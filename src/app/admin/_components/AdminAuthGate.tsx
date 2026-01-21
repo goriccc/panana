@@ -11,6 +11,16 @@ type GateState =
 
 type GateStep = "idle" | "get_session" | "check_admin" | "done";
 
+type AdminAllowlistRow = {
+  user_id: string;
+  active: boolean;
+};
+
+// UX 최적값: "무한 대기" 대신 넉넉한 타임아웃 + 실패 시 재시도 UX
+// - 세션 조회는 보통 즉시 끝나지만, 네트워크/브라우저 상태에 따라 지연될 수 있어 20~30초가 체감상 안정적
+const SESSION_TIMEOUT_MS = 25_000;
+const ADMIN_CHECK_TIMEOUT_MS = 12_000;
+
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return Promise.race([
     p,
@@ -34,7 +44,7 @@ export function AdminAuthGate({ children }: { children: React.ReactNode }) {
       setStep("get_session");
       const { data: sessionData, error: sessionErr } = await withTimeout(
         supabase.auth.getSession(),
-        8000,
+        SESSION_TIMEOUT_MS,
         "auth.getSession"
       );
       if (sessionErr) throw sessionErr;
@@ -50,15 +60,16 @@ export function AdminAuthGate({ children }: { children: React.ReactNode }) {
 
       // 관리자 allowlist 확인
       setStep("check_admin");
-      const { data: adminRow, error: adminErr } = await withTimeout(
-        supabase
+      const adminRes = await withTimeout<{ data: AdminAllowlistRow | null; error: any }>(
+        (supabase
           .from("panana_admin_users")
           .select("user_id, active")
           .eq("user_id", userId)
-          .maybeSingle(),
-        8000,
+          .maybeSingle() as any),
+        ADMIN_CHECK_TIMEOUT_MS,
         "select panana_admin_users"
       );
+      const { data: adminRow, error: adminErr } = adminRes;
 
       if (adminErr) {
         // 흔한 원인: panana_admin_users RLS 재귀(SECURITY ADVISOR 경고 해결 과정에서 발생)
@@ -77,9 +88,19 @@ export function AdminAuthGate({ children }: { children: React.ReactNode }) {
       setGate({ status: "ready", userId });
       setStep("done");
     } catch (e: any) {
-      setError(e?.message || "권한 확인 중 오류가 발생했어요.");
-      setGate({ status: "signed_out" });
+      const msg = e?.message || "권한 확인 중 오류가 발생했어요.";
+      setError(msg);
       setStep("done");
+
+      // 핵심 UX: 네트워크/타임아웃은 "로그아웃됨"으로 처리하지 않고
+      // 로딩 상태 유지 + 재시도 버튼 제공 (사용자가 '매번 로그인' 느낌을 안 받게)
+      if (String(msg).includes("timeout")) {
+        setGate({ status: "loading" });
+        return;
+      }
+
+      // 그 외(실제 세션 없음 등)는 기존대로 로그인 화면으로
+      setGate({ status: "signed_out" });
     }
   };
 
@@ -99,6 +120,15 @@ export function AdminAuthGate({ children }: { children: React.ReactNode }) {
           step: <span className="text-white/55">{step}</span>
         </div>
         {debug ? <div className="mt-1 text-[11px] font-semibold text-white/25">{debug}</div> : null}
+        {error ? (
+          <button
+            type="button"
+            className="mt-4 rounded-xl bg-white/[0.06] px-4 py-2 text-[12px] font-extrabold text-white/80 ring-1 ring-white/10 hover:bg-white/[0.08]"
+            onClick={() => refresh()}
+          >
+            다시 시도
+          </button>
+        ) : null}
       </div>
     );
   }

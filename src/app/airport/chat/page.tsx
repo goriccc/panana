@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { AirportChatClient } from "./ui";
+import { Suspense } from "react";
 
 export const metadata: Metadata = {
   title: "웰컴 투 파나나 공항 - 입국 심사",
@@ -8,6 +9,10 @@ export const metadata: Metadata = {
 };
 
 export default function AirportChatPage() {
-  return <AirportChatClient />;
+  return (
+    <Suspense fallback={null}>
+      <AirportChatClient />
+    </Suspense>
+  );
 }
 
