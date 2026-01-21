@@ -1,0 +1,258 @@
+"use client";
+
+import Image from "next/image";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { SurfaceCard } from "@/components/SurfaceCard";
+import { myPageDummy } from "@/lib/myPage";
+
+function BackIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path
+        d="M15 6l-6 6 6 6"
+        stroke="rgba(255,169,214,0.98)"
+        strokeWidth="2.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function PencilIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path
+        d="M12 20h9"
+        stroke="rgba(255,255,255,0.55)"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <path
+        d="M16.5 3.5a2.1 2.1 0 013 3L8 18l-4 1 1-4 11.5-11.5z"
+        stroke="rgba(255,255,255,0.55)"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function BananaIcon() {
+  return (
+    <span className="inline-flex h-6 w-6 items-center justify-center">
+      <Image src="/pana.png" alt="" width={24} height={24} className="h-6 w-6" />
+    </span>
+  );
+}
+
+function LogoutModal({
+  open,
+  onClose,
+  onLogout,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onLogout: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" />
+      <div className="absolute inset-0 grid place-items-center px-6">
+        <SurfaceCard variant="outglow" className="w-full max-w-[520px] p-6">
+          <div className="text-center text-[16px] font-semibold text-white/90">알림</div>
+          <div className="mt-4 whitespace-pre-line text-center text-[14px] leading-[1.45] text-white/70">
+            정말 로그아웃 하시겠습니까?
+            {"\n"}
+            로그인은 유지하면 더 많은 기능을
+            {"\n"}
+            이용할 수 있어요!
+          </div>
+
+          <div className="mt-6 flex gap-4">
+            <button
+              type="button"
+              onClick={onLogout}
+              className="flex-1 basis-0 rounded-xl bg-white px-4 py-3 text-center text-[15px] font-semibold text-[#0B0C10]"
+            >
+              로그아웃
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 basis-0 rounded-xl bg-panana-pink px-4 py-3 text-center text-[15px] font-semibold text-white"
+            >
+              머무르기
+            </button>
+          </div>
+        </SurfaceCard>
+      </div>
+    </div>
+  );
+}
+
+function Stat({ value, label }: { value: number; label: string }) {
+  return (
+    <div className="text-center">
+      <div className="text-[18px] font-bold text-white/90">{value.toLocaleString("ko-KR")}</div>
+      <div className="mt-1 text-[11px] font-semibold text-white/40">{label}</div>
+    </div>
+  );
+}
+
+export function MyPageClient() {
+  const data = useMemo(() => myPageDummy, []);
+  const [logoutOpen, setLogoutOpen] = useState(false);
+  const [loggedIn, setLoggedIn] = useState(false);
+
+  // NOTE: 추후 DB/Auth 연동 시 교체. 지금은 더미 플래그.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setLoggedIn(window.localStorage.getItem("panana_logged_in") === "1");
+  }, []);
+
+  return (
+    <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.10),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">
+      <header className="mx-auto w-full max-w-[420px] px-5 pt-3">
+        <div className="relative flex h-11 items-center">
+          <Link href="/home" aria-label="뒤로가기" className="absolute left-0 p-2">
+            <BackIcon />
+          </Link>
+          <div className="mx-auto text-[18px] font-semibold tracking-[-0.01em] text-[#ffa9d6]">
+            마이 페이지
+          </div>
+        </div>
+      </header>
+
+      <main className="mx-auto w-full max-w-[420px] px-5 pb-16 pt-2">
+        <div className="mt-2 border-y border-white/10 py-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="h-[58px] w-[58px] overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10" />
+              <div className="min-w-0">
+                <div className="text-[14px] font-bold text-white/85">{data.name}</div>
+                <div className="mt-1 text-[12px] font-semibold text-white/45">{data.handle}</div>
+              </div>
+            </div>
+
+            <Link href="/my/edit" aria-label="프로필 편집" className="p-2">
+              <PencilIcon />
+            </Link>
+          </div>
+        </div>
+
+        {loggedIn ? (
+          <>
+            <div className="mt-6 flex items-center justify-center gap-8">
+              <Link href="/my/follows?tab=followers" aria-label="내 팔로워 목록">
+                <Stat value={data.followers} label="팔로워" />
+              </Link>
+              <Link href="/my/follows?tab=following" aria-label="내 팔로잉 목록">
+                <Stat value={data.following} label="팔로잉" />
+              </Link>
+            </div>
+
+            <div className="mt-6">
+              <div className="rounded-2xl bg-[#2f2f3a] px-4 py-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <BananaIcon />
+                    <div className="min-w-0 text-[13px] font-semibold text-white/70">
+                      {data.bananas.toLocaleString("ko-KR")}
+                      <span className="text-[#f29ac3]">개의 파나나를 가지고 있어요</span>
+                    </div>
+                  </div>
+                  <Link
+                    href="/my/charge"
+                    className="rounded-lg bg-panana-pink px-4 py-2 text-[12px] font-bold text-white"
+                  >
+                    충전
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <Link
+              href="/login?return=/my"
+              className="mt-5 block w-full rounded-2xl bg-panana-pink px-5 py-4 text-center text-[13px] font-extrabold text-white"
+            >
+              로그인하고 더 많은 기능 둘러보기
+            </Link>
+
+            <Link
+              href="/my/membership"
+              className="mt-4 block w-full rounded-2xl border border-panana-pink/60 bg-white px-5 py-4 text-center text-[13px] font-extrabold text-panana-pink"
+            >
+              멤버십 가입하고 무제한 이용하기
+            </Link>
+          </>
+        )}
+
+        {loggedIn ? (
+          <Link
+            href="/my/membership"
+            className="mt-4 block w-full rounded-xl border border-panana-pink/60 bg-white px-4 py-3 text-center text-[13px] font-bold text-panana-pink"
+          >
+            멤버십 가입하고 무제한 이용하기
+          </Link>
+        ) : null}
+
+        <div className="mt-8 space-y-6 text-[14px] font-semibold text-white/60">
+          <Link href="/my/notices" className="block w-full text-left">
+            공지사항
+          </Link>
+          <Link href="/my/notifications" className="block w-full text-left">
+            알림설정
+          </Link>
+          {loggedIn ? (
+            <Link href="/my/account" className="block w-full text-left">
+              계정설정
+            </Link>
+          ) : null}
+          <Link href="/my/reset" className="block w-full text-left">
+            초기화
+          </Link>
+        </div>
+
+        {loggedIn ? (
+          <button
+            type="button"
+            className="mt-16 block w-full text-left text-[13px] font-semibold text-white/45"
+            onClick={() => setLogoutOpen(true)}
+          >
+            로그아웃
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="mt-16 block w-full text-left text-[13px] font-semibold text-white/45"
+            onClick={() => {
+              window.location.href = "/login?return=/my";
+            }}
+          >
+            로그인
+          </button>
+        )}
+      </main>
+
+      <LogoutModal
+        open={logoutOpen}
+        onClose={() => setLogoutOpen(false)}
+        onLogout={() => {
+          setLogoutOpen(false);
+          try {
+            window.localStorage.removeItem("panana_logged_in");
+          } catch {}
+          setLoggedIn(false);
+          window.location.href = "/airport";
+        }}
+      />
+    </div>
+  );
+}
+
