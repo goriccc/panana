@@ -34,5 +34,9 @@
 - `/admin/airport` 썸네일을 **세트(이미지 필수 + 동영상 선택)**로 쓰려면:
   - `MIGRATE_AIRPORT_THUMBNAIL_SETS.sql` 실행
 
+## (중요) 앱에서 공항 썸네일/문장 안 보일 때
+- 증상: `/airport`에서 썸네일/문장이 안 보이거나, debug에서 `permission denied for table panana_airport_media`
+- 해결: `FIX_PUBLIC_READ_AIRPORT.sql` 실행 후 `NOTIFY pgrst, 'reload schema';`
+
 > 주의: 이 스키마는 Studio 쪽 스키마(`docs/pananaai-studio/SCHEMA.sql`)와 **테이블명이 충돌하지 않도록** `panana_*` prefix를 사용합니다.
 
