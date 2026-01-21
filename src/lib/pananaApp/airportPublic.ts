@@ -53,6 +53,10 @@ export async function fetchAirportThumbnailSets(section: AirportSection) {
         .order("sort_order", { ascending: true })
     );
     // "세트는 있지만 미디어가 비어있음"이면(빈 세트만 존재) 구버전 뷰로 폴백해야 실제 썸네일이 보임
+    // 또한 새 뷰가 비어있고(0개) 구버전 데이터만 존재할 수도 있어 폴백
+    if (!rows.length) {
+      throw new Error("empty_sets");
+    }
     if (rows.length && !rows.some((r) => r.image_path || r.video_path)) {
       throw new Error("empty_media_sets");
     }
@@ -70,6 +74,9 @@ export async function fetchAirportThumbnailSets(section: AirportSection) {
         .eq("active", true)
         .order("sort_order", { ascending: true })
     );
+    if (!rows.length) {
+      throw new Error("empty_sets");
+    }
     if (rows.length && !rows.some((r) => r.image_path || r.video_path)) {
       throw new Error("empty_media_sets");
     }
