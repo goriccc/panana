@@ -109,11 +109,12 @@ function Stat({ value, label }: { value: number; label: string }) {
 export function MyPageClient() {
   const data = useMemo(() => myPageDummy, []);
   const [logoutOpen, setLogoutOpen] = useState(false);
-  const [nickname, setNickname] = useState<string>("");
-  const [pananaHandle, setPananaHandle] = useState<string>("");
+  const localIdt = useMemo(() => ensurePananaIdentity(), []);
+  // UX: 초기 렌더에서 더미 대신 로컬/세션 값을 즉시 표시하고, 이후 DB 값으로 보정한다.
+  const [nickname, setNickname] = useState<string>(() => String(localIdt.nickname || "").trim());
+  const [pananaHandle, setPananaHandle] = useState<string>(() => String(localIdt.handle || "").trim().toLowerCase());
   const { data: session, status } = useSession();
   const loggedIn = status === "authenticated";
-  const localIdt = useMemo(() => ensurePananaIdentity(), []);
   const avatarUrl = useMemo(() => {
     const custom = String((session as any)?.profileImageUrl || "").trim();
     const providerImg = String((session as any)?.user?.image || "").trim();
@@ -126,6 +127,16 @@ export function MyPageClient() {
     const handle = isValidPananaHandle(sHandle) ? sHandle : isValidPananaHandle(idt.handle) ? idt.handle : "";
     setPananaHandle(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, status]);
+
+  useEffect(() => {
+    // 세션이 늦게 로딩될 수 있으니, 들어오는 즉시 UI를 먼저 갱신한다(네트워크 fetch 전에).
+    const pn = String((session as any)?.pananaNickname || "").trim();
+    const snick = String((session as any)?.nickname || "").trim();
+    const sname = String((session as any)?.user?.name || "").trim();
+    const semail = String((session as any)?.user?.email || "").trim();
+    const quick = pn || snick || sname || semail;
+    if (quick) setNickname((prev) => (prev ? prev : quick));
   }, [session, status]);
 
   useEffect(() => {

@@ -24,7 +24,9 @@ function BackIcon() {
 
 export function MyEditClient() {
   const data = useMemo(() => myPageDummy, []);
-  const [name, setName] = useState("");
+  const localIdt = useMemo(() => ensurePananaIdentity(), []);
+  // UX: 편집 화면도 초기엔 로컬 닉네임을 즉시 보여주고, 이후 DB/세션으로 보정
+  const [name, setName] = useState(() => String(localIdt.nickname || "").trim());
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -43,9 +45,8 @@ export function MyEditClient() {
         const pn = String((session as any)?.pananaNickname || "").trim();
         if (pn) setName(pn);
         else {
-          const idt = ensurePananaIdentity();
-          const ln = String(idt.nickname || "").trim();
-          if (ln && !name) setName(ln);
+          const ln = String(localIdt.nickname || "").trim();
+          if (ln) setName((prev) => (prev ? prev : ln));
         }
       }
     })();
