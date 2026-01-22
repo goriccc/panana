@@ -194,10 +194,9 @@ export function MyEditClient() {
 
               const res = await upsertMyUserNickname(name);
               if (!res.ok) {
-                // Supabase Auth 미연동 환경(Auth.js)에서는 닉네임을 세션에라도 저장
                 const nick = String(name || "").trim().slice(0, 10);
                 await update({ pananaNickname: nick, nickname: nick } as any);
-                setStatus("프로필 이미지는 저장됐어요. (닉네임 DB 저장은 추후 연동)");
+                setStatus(res.error || "닉네임 저장에 실패했어요.");
                 return;
               }
               // DB 저장 성공 케이스도 마이페이지 즉시 반영을 위해 세션에도 반영
