@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ConditionalFooter } from "@/app/_components/ConditionalFooter";
 import { AuthSessionProvider } from "@/app/_components/AuthSessionProvider";
+import { PananaIdentityInit } from "@/app/_components/PananaIdentityInit";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://panana.local"),
@@ -51,6 +52,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         <AuthSessionProvider>
+          <PananaIdentityInit />
           {children}
           <ConditionalFooter />
         </AuthSessionProvider>

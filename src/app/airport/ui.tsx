@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChatComposerBar } from "@/components/ChatComposerBar";
 import { IllustrationPlaceholder } from "@/components/IllustrationPlaceholder";
 import { PananaLogo } from "@/components/PananaLogo";
 import { ScreenShell } from "@/components/ScreenShell";
@@ -150,8 +149,6 @@ export default function AirportStartClient() {
           </Link>
         </SurfaceCard>
       </ScreenShell>
-
-      <ChatComposerBar />
     </>
   );
 }

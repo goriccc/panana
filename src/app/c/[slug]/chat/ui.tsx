@@ -5,6 +5,9 @@ import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchMyUserProfile } from "@/lib/pananaApp/userProfiles";
 import { loadRuntime, saveRuntime } from "@/lib/pananaApp/chatRuntime";
+import { recordMyChat } from "@/lib/pananaApp/myChats";
+import { loadChatHistory, saveChatHistory } from "@/lib/pananaApp/chatHistory";
+import { ensurePananaIdentity, setPananaId } from "@/lib/pananaApp/identity";
 import type { ChatRuntimeEvent, ChatRuntimeState } from "@/lib/studio/chatRuntimeEngine";
 
 type Msg = { id: string; from: "bot" | "user" | "system"; text: string };
@@ -147,6 +150,7 @@ export function CharacterChatClient({
   characterAvatarUrl?: string;
 }) {
   const [sending, setSending] = useState(false);
+  const [showTyping, setShowTyping] = useState(false);
   const [value, setValue] = useState("");
   const [messages, setMessages] = useState<Msg[]>([]);
   const [err, setErr] = useState<string | null>(null);
@@ -160,15 +164,61 @@ export function CharacterChatClient({
   });
 
   const endRef = useRef<HTMLDivElement | null>(null);
+  const pananaIdRef = useRef<string>("");
+  const savedMsgIdsRef = useRef<Set<string>>(new Set());
+  const lastPersistedAtRef = useRef<number>(0);
+  const warnedDbRef = useRef<boolean>(false);
+  const typingReqIdRef = useRef<number>(0);
+  const typingTimerRef = useRef<number | null>(null);
   const [provider, setProvider] = useState<Provider>("anthropic");
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages.length]);
 
+  const resetTyping = () => {
+    typingReqIdRef.current = 0;
+    if (typingTimerRef.current != null) {
+      window.clearTimeout(typingTimerRef.current);
+      typingTimerRef.current = null;
+    }
+    setShowTyping(false);
+  };
+
   useEffect(() => {
     setProvider(getSavedProvider());
   }, []);
+
+  const getPananaId = () => {
+    const idt = ensurePananaIdentity();
+    const pid = String(idt.id || "").trim();
+    if (pid) pananaIdRef.current = pid;
+    return pid;
+  };
+
+  const persistToDb = async (pid: string, msgs: Msg[], opts?: { keepalive?: boolean }) => {
+    const unsent = msgs.filter((m) => !savedMsgIdsRef.current.has(m.id)).slice(-40);
+    if (!unsent.length) return;
+    try {
+      const res = await fetch("/api/me/chat-messages", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          pananaId: pid,
+          characterSlug,
+          messages: unsent.map((m) => ({ id: m.id, from: m.from, text: m.text, at: Date.now() })),
+        }),
+        // pagehide/unload 시에도 가능한 한 전송되게
+        keepalive: Boolean(opts?.keepalive),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) return;
+      for (const m of unsent) savedMsgIdsRef.current.add(m.id);
+      lastPersistedAtRef.current = Date.now();
+    } catch {
+      // ignore
+    }
+  };
 
   useEffect(() => {
     let alive = true;
@@ -195,6 +245,113 @@ export function CharacterChatClient({
     };
   }, [characterSlug]);
 
+  useEffect(() => {
+    // 이전 대화 불러오기(우선: DB, 실패 시 local fallback)
+    (async () => {
+      // 0) 서버에서 pananaId 확정(=DB row 존재 보장) 후 그 ID로 저장/로드 통일
+      const pidCandidate = getPananaId();
+      let pid = pidCandidate;
+      try {
+        const res = await fetch("/api/me/identity", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ pananaId: pidCandidate }),
+        });
+        const data = await res.json().catch(() => null);
+        if (res.ok && data?.ok && data?.id) {
+          pid = String(data.id || "").trim();
+          if (pid) {
+            setPananaId(pid);
+            pananaIdRef.current = pid;
+          }
+        }
+      } catch {
+        // ignore
+      }
+
+      try {
+        const res = await fetch(
+          `/api/me/chat-messages?pananaId=${encodeURIComponent(pid)}&characterSlug=${encodeURIComponent(characterSlug)}&limit=120`
+        );
+        const data = await res.json().catch(() => null);
+        if (res.ok && data?.ok && Array.isArray(data.messages)) {
+          const rows = data.messages
+            .map((m: any) => ({
+              id: String(m?.id || ""),
+              from: (m?.from === "bot" || m?.from === "user" || m?.from === "system" ? m.from : "system") as Msg["from"],
+              text: String(m?.text || ""),
+            }))
+            .filter((m: any) => m.id && m.text);
+          if (rows.length) {
+            savedMsgIdsRef.current = new Set(rows.map((m: any) => m.id));
+            setMessages(rows);
+            return;
+          }
+        } else if (!warnedDbRef.current) {
+          // DB가 비어있는 케이스를 제외하고(=정상) 에러 힌트를 남긴다.
+          // (테이블 미생성/서비스키 미설정/권한 문제 등)
+          const errText = String(data?.error || "").trim();
+          if (errText) {
+            warnedDbRef.current = true;
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: `s-${Date.now()}-dbwarn`,
+                from: "system",
+                text: `대화 기록(DB)을 불러오지 못했어요. (${errText})`,
+              },
+            ]);
+          }
+        }
+      } catch {
+        // ignore
+      }
+
+      const prev = loadChatHistory({ pananaId: pid, characterSlug });
+      if (prev.length) {
+        const rows = prev.map((m) => ({ id: m.id, from: m.from as any, text: m.text }));
+        savedMsgIdsRef.current = new Set(rows.map((m) => m.id));
+        setMessages(rows);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [characterSlug]);
+
+  useEffect(() => {
+    // 메시지 변경 시 히스토리 저장(로컬 백업 + DB 동기화)
+    const pid = pananaIdRef.current || getPananaId();
+    if (!pid) return;
+    // 너무 잦은 저장 방지(짧은 debounce)
+    const t = window.setTimeout(() => {
+      saveChatHistory({
+        pananaId: pid,
+        characterSlug,
+        messages: messages.map((m) => ({ id: m.id, from: m.from, text: m.text, at: Date.now() })),
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      persistToDb(pid, messages);
+    }, 80);
+    return () => window.clearTimeout(t);
+  }, [characterSlug, messages]);
+
+  useEffect(() => {
+    // 뒤로가기/탭 종료 등에서 DB 저장 유실 방지
+    const onPageHide = () => {
+      const pid = pananaIdRef.current;
+      if (!pid) return;
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      persistToDb(pid, messages, { keepalive: true });
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, [messages]);
+
+  // "MY" 리스트용: 대화 진입만 해도 목록에 기록
+  useEffect(() => {
+    recordMyChat({ characterSlug, characterName, avatarUrl: characterAvatarUrl });
+  }, [characterAvatarUrl, characterName, characterSlug]);
+
   const send = async () => {
     const text = value.trim();
     if (!text) return;
@@ -205,6 +362,15 @@ export function CharacterChatClient({
 
     // 알파 테스트: 프론트에서 선택한 provider로 즉시 전환
     setSending(true);
+    // typing indicator flicker 방지:
+    // - 아주 빠른 응답에서는 아예 표시하지 않음(지연 표시)
+    // - 요청 ID 기반으로 타이머 무효화(응답 도착 직후 1프레임 깜빡임 방지)
+    resetTyping();
+    const reqId = Date.now();
+    typingReqIdRef.current = reqId;
+    typingTimerRef.current = window.setTimeout(() => {
+      if (typingReqIdRef.current === reqId) setShowTyping(true);
+    }, 650);
     try {
       const runtimeVariables = {
         ...(rt.variables || {}),
@@ -268,6 +434,7 @@ export function CharacterChatClient({
       }
 
       const reply = String(data.text || "").trim() || "…";
+      resetTyping();
       setMessages((prev) => [...prev, { id: `b-${Date.now()}`, from: "bot", text: reply }]);
 
       const next: ChatRuntimeState | null =
@@ -286,6 +453,7 @@ export function CharacterChatClient({
     } catch (e: any) {
       setErr(e?.message || "대화에 실패했어요. (LLM 키/모델/공개 뷰/RLS 설정을 확인해주세요)");
     } finally {
+      resetTyping();
       setSending(false);
     }
   };
@@ -347,7 +515,7 @@ export function CharacterChatClient({
           {messages.map((m) => (
             <Bubble key={m.id} from={m.from} text={m.text} avatarUrl={m.from === "bot" ? characterAvatarUrl : undefined} />
           ))}
-          {sending ? <TypingDots avatarUrl={characterAvatarUrl} /> : null}
+          {showTyping ? <TypingDots avatarUrl={characterAvatarUrl} /> : null}
           <div ref={endRef} />
         </div>
       </main>

@@ -37,7 +37,9 @@ export function AccountClient() {
   const accountText = useMemo(() => {
     const email = String((session as any)?.user?.email || "").trim();
     const name = String((session as any)?.user?.name || "").trim();
-    return email || name || "";
+    const pid = String((session as any)?.providerAccountId || "").trim();
+    // 이메일이 없으면(카카오/네이버 등) 이름 → provider 계정ID 순으로 fallback
+    return email || name || (pid ? `ID: ${pid}` : "");
   }, [session]);
 
   return (

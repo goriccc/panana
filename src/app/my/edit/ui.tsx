@@ -2,9 +2,11 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { myPageDummy } from "@/lib/myPage";
 import { fetchMyUserProfile, upsertMyUserNickname } from "@/lib/pananaApp/userProfiles";
+import { ensurePananaIdentity, isValidPananaHandle } from "@/lib/pananaApp/identity";
+import { useSession } from "next-auth/react";
 
 function BackIcon() {
   return (
@@ -25,6 +27,11 @@ export function MyEditClient() {
   const [name, setName] = useState(data.name);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string>("");
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const { data: session, update } = useSession();
+  const [pananaHandle, setPananaHandle] = useState<string>("");
 
   useEffect(() => {
     let alive = true;
@@ -32,11 +39,40 @@ export function MyEditClient() {
       const p = await fetchMyUserProfile();
       if (!alive) return;
       if (p?.nickname) setName(p.nickname);
+      else {
+        const pn = String((session as any)?.pananaNickname || "").trim();
+        if (pn) setName(pn);
+      }
     })();
     return () => {
       alive = false;
     };
   }, []);
+
+  useEffect(() => {
+    const idt = ensurePananaIdentity();
+    const sHandle = String((session as any)?.pananaHandle || "").trim().toLowerCase();
+    const handle = isValidPananaHandle(sHandle) ? sHandle : isValidPananaHandle(idt.handle) ? idt.handle : "";
+    setPananaHandle(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session]);
+
+  useEffect(() => {
+    // 세션에 저장된 프로필 이미지가 있으면 초기 표시
+    const url = String((session as any)?.profileImageUrl || (session as any)?.user?.image || "").trim();
+    if (!url) return;
+    // blob 미리보기 우선
+    if (avatarUrl && avatarUrl.startsWith("blob:")) return;
+    setAvatarUrl(url);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session]);
+
+  useEffect(() => {
+    return () => {
+      // blob URL 정리
+      if (avatarUrl && avatarUrl.startsWith("blob:")) URL.revokeObjectURL(avatarUrl);
+    };
+  }, [avatarUrl]);
 
   return (
     <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.10),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">
@@ -54,11 +90,49 @@ export function MyEditClient() {
       <main className="mx-auto w-full max-w-[420px] px-5 pb-16 pt-4">
         <div className="flex flex-col items-center">
           <div className="h-[86px] w-[86px] overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10">
-            <Image src="/panana.png" alt="" width={86} height={86} className="h-full w-full object-cover opacity-0" />
+            {avatarUrl && avatarUrl.startsWith("blob:") ? (
+              // 선택한 로컬 이미지 미리보기(blob URL)
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={avatarUrl} alt="프로필 이미지" className="h-full w-full object-cover" />
+            ) : (
+              <Image src="/dumyprofile.png" alt="기본 프로필 이미지" width={86} height={86} className="h-full w-full object-cover" />
+            )}
           </div>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.currentTarget.files?.[0];
+              if (!f) return;
+              if (!f.type.startsWith("image/")) {
+                setStatus("이미지 파일만 선택할 수 있어요.");
+                e.currentTarget.value = "";
+                return;
+              }
+              // 너무 큰 파일은 UX상 제한(업로드 기능 붙일 때도 유용)
+              if (f.size > 8 * 1024 * 1024) {
+                setStatus("이미지는 8MB 이하로 선택해 주세요.");
+                e.currentTarget.value = "";
+                return;
+              }
+
+              setStatus(null);
+              // 이전 blob URL 정리
+              setAvatarUrl((prev) => {
+                if (prev && prev.startsWith("blob:")) URL.revokeObjectURL(prev);
+                return URL.createObjectURL(f);
+              });
+              setAvatarFile(f);
+              // 같은 파일 재선택도 가능하게
+              e.currentTarget.value = "";
+            }}
+          />
           <button
             type="button"
             className="mt-3 rounded-full bg-white/10 px-4 py-2 text-[12px] font-semibold text-white/70 ring-1 ring-white/10"
+            onClick={() => fileRef.current?.click()}
           >
             변경하기
           </button>
@@ -83,7 +157,7 @@ export function MyEditClient() {
             회원가입시 부여되는 아이디예요. 변경할 수 없어요.
           </div>
           <input
-            value={data.handle}
+            value={pananaHandle || data.handle}
             disabled
             className="mt-3 w-full rounded-2xl bg-white/[0.06] px-5 py-4 text-[14px] font-semibold text-white/35 outline-none"
           />
@@ -97,12 +171,28 @@ export function MyEditClient() {
             setStatus(null);
             setSaving(true);
             try {
+              // 1) 프로필 이미지 업로드(선택된 경우)
+              if (avatarFile) {
+                const fd = new FormData();
+                fd.set("file", avatarFile);
+                const res = await fetch("/api/me/profile-image", { method: "POST", body: fd });
+                const data = await res.json().catch(() => null);
+                if (!res.ok || !data?.ok) throw new Error(data?.error || "프로필 이미지 업로드에 실패했어요.");
+                const publicUrl = String(data.publicUrl || "").trim();
+                if (publicUrl) {
+                  await update({ profileImageUrl: publicUrl } as any);
+                }
+              }
+
               const res = await upsertMyUserNickname(name);
               if (!res.ok) {
-                setStatus(res.error);
+                // Supabase Auth 미연동 환경(Auth.js)에서는 닉네임을 세션에라도 저장
+                await update({ nickname: String(name || "").trim().slice(0, 10) } as any);
+                setStatus("프로필 이미지는 저장됐어요. (닉네임 DB 저장은 추후 연동)");
                 return;
               }
               setStatus("저장 완료!");
+              setAvatarFile(null);
             } finally {
               setSaving(false);
             }

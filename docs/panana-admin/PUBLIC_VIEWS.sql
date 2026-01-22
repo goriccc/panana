@@ -30,6 +30,7 @@ revoke all on table public.panana_home_hero_cards from anon;
 revoke all on table public.panana_notices from anon;
 revoke all on table public.panana_billing_products from anon;
 revoke all on table public.panana_membership_plans from anon;
+revoke all on table public.panana_membership_banners from anon;
 revoke all on table public.panana_airport_media from anon;
 revoke all on table public.panana_airport_copy from anon;
 revoke all on table public.panana_site_settings from anon;
@@ -57,6 +58,9 @@ on table public.panana_billing_products to anon, authenticated;
 
 grant select (id, plan_key, title, price_label, cta_text, benefits, terms_url, sort_order, active)
 on table public.panana_membership_plans to anon, authenticated;
+
+grant select (id, title, image_path, image_url, link_url, sort_order, active, starts_at, ends_at)
+on table public.panana_membership_banners to anon, authenticated;
 
 grant select (id, section, kind, title, media_url, sort_order, active) on table public.panana_airport_media to anon, authenticated;
 grant select (id, key, text, sort_order, active) on table public.panana_airport_copy to anon, authenticated;
@@ -228,6 +232,26 @@ from public.panana_membership_plans
 where active = true
 order by sort_order asc;
 
+-- 7-1) 멤버십 배너(공개: 복수)
+create or replace view public.panana_public_membership_banners_v
+with (security_barrier=true, security_invoker=true)
+as
+select
+  id,
+  title,
+  image_path,
+  image_url,
+  link_url,
+  sort_order
+from public.panana_membership_banners
+where
+  active = true
+  and (starts_at is null or starts_at <= now())
+  and (ends_at is null or now() <= ends_at)
+-- NOTE: security_invoker=true인 뷰는 ORDER BY에 사용되는 컬럼도 invoker가 SELECT 권한이 필요합니다.
+-- 아래에서는 created_at을 쓰지 않고 id로 tie-break 하여, 추가 컬럼 권한 없이도 동작하게 합니다.
+order by sort_order asc, id asc;
+
 -- 8) 공항 미디어(공개)
 create or replace view public.panana_public_airport_media_v
 with (security_barrier=true, security_invoker=true)
@@ -299,6 +323,7 @@ grant select on public.panana_public_home_hero_cards_v to anon, authenticated;
 grant select on public.panana_public_notices_v to anon, authenticated;
 grant select on public.panana_public_billing_products_v to anon, authenticated;
 grant select on public.panana_public_membership_plans_v to anon, authenticated;
+grant select on public.panana_public_membership_banners_v to anon, authenticated;
 grant select on public.panana_public_airport_media_v to anon, authenticated;
 grant select on public.panana_public_airport_thumbnail_sets_v to anon, authenticated;
 grant select on public.panana_public_airport_copy_v to anon, authenticated;

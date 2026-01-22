@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { SurfaceCard } from "@/components/SurfaceCard";
 import { myPageDummy } from "@/lib/myPage";
 import { fetchMyUserProfile } from "@/lib/pananaApp/userProfiles";
+import { ensurePananaIdentity, isValidPananaHandle } from "@/lib/pananaApp/identity";
 import { signOut, useSession } from "next-auth/react";
 
 function BackIcon() {
@@ -109,8 +110,22 @@ export function MyPageClient() {
   const data = useMemo(() => myPageDummy, []);
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [nickname, setNickname] = useState<string>("");
+  const [pananaHandle, setPananaHandle] = useState<string>("");
   const { data: session, status } = useSession();
   const loggedIn = status === "authenticated";
+  const avatarUrl = useMemo(() => {
+    const custom = String((session as any)?.profileImageUrl || "").trim();
+    const providerImg = String((session as any)?.user?.image || "").trim();
+    return custom || providerImg || "";
+  }, [session]);
+
+  useEffect(() => {
+    const idt = ensurePananaIdentity();
+    const sHandle = String((session as any)?.pananaHandle || "").trim().toLowerCase();
+    const handle = isValidPananaHandle(sHandle) ? sHandle : isValidPananaHandle(idt.handle) ? idt.handle : "";
+    setPananaHandle(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, status]);
 
   useEffect(() => {
     let alive = true;
@@ -121,9 +136,10 @@ export function MyPageClient() {
       // Supabase 프로필이 없으면 Auth.js 세션 이름/이메일로 fallback
       if (nick) setNickname(nick);
       else {
+        const pn = String((session as any)?.pananaNickname || "").trim();
         const sname = String((session as any)?.user?.name || "").trim();
         const semail = String((session as any)?.user?.email || "").trim();
-        const fallback = sname || semail;
+        const fallback = pn || sname || semail;
         if (fallback) setNickname(fallback);
       }
     };
@@ -155,10 +171,22 @@ export function MyPageClient() {
         <div className="mt-2 border-y border-white/10 py-4">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-4">
-              <div className="h-[58px] w-[58px] overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10" />
+              <div className="h-[58px] w-[58px] overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10">
+                {avatarUrl ? (
+                  <Image src={avatarUrl} alt="프로필 이미지" width={58} height={58} className="h-full w-full object-cover" />
+                ) : (
+                  <Image
+                    src="/dumyprofile.png"
+                    alt="기본 프로필 이미지"
+                    width={58}
+                    height={58}
+                    className="h-full w-full object-cover opacity-90"
+                  />
+                )}
+              </div>
               <div className="min-w-0">
                 <div className="text-[14px] font-bold text-white/85">{nickname || data.name}</div>
-                <div className="mt-1 text-[12px] font-semibold text-white/45">{data.handle}</div>
+                <div className="mt-1 text-[12px] font-semibold text-white/45">{pananaHandle || data.handle}</div>
               </div>
             </div>
 

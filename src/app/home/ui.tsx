@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { HomeHeader } from "@/components/HomeHeader";
 import { ContentCard } from "@/components/ContentCard";
 import { categories as fallbackCategories, type Category, type ContentCardItem } from "@/lib/content";
+import { loadMyChats, type MyChatItem } from "@/lib/pananaApp/myChats";
 
 export function HomeClient({ categories }: { categories?: Category[] }) {
   const source = categories?.length ? categories : fallbackCategories;
@@ -28,6 +29,8 @@ export function HomeClient({ categories }: { categories?: Category[] }) {
   const [heroList, setHeroList] = useState<ContentCardItem[]>([]);
   const [heroIdx, setHeroIdx] = useState(0);
   const [heroPaused, setHeroPaused] = useState(false);
+  const [activeTab, setActiveTab] = useState<"my" | "home" | "challenge" | "ranking">("home");
+  const [myChats, setMyChats] = useState<MyChatItem[]>([]);
 
   const hero = heroList[heroIdx] || null;
 
@@ -75,11 +78,62 @@ export function HomeClient({ categories }: { categories?: Category[] }) {
     return () => window.clearInterval(t);
   }, [heroPaused, heroList.length]);
 
+  useEffect(() => {
+    const load = () => {
+      const list = loadMyChats();
+      setMyChats(list);
+      // 대화한 캐릭터가 있으면 첫 진입에 MY를 자동 선택(요청 UX)
+      if (list.length) setActiveTab("my");
+    };
+    load();
+    const onFocus = () => load();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
+
   return (
     <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.18),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">
-      <HomeHeader />
+      <HomeHeader active={activeTab} showMy={myChats.length > 0} onChange={setActiveTab} />
 
       <main className="mx-auto w-full max-w-[420px] px-5 pb-10 pt-5">
+        {activeTab === "my" && myChats.length ? (
+          <div className="mb-6 overflow-hidden rounded-[16px] border border-white/10 bg-white/[0.03]">
+            {myChats.slice(0, 20).map((it) => (
+              <Link
+                key={it.characterSlug}
+                href={`/c/${it.characterSlug}/chat`}
+                className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4 last:border-b-0 hover:bg-white/[0.03]"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="relative h-10 w-10 flex-none overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10">
+                    {it.avatarUrl ? (
+                      <Image src={it.avatarUrl} alt="" fill sizes="40px" className="object-cover" />
+                    ) : (
+                      <Image src="/dumyprofile.png" alt="" fill sizes="40px" className="object-cover opacity-90" />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="truncate text-[14px] font-semibold text-white/85">{it.characterName}</div>
+                    <div className="mt-1 text-[11px] font-semibold text-white/35">@{it.characterSlug}</div>
+                  </div>
+                </div>
+                {/* unread UI는 추후 연결. 지금은 진입 버튼 느낌만 유지 */}
+                <div className="flex-none rounded-full bg-panana-pink/20 px-3 py-1 text-[11px] font-extrabold text-[#ffa9d6] ring-1 ring-panana-pink/30">
+                  대화
+                </div>
+              </Link>
+            ))}
+          </div>
+        ) : null}
+
+        {activeTab === "my" && !myChats.length ? (
+          <div className="mb-6 rounded-[16px] border border-white/10 bg-white/[0.03] px-5 py-6 text-[13px] font-semibold text-white/60">
+            아직 대화한 캐릭터가 없어요. 홈에서 캐릭터를 선택해 대화를 시작해 보세요.
+          </div>
+        ) : null}
+
+        {activeTab === "my" ? null : (
+          <>
         {/* 상단 큰 카드(향후: 공지/추천/바로가기) */}
         <Link
           href={hero ? `/c/${hero.characterSlug}` : "/home"}
@@ -181,6 +235,8 @@ export function HomeClient({ categories }: { categories?: Category[] }) {
             </section>
           ))}
         </div>
+          </>
+        )}
       </main>
 
     </div>

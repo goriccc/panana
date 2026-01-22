@@ -24,7 +24,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               { href: "/admin/llm", label: "LLM 설정" },
               { href: "/admin/airport", label: "공항/입국 플로우" },
               { href: "/admin/site", label: "사이트(푸터/SEO)" },
-              { href: "/studio/projects", label: "PananaAI Studio" },
+              { href: "/studio", label: "PananaAI Studio" },
             ].map((i) => (
               <Link
                 key={i.href}

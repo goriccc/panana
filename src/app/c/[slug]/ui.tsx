@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useMemo } from "react";
 import type { CharacterProfile } from "@/lib/characters";
+import type { ContentCardItem } from "@/lib/content";
 import { ContentCard } from "@/components/ContentCard";
 
 function Stat({ value, label }: { value: number; label: string }) {
@@ -25,8 +26,15 @@ function PhotoTile({ seed }: { seed: string }) {
   );
 }
 
-export function CharacterClient({ character }: { character: CharacterProfile }) {
+export function CharacterClient({
+  character,
+  recommendedTalkCards,
+}: {
+  character: CharacterProfile;
+  recommendedTalkCards: ContentCardItem[];
+}) {
   const photos = useMemo(() => character.photos, [character.photos]);
+  const isEmptyPosts = Number(character.photoCount || 0) <= 0;
 
   return (
     <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.12),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">
@@ -185,6 +193,26 @@ export function CharacterClient({ character }: { character: CharacterProfile }) 
             ))}
           </div>
         </div>
+
+        {/* 추천 섹션: 게시물 0개일 때 태그 유사 카드 */}
+        {isEmptyPosts && recommendedTalkCards.length ? (
+          <div className="mt-10">
+            <div className="text-[14px] font-semibold tracking-[-0.01em] text-white/75"># 이런 대화는 어때?</div>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              {recommendedTalkCards.map((it) => (
+                <ContentCard
+                  key={it.id}
+                  href={`/c/${it.characterSlug}`}
+                  author={it.author}
+                  title={it.title}
+                  description={it.description}
+                  tags={it.tags}
+                  imageUrl={it.imageUrl}
+                />
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         {/* sections */}
         <div className="mt-10 space-y-10">
