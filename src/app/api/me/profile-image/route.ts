@@ -38,7 +38,9 @@ export async function POST(req: Request) {
     const pid = String((session as any)?.providerAccountId || "me");
     const ext = (file.name.split(".").pop() || "png").toLowerCase().replace(/[^a-z0-9]/g, "");
     const safeExt = ext || "png";
-    const path = `user-avatars/${provider}/${pid}.${safeExt}`;
+    // 같은 경로에 upsert하면 브라우저/Next Image 캐시 때문에 즉시 반영이 안 될 수 있어
+    // 매 업로드마다 경로를 바꿔 URL 자체가 달라지도록 처리한다.
+    const path = `user-avatars/${provider}/${pid}/${Date.now()}.${safeExt}`;
 
     const buf = new Uint8Array(await file.arrayBuffer());
     const { error } = await sb.storage.from(BUCKET).upload(path, buf, {

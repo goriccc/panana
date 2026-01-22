@@ -90,10 +90,14 @@ export function MyEditClient() {
       <main className="mx-auto w-full max-w-[420px] px-5 pb-16 pt-4">
         <div className="flex flex-col items-center">
           <div className="h-[86px] w-[86px] overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10">
-            {avatarUrl && avatarUrl.startsWith("blob:") ? (
-              // 선택한 로컬 이미지 미리보기(blob URL)
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={avatarUrl} alt="프로필 이미지" className="h-full w-full object-cover" />
+            {avatarUrl ? (
+              avatarUrl.startsWith("blob:") ? (
+                // 선택한 로컬 이미지 미리보기(blob URL)
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={avatarUrl} alt="프로필 이미지" className="h-full w-full object-cover" />
+              ) : (
+                <Image src={avatarUrl} alt="프로필 이미지" width={86} height={86} className="h-full w-full object-cover" />
+              )
             ) : (
               <Image src="/dumyprofile.png" alt="기본 프로필 이미지" width={86} height={86} className="h-full w-full object-cover" />
             )}
@@ -180,16 +184,26 @@ export function MyEditClient() {
                 if (!res.ok || !data?.ok) throw new Error(data?.error || "프로필 이미지 업로드에 실패했어요.");
                 const publicUrl = String(data.publicUrl || "").trim();
                 if (publicUrl) {
-                  await update({ profileImageUrl: publicUrl } as any);
+                  // 이미지 캐시(브라우저/Next Image) 무효화를 위해 version query 추가
+                  const sep = publicUrl.includes("?") ? "&" : "?";
+                  const bustUrl = `${publicUrl}${sep}v=${Date.now()}`;
+                  await update({ profileImageUrl: bustUrl } as any);
+                  setAvatarUrl((prev) => (prev && prev.startsWith("blob:") ? prev : bustUrl));
                 }
               }
 
               const res = await upsertMyUserNickname(name);
               if (!res.ok) {
                 // Supabase Auth 미연동 환경(Auth.js)에서는 닉네임을 세션에라도 저장
-                await update({ nickname: String(name || "").trim().slice(0, 10) } as any);
+                const nick = String(name || "").trim().slice(0, 10);
+                await update({ pananaNickname: nick, nickname: nick } as any);
                 setStatus("프로필 이미지는 저장됐어요. (닉네임 DB 저장은 추후 연동)");
                 return;
+              }
+              // DB 저장 성공 케이스도 마이페이지 즉시 반영을 위해 세션에도 반영
+              {
+                const nick = String(name || "").trim().slice(0, 10);
+                await update({ pananaNickname: nick, nickname: nick } as any);
               }
               setStatus("저장 완료!");
               setAvatarFile(null);

@@ -137,9 +137,10 @@ export function MyPageClient() {
       if (nick) setNickname(nick);
       else {
         const pn = String((session as any)?.pananaNickname || "").trim();
+        const snick = String((session as any)?.nickname || "").trim();
         const sname = String((session as any)?.user?.name || "").trim();
         const semail = String((session as any)?.user?.email || "").trim();
-        const fallback = pn || sname || semail;
+        const fallback = pn || snick || sname || semail;
         if (fallback) setNickname(fallback);
       }
     };

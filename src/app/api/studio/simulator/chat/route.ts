@@ -6,6 +6,16 @@ import { buildTemplateVars, interpolateTemplate } from "@/lib/studio/templateRun
 
 export const runtime = "nodejs";
 
+function sanitizeAssistantText(raw: string, tvars: Record<string, any>) {
+  let s = interpolateTemplate(String(raw || ""), tvars as any);
+  s = s.replace(/\{\{\s*[a-zA-Z0-9_]+\s*\}\}/g, "");
+  s = s
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ");
+  return s.trim();
+}
+
 const MessageSchema = z.object({
   role: z.enum(["user", "assistant"]),
   content: z.string().min(1),
@@ -510,7 +520,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const text = String(out.text || "").trim();
+    const text = sanitizeAssistantText(String(out.text || ""), tvars);
     if (!text) {
       // 빈 응답은 대부분 안전필터/차단이므로, 원인 힌트를 포함해 에러로 반환한다.
       if (body.provider === "gemini") {
@@ -528,7 +538,7 @@ export async function POST(req: Request) {
           messages: retryMessages,
           allowUnsafe: settings?.nsfw_filter === false,
         });
-        const retryText = String(retryOut.text || "").trim();
+        const retryText = sanitizeAssistantText(String(retryOut.text || ""), tvars);
         if (retryText) {
           return NextResponse.json({ ok: true, provider: body.provider, model, text: retryText });
         }

@@ -7,6 +7,19 @@ import { applyTriggerPayloads, type ChatRuntimeEvent, type ChatRuntimeState } fr
 
 export const runtime = "nodejs";
 
+function sanitizeAssistantText(raw: string, tvars: Record<string, any>) {
+  // 1) 런타임 변수로 1차 치환
+  let s = interpolateTemplate(String(raw || ""), tvars as any);
+  // 2) 그래도 남는 {{var}}는 유저에게 그대로 노출되면 안 되므로 제거
+  s = s.replace(/\{\{\s*[a-zA-Z0-9_]+\s*\}\}/g, "");
+  // 3) 잔여 공백 정리(가독성)
+  s = s
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ");
+  return s.trim();
+}
+
 const MessageSchema = z.object({
   role: z.enum(["system", "user", "assistant"]),
   content: z.string().min(1),
@@ -490,6 +503,17 @@ export async function POST(req: Request) {
     const tvars = buildTemplateVars({ runtimeVariables: runtimeVariablesMerged || null });
     if (system) system = interpolateTemplate(system, tvars);
     const nonSystemInterpolated = nonSystem.map((m) => ({ ...m, content: interpolateTemplate(m.content, tvars) }));
+    // 트리거/시스템 이벤트에도 템플릿이 섞일 수 있으므로 응답 전에 치환(혹시 남으면 제거)
+    if (runtimeEvents.length) {
+      runtimeEvents = runtimeEvents.map((e) => {
+        if (e.type === "system_message") return { ...e, text: sanitizeAssistantText(e.text, tvars) };
+        if (e.type === "unlock_suggest") return { ...e, text: sanitizeAssistantText(e.text, tvars) };
+        if (e.type === "reset_offer") return { ...e, text: sanitizeAssistantText(e.text, tvars) };
+        if (e.type === "premium_offer") return { ...e, text: sanitizeAssistantText(e.text, tvars) };
+        if (e.type === "ep_unlock") return { ...e, text: sanitizeAssistantText(e.text, tvars) };
+        return e;
+      });
+    }
 
     // system prompt에 현재 상태/이벤트를 추가(LLM이 변수/참여자를 인지하도록)
     if (system) {
@@ -548,7 +572,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const text = String(out.text || "").trim();
+    const text = sanitizeAssistantText(String(out.text || ""), tvars);
     if (!text) {
       if (body.provider === "gemini") {
         // 1회 자동 재시도: 시스템/대화 축약 + 텍스트 출력 강제 규칙 추가
@@ -568,7 +592,7 @@ export async function POST(req: Request) {
           messages: retryMessages,
           allowUnsafe,
         });
-        const retryText = String(retryOut.text || "").trim();
+        const retryText = sanitizeAssistantText(String(retryOut.text || ""), tvars);
         if (retryText) {
           return NextResponse.json({ ok: true, provider: body.provider, model, text: retryText });
         }
