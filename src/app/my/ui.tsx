@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { SurfaceCard } from "@/components/SurfaceCard";
 import { myPageDummy } from "@/lib/myPage";
 import { fetchMyUserProfile } from "@/lib/pananaApp/userProfiles";
+import { signOut, useSession } from "next-auth/react";
 
 function BackIcon() {
   return (
@@ -107,14 +108,9 @@ function Stat({ value, label }: { value: number; label: string }) {
 export function MyPageClient() {
   const data = useMemo(() => myPageDummy, []);
   const [logoutOpen, setLogoutOpen] = useState(false);
-  const [loggedIn, setLoggedIn] = useState(false);
   const [nickname, setNickname] = useState<string>("");
-
-  // NOTE: 추후 DB/Auth 연동 시 교체. 지금은 더미 플래그.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    setLoggedIn(window.localStorage.getItem("panana_logged_in") === "1");
-  }, []);
+  const { data: session, status } = useSession();
+  const loggedIn = status === "authenticated";
 
   useEffect(() => {
     let alive = true;
@@ -122,7 +118,14 @@ export function MyPageClient() {
       const p = await fetchMyUserProfile();
       if (!alive) return;
       const nick = String(p?.nickname || "").trim();
+      // Supabase 프로필이 없으면 Auth.js 세션 이름/이메일로 fallback
       if (nick) setNickname(nick);
+      else {
+        const sname = String((session as any)?.user?.name || "").trim();
+        const semail = String((session as any)?.user?.email || "").trim();
+        const fallback = sname || semail;
+        if (fallback) setNickname(fallback);
+      }
     };
     load();
     const onFocus = () => {
@@ -266,11 +269,8 @@ export function MyPageClient() {
         onClose={() => setLogoutOpen(false)}
         onLogout={() => {
           setLogoutOpen(false);
-          try {
-            window.localStorage.removeItem("panana_logged_in");
-          } catch {}
-          setLoggedIn(false);
-          window.location.href = "/airport";
+          // Auth.js 로그아웃 후 공항(온보딩)으로 이동
+          signOut({ callbackUrl: "/airport" });
         }}
       />
     </div>

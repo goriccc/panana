@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ConditionalFooter } from "@/app/_components/ConditionalFooter";
+import { AuthSessionProvider } from "@/app/_components/AuthSessionProvider";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://panana.local"),
@@ -49,8 +50,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body>
-        {children}
-        <ConditionalFooter />
+        <AuthSessionProvider>
+          {children}
+          <ConditionalFooter />
+        </AuthSessionProvider>
       </body>
     </html>
   );

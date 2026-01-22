@@ -2,18 +2,15 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useMemo } from "react";
+import { signIn } from "next-auth/react";
 
 export function LoginClient({ returnTo }: { returnTo: string }) {
-  const router = useRouter();
   const backHref = useMemo(() => returnTo || "/my", [returnTo]);
 
-  const login = (provider: "kakao" | "naver" | "google") => {
-    // TODO: 실제 소셜 로그인 연동 시 교체
-    window.localStorage.setItem("panana_logged_in", "1");
-    console.log("login provider:", provider);
-    router.push(backHref);
+  const login = async (provider: "kakao" | "naver" | "google") => {
+    // Auth.js(NextAuth) OAuth 로그인
+    await signIn(provider, { callbackUrl: backHref });
   };
 
   return (
