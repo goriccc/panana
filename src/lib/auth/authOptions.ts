@@ -24,6 +24,17 @@ export const authOptions: NextAuthOptions = {
     signIn: "/login",
   },
   callbacks: {
+    async jwt({ token, account }) {
+      // 최초 로그인 시 provider를 토큰에 저장(계정설정 화면에서 표시용)
+      if (account?.provider) {
+        (token as any).provider = String(account.provider);
+      }
+      return token;
+    },
+    async session({ session, token }) {
+      (session as any).provider = (token as any)?.provider ? String((token as any).provider) : undefined;
+      return session;
+    },
     async redirect({ url, baseUrl }) {
       // callbackUrl로 상대경로(/home 등) 전달된 경우 baseUrl에 붙여서 허용
       if (url.startsWith("/")) return `${baseUrl}${url}`;

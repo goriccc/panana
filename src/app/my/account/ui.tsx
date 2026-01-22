@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { TopBar } from "@/components/TopBar";
+import { useSession } from "next-auth/react";
+import { useMemo } from "react";
 
 function PencilIcon() {
   return (
@@ -24,6 +26,20 @@ function PencilIcon() {
 }
 
 export function AccountClient() {
+  const { data: session, status } = useSession();
+  const providerLabel = useMemo(() => {
+    const p = String((session as any)?.provider || "").toLowerCase();
+    if (p === "google") return "구글";
+    if (p === "kakao") return "카카오";
+    if (p === "naver") return "네이버";
+    return p ? p : null;
+  }, [session]);
+  const accountText = useMemo(() => {
+    const email = String((session as any)?.user?.email || "").trim();
+    const name = String((session as any)?.user?.name || "").trim();
+    return email || name || "";
+  }, [session]);
+
   return (
     <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.10),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">
       <TopBar title="계정설정" backHref="/my" />
@@ -58,9 +74,9 @@ export function AccountClient() {
           <div className="px-5 py-5">
             <div className="text-[13px] font-extrabold text-white/85">로그인 정보</div>
             <div className="mt-2 text-[11px] font-semibold text-white/35">
-              구글계정으로 로그인했어요.
+              {status === "authenticated" && providerLabel ? `${providerLabel} 계정으로 로그인했어요.` : "로그인 정보가 없어요."}
             </div>
-            <div className="mt-2 text-[12px] font-semibold text-white/25">abcabc123456@gmail.com</div>
+            <div className="mt-2 text-[12px] font-semibold text-white/25">{status === "authenticated" ? accountText || "—" : "—"}</div>
           </div>
 
           <div className="border-t border-white/10" />
