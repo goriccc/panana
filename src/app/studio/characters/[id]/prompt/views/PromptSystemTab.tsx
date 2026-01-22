@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStudioStore } from "@/lib/studio/store";
 import { cn } from "@/lib/utils/cn";
 import { useFieldArray, useForm } from "react-hook-form";
+import { studioGetCharacter, studioSavePromptPayload } from "@/lib/studio/db";
 
 type FormValues = {
   personalitySummary: string;
@@ -82,6 +83,8 @@ function ChatRow({
 export function PromptSystemTab({ characterId }: { characterId: string }) {
   const prompt = useStudioStore((s) => s.getPrompt(characterId));
   const setPrompt = useStudioStore((s) => s.setPrompt);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   const defaultValues = useMemo<FormValues>(
     () => ({
@@ -90,8 +93,7 @@ export function PromptSystemTab({ characterId }: { characterId: string }) {
       coreDesire: prompt.system.coreDesire,
       fewShotPairs: prompt.system.fewShotPairs,
     }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [characterId]
+    [prompt.system.personalitySummary, prompt.system.speechGuide, prompt.system.coreDesire, prompt.system.fewShotPairs]
   );
 
   const form = useForm<FormValues>({ defaultValues, mode: "onChange" });
@@ -99,6 +101,14 @@ export function PromptSystemTab({ characterId }: { characterId: string }) {
   const fs = useFieldArray({ control: form.control, name: "fewShotPairs", keyName: "_key" });
 
   const values = watch();
+
+  useEffect(() => {
+    // DB 로드로 prompt가 갱신되면(또는 캐릭터 변경) 폼을 동기화
+    // 단, 사용자가 수정 중이면 덮어쓰지 않음
+    if (form.formState.isDirty) return;
+    form.reset(defaultValues);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [characterId, defaultValues]);
 
   const persist = () => {
     const next = useStudioStore.getState().getPrompt(characterId);
@@ -199,6 +209,39 @@ export function PromptSystemTab({ characterId }: { characterId: string }) {
             + 대화쌍 추가하기
           </button>
         </div>
+      </div>
+
+      <div className="flex items-center justify-end gap-2 pt-2">
+        {err ? <div className="mr-auto text-[12px] font-semibold text-[#ff9aa1]">{err}</div> : null}
+        <button
+          type="button"
+          className="rounded-xl bg-white/[0.06] px-4 py-3 text-[12px] font-extrabold text-white/80 ring-1 ring-white/10 hover:bg-white/[0.08] disabled:opacity-50"
+          disabled={saving}
+          onClick={async () => {
+            setErr(null);
+            setSaving(true);
+            try {
+              // form → store 먼저 반영
+              persist();
+              const c = await studioGetCharacter(characterId);
+              if (!c) throw new Error("캐릭터를 찾을 수 없어요.");
+              const current = useStudioStore.getState().getPrompt(characterId);
+              await studioSavePromptPayload({
+                projectId: c.project_id,
+                characterId,
+                payload: { system: current.system, author: current.author, meta: current.meta },
+                status: "draft",
+              });
+              form.reset(values); // 저장 시점 기준으로 dirty 해제
+            } catch (e: any) {
+              setErr(e?.message || "저장에 실패했어요.");
+            } finally {
+              setSaving(false);
+            }
+          }}
+        >
+          {saving ? "저장 중..." : "저장"}
+        </button>
       </div>
     </div>
   );

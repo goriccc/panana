@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStudioStore } from "@/lib/studio/store";
 import type { PromptLorebookItem } from "@/lib/studio/types";
 import { cn } from "@/lib/utils/cn";
 import { studioSkuCatalog } from "@/lib/studio/monetization";
+import { studioLoadLorebook, studioSaveLorebook } from "@/lib/studio/db";
 import {
   ColumnDef,
   flexRender,
@@ -14,16 +15,11 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 
-function DiamondIcon({ className }: { className?: string }) {
+function PananaIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} width="16" height="16" viewBox="0 0 24 24" fill="none">
-      <path
-        d="M12 3l4 4 5 2-9 12L3 9l5-2 4-4Z"
-        stroke="rgba(255,255,255,0.75)"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-    </svg>
+    <div className={cn("inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ff4da7]/25 px-1 text-[10px] font-black text-[#ffb3d7]", className)}>
+      P
+    </div>
   );
 }
 
@@ -42,22 +38,28 @@ function UnlockCell({
         "inline-flex items-center gap-2 rounded-xl border px-2 py-1 text-[12px] font-extrabold",
         type === "paid_item"
           ? "border-[#ff3d4a]/35 bg-[#ff3d4a]/10 text-[#ff9aa1]"
+          : type === "condition"
+            ? "border-[#7c5cff]/35 bg-[#7c5cff]/10 text-[#c9b8ff]"
           : "border-white/10 bg-white/[0.03] text-white/65"
       )}
     >
-      {type === "paid_item" ? <DiamondIcon className="opacity-90" /> : null}
+      {type === "paid_item" ? <PananaIcon className="opacity-90" /> : null}
       <select
         value={type}
         onChange={(e) => {
           const t = e.target.value as PromptLorebookItem["unlock"]["type"];
           if (t === "public") onChange({ type: "public" });
           else if (t === "affection") onChange({ type: "affection", min: 30 });
-          else onChange({ type: "paid_item", sku: "DIAMOND_01" });
+          else if (t === "condition") onChange({ type: "condition", expr: "trust>=70", costPanana: 0 });
+          else if (t === "ending_route") onChange({ type: "ending_route", endingKey: "", epMin: 7, costPanana: 0 });
+          else onChange({ type: "paid_item", sku: "PANA_UNLOCK_01" });
         }}
         className="bg-transparent text-[12px] font-extrabold text-inherit outline-none"
       >
         <option value="public">기본 공개</option>
         <option value="affection">호감도 조건</option>
+        <option value="condition">조건식(변수)</option>
+        <option value="ending_route">엔딩 루트</option>
         <option value="paid_item">유료 아이템 필요</option>
       </select>
 
@@ -75,9 +77,9 @@ function UnlockCell({
 
       {type === "paid_item" ? (
         <span className="inline-flex items-center gap-1 text-[#ff9aa1]">
-          <span className="text-[11px] font-extrabold">SKU</span>
+          <span className="text-[11px] font-extrabold">파나나</span>
           <input
-            value={value.sku}
+            value={(value as any).sku}
             onChange={(e) => onChange({ type: "paid_item", sku: e.target.value })}
             list="studio-sku-list"
             className="w-28 rounded-lg border border-[#ff3d4a]/35 bg-black/20 px-2 py-1 text-[12px] font-extrabold text-[#ffd0d4] outline-none"
@@ -91,6 +93,77 @@ function UnlockCell({
           </datalist>
         </span>
       ) : null}
+
+      {type === "condition" ? (
+        <span className="inline-flex flex-wrap items-center gap-2 text-[#c9b8ff]">
+          <span className="text-[11px] font-extrabold">조건</span>
+          <input
+            value={(value as any).expr || ""}
+            onChange={(e) => onChange({ type: "condition", expr: e.target.value, costPanana: (value as any).costPanana || 0 })}
+            placeholder="trust>=70"
+            className="w-28 rounded-lg border border-[#7c5cff]/35 bg-black/20 px-2 py-1 text-[12px] font-extrabold text-[#e6dcff] outline-none placeholder:text-[#e6dcff]/35"
+          />
+          <span className="text-[11px] font-extrabold">비용</span>
+          <input
+            value={Number((value as any).costPanana || 0)}
+            onChange={(e) =>
+              onChange({
+                type: "condition",
+                expr: (value as any).expr || "",
+                costPanana: Number(e.target.value) || 0,
+              })
+            }
+            className="w-16 rounded-lg border border-[#7c5cff]/35 bg-black/20 px-2 py-1 text-[12px] font-extrabold text-[#e6dcff] outline-none"
+          />
+          <span className="text-[11px] font-extrabold">P</span>
+        </span>
+      ) : null}
+
+      {type === "ending_route" ? (
+        <span className="inline-flex flex-wrap items-center gap-2 text-[#c9b8ff]">
+          <span className="text-[11px] font-extrabold">엔딩키</span>
+          <input
+            value={(value as any).endingKey || ""}
+            onChange={(e) =>
+              onChange({
+                type: "ending_route",
+                endingKey: e.target.value,
+                epMin: (value as any).epMin || 0,
+                costPanana: (value as any).costPanana || 0,
+              })
+            }
+            placeholder="partner / ruin / ... (옵션)"
+            className="w-32 rounded-lg border border-[#7c5cff]/35 bg-black/20 px-2 py-1 text-[12px] font-extrabold text-[#e6dcff] outline-none placeholder:text-[#e6dcff]/35"
+          />
+          <span className="text-[11px] font-extrabold">EP≥</span>
+          <input
+            value={Number((value as any).epMin || 0)}
+            onChange={(e) =>
+              onChange({
+                type: "ending_route",
+                endingKey: (value as any).endingKey || "",
+                epMin: Number(e.target.value) || 0,
+                costPanana: (value as any).costPanana || 0,
+              })
+            }
+            className="w-14 rounded-lg border border-[#7c5cff]/35 bg-black/20 px-2 py-1 text-[12px] font-extrabold text-[#e6dcff] outline-none"
+          />
+          <span className="text-[11px] font-extrabold">비용</span>
+          <input
+            value={Number((value as any).costPanana || 0)}
+            onChange={(e) =>
+              onChange({
+                type: "ending_route",
+                endingKey: (value as any).endingKey || "",
+                epMin: (value as any).epMin || 0,
+                costPanana: Number(e.target.value) || 0,
+              })
+            }
+            className="w-16 rounded-lg border border-[#7c5cff]/35 bg-black/20 px-2 py-1 text-[12px] font-extrabold text-[#e6dcff] outline-none"
+          />
+          <span className="text-[11px] font-extrabold">P</span>
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -100,8 +173,25 @@ export function LorebookTab({ characterId }: { characterId: string }) {
   const setPrompt = useStudioStore((s) => s.setPrompt);
 
   const [globalFilter, setGlobalFilter] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   const data = prompt.lorebook;
+
+  useEffect(() => {
+    // DB → store 로드(1회)
+    (async () => {
+      try {
+        const rows = await studioLoadLorebook(characterId);
+        if (!rows?.length) return;
+        const next = useStudioStore.getState().getPrompt(characterId);
+        setPrompt(characterId, { ...next, lorebook: rows });
+      } catch {
+        // 실패해도 더미/로컬 상태 유지
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [characterId]);
 
   const updateRow = (id: string, patch: Partial<PromptLorebookItem>) => {
     const next = useStudioStore.getState().getPrompt(characterId);
@@ -216,6 +306,25 @@ export function LorebookTab({ characterId }: { characterId: string }) {
         <div className="flex items-center gap-2">
           <button
             type="button"
+            className="rounded-xl bg-white/[0.06] px-4 py-2 text-[12px] font-extrabold text-white/80 ring-1 ring-white/10 hover:bg-white/[0.08]"
+            disabled={saving}
+            onClick={async () => {
+              setErr(null);
+              setSaving(true);
+              try {
+                const current = useStudioStore.getState().getPrompt(characterId);
+                await studioSaveLorebook(characterId, current.lorebook);
+              } catch (e: any) {
+                setErr(e?.message || "저장에 실패했어요.");
+              } finally {
+                setSaving(false);
+              }
+            }}
+          >
+            {saving ? "저장 중..." : "저장"}
+          </button>
+          <button
+            type="button"
             className="rounded-xl bg-[#4F7CFF] px-4 py-2 text-[12px] font-extrabold text-white hover:bg-[#3E6BFF]"
             onClick={() => {
               const next = useStudioStore.getState().getPrompt(characterId);
@@ -239,6 +348,7 @@ export function LorebookTab({ characterId }: { characterId: string }) {
           </button>
         </div>
       </div>
+      {err ? <div className="mt-3 text-[12px] font-semibold text-[#ff9aa1]">{err}</div> : null}
 
       <div className="mt-4 overflow-hidden rounded-2xl border border-white/10">
         <table className="min-w-full border-separate border-spacing-0">

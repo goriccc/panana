@@ -19,3 +19,73 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* ===== App(채팅) 전용: 스크롤바 숨김(스크롤은 유지) ===== */
+.chat-scrollbar {
+  -ms-overflow-style: none; /* IE/Edge legacy */
+  scrollbar-width: none; /* Firefox */
+}
+.chat-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* ===== Studio 전용: 다크톤 스크롤바(세로/가로) ===== */
+/* 사용법: 스튜디오 내부에서 스크롤 요소에 `studio-scrollbar` 클래스 부여 */
+.studio-scope .studio-scrollbar {
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: rgba(255, 255, 255, 0.22) rgba(255, 255, 255, 0.06);
+}
+.studio-scope .studio-scrollbar::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.studio-scope .studio-scrollbar::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+}
+.studio-scope .studio-scrollbar::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(143, 177, 255, 0.45), rgba(79, 124, 255, 0.35));
+  border: 2px solid rgba(0, 0, 0, 0.35);
+  border-radius: 999px;
+}
+.studio-scope .studio-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(143, 177, 255, 0.65), rgba(79, 124, 255, 0.55));
+}
+
+/* ===== Admin/Studio 공통: 모든 스크롤바를 다크톤 커스텀으로 통일 ===== */
+/* 목적: 특정 요소에만 클래스 붙이는 방식이 아니라, /admin /studio 범위 전체에 적용 */
+:where(.admin-scope, .studio-scope) * {
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: rgba(255, 255, 255, 0.18) rgba(255, 255, 255, 0.06);
+}
+:where(.admin-scope, .studio-scope) *::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+:where(.admin-scope, .studio-scope) *::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.06);
+}
+:where(.admin-scope, .studio-scope) *::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.20);
+  border: 2px solid rgba(0, 0, 0, 0.35);
+  border-radius: 999px;
+}
+:where(.admin-scope, .studio-scope) *::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.30);
+}
+
+/* ===== Studio 전용: 네이티브 select 드롭다운(옵션) 가독성 ===== */
+/* Windows/Chrome에서 select는 옵션 리스트가 기본 흰색으로 떠서 text-white 계열과 충돌할 수 있어 강제 다크톤 적용 */
+.studio-scope select {
+  color-scheme: dark;
+}
+.studio-scope select option,
+.studio-scope select optgroup {
+  background-color: #0b0f18;
+  color: rgba(255, 255, 255, 0.88);
+}
+.studio-scope select:disabled,
+.studio-scope select option:disabled {
+  color: rgba(255, 255, 255, 0.35);
+}
+

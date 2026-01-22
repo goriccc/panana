@@ -38,6 +38,7 @@ using (user_id = auth.uid() and active = true);
 alter table public.panana_categories enable row level security;
 alter table public.panana_characters enable row level security;
 alter table public.panana_character_categories enable row level security;
+alter table public.panana_character_posts enable row level security;
 alter table public.panana_home_hero_cards enable row level security;
 alter table public.panana_notices enable row level security;
 alter table public.panana_billing_products enable row level security;
@@ -50,22 +51,27 @@ alter table public.panana_site_settings enable row level security;
 drop policy if exists "panana_categories_public_read" on public.panana_categories;
 create policy "panana_categories_public_read"
 on public.panana_categories for select
-using (true);
+using (active = true);
 
 drop policy if exists "panana_characters_public_read" on public.panana_characters;
 create policy "panana_characters_public_read"
 on public.panana_characters for select
-using (true);
+using (active = true);
 
 drop policy if exists "panana_character_categories_public_read" on public.panana_character_categories;
 create policy "panana_character_categories_public_read"
 on public.panana_character_categories for select
-using (true);
+using (active = true);
+
+drop policy if exists "panana_character_posts_public_read" on public.panana_character_posts;
+create policy "panana_character_posts_public_read"
+on public.panana_character_posts for select
+using (active = true);
 
 drop policy if exists "panana_home_hero_cards_public_read" on public.panana_home_hero_cards;
 create policy "panana_home_hero_cards_public_read"
 on public.panana_home_hero_cards for select
-using (true);
+using (active = true);
 
 -- 공지사항은 공개된 것만(게시일이 미래면 숨김)
 drop policy if exists "panana_notices_public_read_published" on public.panana_notices;
@@ -76,22 +82,22 @@ using (published_at is not null and published_at <= now());
 drop policy if exists "panana_billing_products_public_read" on public.panana_billing_products;
 create policy "panana_billing_products_public_read"
 on public.panana_billing_products for select
-using (true);
+using (active = true);
 
 drop policy if exists "panana_membership_plans_public_read" on public.panana_membership_plans;
 create policy "panana_membership_plans_public_read"
 on public.panana_membership_plans for select
-using (true);
+using (active = true);
 
 drop policy if exists "panana_airport_media_public_read" on public.panana_airport_media;
 create policy "panana_airport_media_public_read"
 on public.panana_airport_media for select
-using (true);
+using (active = true);
 
 drop policy if exists "panana_airport_copy_public_read" on public.panana_airport_copy;
 create policy "panana_airport_copy_public_read"
 on public.panana_airport_copy for select
-using (true);
+using (active = true);
 
 drop policy if exists "panana_site_settings_public_read" on public.panana_site_settings;
 create policy "panana_site_settings_public_read"
@@ -114,6 +120,12 @@ with check (exists (select 1 from public.panana_admin_users a where a.user_id = 
 drop policy if exists "panana_character_categories_admin_all" on public.panana_character_categories;
 create policy "panana_character_categories_admin_all"
 on public.panana_character_categories for all
+using (exists (select 1 from public.panana_admin_users a where a.user_id = auth.uid() and a.active = true))
+with check (exists (select 1 from public.panana_admin_users a where a.user_id = auth.uid() and a.active = true));
+
+drop policy if exists "panana_character_posts_admin_all" on public.panana_character_posts;
+create policy "panana_character_posts_admin_all"
+on public.panana_character_posts for all
 using (exists (select 1 from public.panana_admin_users a where a.user_id = auth.uid() and a.active = true))
 with check (exists (select 1 from public.panana_admin_users a where a.user_id = auth.uid() and a.active = true));
 

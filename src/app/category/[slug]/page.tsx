@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getCategory } from "@/lib/content";
+import { fetchCategoryFromDb } from "@/lib/pananaApp/contentServer";
 import { CategoryClient } from "./ui";
 
 export function generateMetadata({ params }: { params: { slug: string } }): Metadata {
@@ -14,8 +15,9 @@ export function generateMetadata({ params }: { params: { slug: string } }): Meta
   };
 }
 
-export default function CategoryPage({ params }: { params: { slug: string } }) {
-  const c = getCategory(params.slug);
+export default async function CategoryPage({ params }: { params: { slug: string } }) {
+  const fromDb = await fetchCategoryFromDb(params.slug).catch(() => null);
+  const c = fromDb || getCategory(params.slug);
   if (!c) notFound();
   return <CategoryClient category={c} />;
 }

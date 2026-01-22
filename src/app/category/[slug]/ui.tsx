@@ -50,6 +50,7 @@ export function CategoryClient({ category }: { category: Category }) {
               title={(it as ContentCardItem).title}
               description={(it as ContentCardItem).description}
               tags={(it as ContentCardItem).tags}
+              imageUrl={(it as ContentCardItem).imageUrl}
               href={`/c/${(it as ContentCardItem).characterSlug}`}
             />
           ))}

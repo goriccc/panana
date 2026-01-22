@@ -5,6 +5,7 @@ export type ContentCardItem = {
   title: string;
   description: string;
   tags: string[];
+  imageUrl?: string;
 };
 
 export type Category = {

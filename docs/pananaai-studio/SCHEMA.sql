@@ -16,7 +16,11 @@ create table if not exists public.projects (
 );
 
 -- 2) 멤버십(RBAC) - Project 단위
-create type public.project_role as enum ('owner','admin','editor','author','reviewer','viewer');
+do $$ begin
+  if not exists (select 1 from pg_type t join pg_namespace n on n.oid = t.typnamespace where n.nspname = 'public' and t.typname = 'project_role') then
+    create type public.project_role as enum ('owner','admin','editor','author','reviewer','viewer');
+  end if;
+end $$;
 
 create table if not exists public.project_members (
   project_id uuid not null references public.projects(id) on delete cascade,
@@ -27,13 +31,25 @@ create table if not exists public.project_members (
 );
 
 -- 3) 캐릭터(등장인물)
-create type public.content_status as enum ('draft','review','approved','published','archived');
+do $$ begin
+  if not exists (select 1 from pg_type t join pg_namespace n on n.oid = t.typnamespace where n.nspname = 'public' and t.typname = 'content_status') then
+    create type public.content_status as enum ('draft','review','approved','published','archived');
+  end if;
+end $$;
 
 create table if not exists public.characters (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references public.projects(id) on delete cascade,
   slug text not null,
   name text not null,
+  -- 앱 노출용 공개 프로필 메타(Studio에서 관리 → Admin에서 1회 자동 채움 가능)
+  handle text not null default '',
+  hashtags text[] not null default '{}'::text[],
+  tagline text not null default '',
+  intro_title text not null default '',
+  intro_lines text[] not null default '{}'::text[],
+  mood_title text not null default '',
+  mood_lines text[] not null default '{}'::text[],
   role_label text not null default '',
   status public.content_status not null default 'draft',
   created_by uuid not null,
@@ -66,9 +82,29 @@ create table if not exists public.scene_participants (
 );
 
 -- 5) Lorebook (Project/Character/Scene 공통 테이블)
-create type public.lorebook_scope as enum ('project','character','scene');
-create type public.merge_mode as enum ('override','append');
-create type public.unlock_type as enum ('public','affection','paid_item');
+do $$ begin
+  if not exists (select 1 from pg_type t join pg_namespace n on n.oid = t.typnamespace where n.nspname = 'public' and t.typname = 'lorebook_scope') then
+    create type public.lorebook_scope as enum ('project','character','scene');
+  end if;
+end $$;
+
+do $$ begin
+  if not exists (select 1 from pg_type t join pg_namespace n on n.oid = t.typnamespace where n.nspname = 'public' and t.typname = 'merge_mode') then
+    create type public.merge_mode as enum ('override','append');
+  end if;
+end $$;
+
+do $$ begin
+  if not exists (select 1 from pg_type t join pg_namespace n on n.oid = t.typnamespace where n.nspname = 'public' and t.typname = 'unlock_type') then
+    -- unlock_type:
+    -- - public: 항상 공개
+    -- - affection: 호감도(정수) 기준
+    -- - paid_item: SKU(아이템) 필요
+    -- - condition: trust/risk/submission/debt 등 조건식 기반 해금 (unlock_expr로 저장)
+    -- - ending_route: 엔딩 진행/엔딩키 기반 해금 (unlock_ending_key / unlock_ep_min로 저장)
+    create type public.unlock_type as enum ('public','affection','paid_item','condition','ending_route');
+  end if;
+end $$;
 
 create table if not exists public.lorebook_entries (
   id uuid primary key default gen_random_uuid(),
@@ -81,6 +117,14 @@ create table if not exists public.lorebook_entries (
   merge_mode public.merge_mode not null default 'override',
   unlock_type public.unlock_type not null default 'public',
   unlock_affection_min int,
+  -- unlock_type='condition' 일 때 조건식(예: trust>=70, risk>=50)
+  unlock_expr text,
+  -- unlock_type='condition' 일 때 조건 + 결제가 함께 필요한 경우(선택)
+  unlock_cost_panana int,
+  -- unlock_type='ending_route' 일 때 (선택) 특정 엔딩/루트 키
+  unlock_ending_key text,
+  -- unlock_type='ending_route' 일 때 (선택) 최소 EP 진행 조건 (예: EP7 이후)
+  unlock_ep_min int,
   unlock_sku text,
   sort_order int not null default 0,
   active boolean not null default true,
@@ -93,7 +137,11 @@ create table if not exists public.lorebook_entries (
 -- 예: scope='character'면 character_id not null, scope='scene'면 scene_id not null
 
 -- 6) Trigger Rules (Project/Character/Scene 공통)
-create type public.rule_scope as enum ('project','character','scene');
+do $$ begin
+  if not exists (select 1 from pg_type t join pg_namespace n on n.oid = t.typnamespace where n.nspname = 'public' and t.typname = 'rule_scope') then
+    create type public.rule_scope as enum ('project','character','scene');
+  end if;
+end $$;
 
 create table if not exists public.trigger_rule_sets (
   id uuid primary key default gen_random_uuid(),

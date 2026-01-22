@@ -22,22 +22,12 @@ export type StudioScene = {
   updatedAt: string;
 };
 
-export const studioProjects: StudioProject[] = [
-  { id: "romance-drama", title: "로판남주", subtitle: "드라마형/씬 진행", updatedAt: "2026-01-21" },
-  { id: "modern-chat", title: "현대 캐릭터팩", subtitle: "1:1 중심", updatedAt: "2026-01-20" },
-];
+// NOTE: Studio는 DB 기반으로 동작합니다. 더미 데이터는 혼동/오류(예: uuid 필드에 문자열 저장)를 유발하므로 비웁니다.
+export const studioProjects: StudioProject[] = [];
 
-export const studioCast: StudioCastMember[] = [
-  { id: "guide", projectId: "romance-drama", name: "가이드", roleLabel: "남주", status: "draft", updatedAt: "2026-01-21" },
-  { id: "emperor", projectId: "romance-drama", name: "황제", roleLabel: "적대", status: "draft", updatedAt: "2026-01-19" },
-  { id: "knight", projectId: "romance-drama", name: "기사단장", roleLabel: "서브", status: "published", updatedAt: "2026-01-18" },
-  { id: "seol-a", projectId: "modern-chat", name: "김설아", roleLabel: "친구", status: "published", updatedAt: "2026-01-20" },
-];
+export const studioCast: StudioCastMember[] = [];
 
-export const studioScenes: StudioScene[] = [
-  { id: "ep1", projectId: "romance-drama", title: "첫 만남", episodeLabel: "EP1", updatedAt: "2026-01-21" },
-  { id: "ep2", projectId: "romance-drama", title: "가면무도회", episodeLabel: "EP2", updatedAt: "2026-01-20" },
-];
+export const studioScenes: StudioScene[] = [];
 
 export function getProject(projectId: string) {
   return studioProjects.find((p) => p.id === projectId) ?? null;

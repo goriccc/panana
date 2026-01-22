@@ -1,6 +1,10 @@
 import { create } from "zustand";
 import type { StudioLorebookItem, StudioPromptState, TriggerRulesPayload } from "./types";
 
+function isUuid(v: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+}
+
 const seedPrompt: StudioPromptState = {
   system: {
     personalitySummary: "",
@@ -14,7 +18,7 @@ const seedPrompt: StudioPromptState = {
   lorebook: [
     { id: "l-1", key: "방하의 저주", value: "복부 대공 가문의 유전병. 사랑을 하면 심장이 얼어붙는 고통…", unlock: { type: "public" } },
     { id: "l-2", key: "황제, 이복형", value: "현 황제는 카이든을 견제하며 틈만 나면 암살자를 보낸다.", unlock: { type: "affection", min: 30 } },
-    { id: "l-3", key: "**어머니의 유품**", value: "(비밀 설정) 카이든이 목숨처럼 아끼는 로켓 목걸이…", unlock: { type: "paid_item", sku: "DIAMOND_01" } },
+    { id: "l-3", key: "**어머니의 유품**", value: "(비밀 설정) 카이든이 목숨처럼 아끼는 로켓 목걸이…", unlock: { type: "paid_item", sku: "PANA_UNLOCK_01" } },
   ],
   author: {
     forceBracketNarration: true,
@@ -22,6 +26,9 @@ const seedPrompt: StudioPromptState = {
     nsfwFilterOff: false,
     authorNote:
       "모든 행동 묘사는 현재형으로 서술하시오.\n유저와의 대화에 몰입하고 AI임을 밝히지 마시오.\n현재 질투 수치가 높으므로 비교는 말투를 유지하시오.",
+  },
+  meta: {
+    operatorMemo: "",
   },
 };
 
@@ -180,13 +187,14 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   },
   selectedProjectId: null,
   setSelectedProjectId: (id) => {
+    const next = id && isUuid(id) ? id : null;
     try {
       if (typeof window !== "undefined") {
-        if (id) window.localStorage.setItem("studio_selected_project_id", id);
+        if (next) window.localStorage.setItem("studio_selected_project_id", next);
         else window.localStorage.removeItem("studio_selected_project_id");
       }
     } catch {}
-    set({ selectedProjectId: id });
+    set({ selectedProjectId: next });
   },
   selectedSceneId: null,
   setSelectedSceneId: (id) => {

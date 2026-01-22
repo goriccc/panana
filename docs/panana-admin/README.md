@@ -38,5 +38,16 @@
 - 증상: `/airport`에서 썸네일/문장이 안 보이거나, debug에서 `permission denied for table panana_airport_media`
 - 해결: `FIX_PUBLIC_READ_AIRPORT.sql` 실행 후 `NOTIFY pgrst, 'reload schema';`
 
+## LLM(Claude/Gemini/DeepSeek) 설정
+- DB에 **API Key를 저장하지 않고**, Vercel 환경변수(서버 전용)로 관리합니다.
+  - 테이블/정책: `LLM_SCHEMA.sql`
+  - 환경변수 안내: `LLM_ENV.md`
+
 > 주의: 이 스키마는 Studio 쪽 스키마(`docs/pananaai-studio/SCHEMA.sql`)와 **테이블명이 충돌하지 않도록** `panana_*` prefix를 사용합니다.
+
+## 파나나(크레딧) / 해금(Unlock) 기본 스키마
+- 용어: 서비스 내부 통화는 **파나나**(크레딧)로 통일합니다.
+- 목표: 씬/비밀/등장인물 끼어듦(1:N)/분기/리셋/프리미엄 모드를 모두 같은 엔진으로 해금/차감합니다.
+- 테이블:
+  - `PANANA_ECONOMY.sql`: 지갑(`panana_wallets`), 원장(`panana_ledger`), 해금 카탈로그(`panana_unlockables`), 유저 해금(`panana_user_unlocks`), 패스(`panana_premium_passes`)
 

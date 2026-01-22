@@ -2,8 +2,9 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { myPageDummy } from "@/lib/myPage";
+import { fetchMyUserProfile, upsertMyUserNickname } from "@/lib/pananaApp/userProfiles";
 
 function BackIcon() {
   return (
@@ -22,6 +23,20 @@ function BackIcon() {
 export function MyEditClient() {
   const data = useMemo(() => myPageDummy, []);
   const [name, setName] = useState(data.name);
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const p = await fetchMyUserProfile();
+      if (!alive) return;
+      if (p?.nickname) setName(p.nickname);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   return (
     <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.10),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">
@@ -76,10 +91,26 @@ export function MyEditClient() {
 
         <button
           type="button"
-          className="mt-10 w-full rounded-2xl bg-panana-pink px-5 py-4 text-[15px] font-extrabold text-white"
+          disabled={saving}
+          className="mt-10 w-full rounded-2xl bg-panana-pink px-5 py-4 text-[15px] font-extrabold text-white disabled:opacity-60"
+          onClick={async () => {
+            setStatus(null);
+            setSaving(true);
+            try {
+              const res = await upsertMyUserNickname(name);
+              if (!res.ok) {
+                setStatus(res.error);
+                return;
+              }
+              setStatus("저장 완료!");
+            } finally {
+              setSaving(false);
+            }
+          }}
         >
-          저장하기
+          {saving ? "저장 중..." : "저장하기"}
         </button>
+        {status ? <div className="mt-3 text-center text-[12px] font-semibold text-white/60">{status}</div> : null}
       </main>
     </div>
   );

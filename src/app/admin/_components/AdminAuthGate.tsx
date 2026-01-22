@@ -20,6 +20,38 @@ type AdminAllowlistRow = {
 // - 세션 조회는 보통 즉시 끝나지만, 네트워크/브라우저 상태에 따라 지연될 수 있어 20~30초가 체감상 안정적
 const SESSION_TIMEOUT_MS = 25_000;
 const ADMIN_CHECK_TIMEOUT_MS = 12_000;
+const ADMIN_CACHE_KEY = "panana_admin_verified_v1";
+const ADMIN_CACHE_TTL_MS = 1000 * 60 * 60 * 12; // 12시간(체감상 충분히 길고, 권한 변경도 과하게 늦지 않게)
+
+function readAdminCache(): { userId: string; exp: number } | null {
+  try {
+    const raw = localStorage.getItem(ADMIN_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { userId?: unknown; exp?: unknown };
+    if (typeof parsed?.userId !== "string") return null;
+    if (typeof parsed?.exp !== "number") return null;
+    if (Date.now() > parsed.exp) return null;
+    return { userId: parsed.userId, exp: parsed.exp };
+  } catch {
+    return null;
+  }
+}
+
+function writeAdminCache(userId: string) {
+  try {
+    localStorage.setItem(ADMIN_CACHE_KEY, JSON.stringify({ userId, exp: Date.now() + ADMIN_CACHE_TTL_MS }));
+  } catch {
+    // ignore
+  }
+}
+
+function clearAdminCache() {
+  try {
+    localStorage.removeItem(ADMIN_CACHE_KEY);
+  } catch {
+    // ignore
+  }
+}
 
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return Promise.race([
@@ -28,7 +60,13 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   ]);
 }
 
-export function AdminAuthGate({ children }: { children: React.ReactNode }) {
+export function AdminAuthGate({
+  children,
+  hideLogoutButton,
+}: {
+  children: React.ReactNode;
+  hideLogoutButton?: boolean;
+}) {
   const supabase = useMemo(() => getBrowserSupabase(), []);
   const [gate, setGate] = useState<GateState>({ status: "loading" });
   const [step, setStep] = useState<GateStep>("idle");
@@ -50,6 +88,7 @@ export function AdminAuthGate({ children }: { children: React.ReactNode }) {
       if (sessionErr) throw sessionErr;
       const session = sessionData.session;
       if (!session?.user?.id) {
+        clearAdminCache();
         setGate({ status: "signed_out" });
         setStep("done");
         return;
@@ -58,35 +97,54 @@ export function AdminAuthGate({ children }: { children: React.ReactNode }) {
       const userId = session.user.id;
       setDebug(`user_id: ${userId}`);
 
-      // 관리자 allowlist 확인
+      // 1) 캐시가 있으면 즉시 통과(UX: 화면 전환마다 DB 체크 때문에 "재로그인 느낌" 방지)
+      const cached = readAdminCache();
+      const hasValidCache = cached?.userId === userId;
+      if (hasValidCache) {
+        setGate({ status: "ready", userId });
+      }
+
+      // 2) 백그라운드로 allowlist 재검증(권한 회수/변경은 TTL 내에서만 지연)
       setStep("check_admin");
-      const adminRes = await withTimeout<{ data: AdminAllowlistRow | null; error: any }>(
-        (supabase
-          .from("panana_admin_users")
-          .select("user_id, active")
-          .eq("user_id", userId)
-          .maybeSingle() as any),
-        ADMIN_CHECK_TIMEOUT_MS,
-        "select panana_admin_users"
-      );
-      const { data: adminRow, error: adminErr } = adminRes;
+      try {
+        const adminRes = await withTimeout<{ data: AdminAllowlistRow | null; error: any }>(
+          (supabase
+            .from("panana_admin_users")
+            .select("user_id, active")
+            .eq("user_id", userId)
+            .maybeSingle() as any),
+          ADMIN_CHECK_TIMEOUT_MS,
+          "select panana_admin_users"
+        );
+        const { data: adminRow, error: adminErr } = adminRes;
 
-      if (adminErr) {
-        // 흔한 원인: panana_admin_users RLS 재귀(SECURITY ADVISOR 경고 해결 과정에서 발생)
-        setError(adminErr.message);
-        setGate({ status: "not_admin" });
+        if (adminErr) throw adminErr;
+
+        if (!adminRow?.active) {
+          clearAdminCache();
+          setGate({ status: "not_admin" });
+          setStep("done");
+          return;
+        }
+
+        writeAdminCache(userId);
+        setGate({ status: "ready", userId });
         setStep("done");
+      } catch (e: any) {
+        const msg = e?.message || "관리자 권한 확인에 실패했어요.";
+        setError(msg);
+        setStep("done");
+
+        // 핵심 UX: 일시적인 네트워크/타임아웃/5xx 등은 '권한 없음/로그아웃'으로 떨어뜨리지 않음
+        // - 캐시가 있으면 그대로 사용(ready 유지)
+        // - 캐시가 없으면 loading + 재시도 제공
+        if (hasValidCache) {
+          setGate({ status: "ready", userId });
+          return;
+        }
+        setGate({ status: "loading" });
         return;
       }
-
-      if (!adminRow?.active) {
-        setGate({ status: "not_admin" });
-        setStep("done");
-        return;
-      }
-
-      setGate({ status: "ready", userId });
-      setStep("done");
     } catch (e: any) {
       const msg = e?.message || "권한 확인 중 오류가 발생했어요.";
       setError(msg);
@@ -106,7 +164,11 @@ export function AdminAuthGate({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     refresh();
-    const { data: sub } = supabase.auth.onAuthStateChange(() => refresh());
+    const { data: sub } = supabase.auth.onAuthStateChange((_event) => {
+      // event별로 분기할 수도 있지만, 현재는 refresh가 충분히 가볍고
+      // 캐시/소프트 실패 처리로 UX가 안정적이라 그대로 유지
+      refresh();
+    });
     return () => sub.subscription.unsubscribe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -218,15 +280,17 @@ values ('YOUR_AUTH_USER_UUID');
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-end">
-        <button
-          type="button"
-          className="rounded-xl bg-white/[0.06] px-4 py-2 text-[12px] font-extrabold text-white/80 ring-1 ring-white/10 hover:bg-white/[0.08]"
-          onClick={() => supabase.auth.signOut()}
-        >
-          로그아웃
-        </button>
-      </div>
+      {!hideLogoutButton ? (
+        <div className="mb-4 flex items-center justify-end">
+          <button
+            type="button"
+            className="rounded-xl bg-white/[0.06] px-4 py-2 text-[12px] font-extrabold text-white/80 ring-1 ring-white/10 hover:bg-white/[0.08]"
+            onClick={() => supabase.auth.signOut()}
+          >
+            로그아웃
+          </button>
+        </div>
+      ) : null}
       {children}
     </div>
   );

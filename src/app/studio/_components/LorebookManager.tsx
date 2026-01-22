@@ -13,16 +13,11 @@ import {
 } from "@tanstack/react-table";
 import { studioSkuCatalog } from "@/lib/studio/monetization";
 
-function DiamondIcon({ className }: { className?: string }) {
+function PananaIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} width="16" height="16" viewBox="0 0 24 24" fill="none">
-      <path
-        d="M12 3l4 4 5 2-9 12L3 9l5-2 4-4Z"
-        stroke="rgba(255,255,255,0.75)"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-    </svg>
+    <div className={cn("inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ff4da7]/25 px-1 text-[10px] font-black text-[#ffb3d7]", className)}>
+      P
+    </div>
   );
 }
 
@@ -42,22 +37,28 @@ function UnlockCell({
         "inline-flex items-center gap-2 rounded-xl border px-2 py-1 text-[12px] font-extrabold",
         type === "paid_item"
           ? "border-[#ff3d4a]/35 bg-[#ff3d4a]/10 text-[#ff9aa1]"
+          : type === "condition"
+            ? "border-[#7c5cff]/35 bg-[#7c5cff]/10 text-[#c9b8ff]"
           : "border-white/10 bg-white/[0.03] text-white/65"
       )}
     >
-      {type === "paid_item" ? <DiamondIcon className="opacity-90" /> : null}
+      {type === "paid_item" ? <PananaIcon className="opacity-90" /> : null}
       <select
         value={type}
         onChange={(e) => {
           const t = e.target.value as StudioLorebookItem["unlock"]["type"];
           if (t === "public") onChange({ type: "public" });
           else if (t === "affection") onChange({ type: "affection", min: 30 });
-          else onChange({ type: "paid_item", sku: "DIAMOND_01" });
+          else if (t === "condition") onChange({ type: "condition", expr: "trust>=70", costPanana: 0 });
+          else if (t === "ending_route") onChange({ type: "ending_route", endingKey: "", epMin: 7, costPanana: 0 });
+          else onChange({ type: "paid_item", sku: "PANA_UNLOCK_01" });
         }}
         className="bg-transparent text-[12px] font-extrabold text-inherit outline-none"
       >
         <option value="public">기본 공개</option>
         <option value="affection">호감도 조건</option>
+        <option value="condition">조건식(변수)</option>
+        <option value="ending_route">엔딩 루트</option>
         <option value="paid_item">유료 아이템 필요</option>
       </select>
 
@@ -75,13 +76,84 @@ function UnlockCell({
 
       {type === "paid_item" ? (
         <span className="inline-flex items-center gap-1 text-[#ff9aa1]">
-          <span className="text-[11px] font-extrabold">SKU</span>
+          <span className="text-[11px] font-extrabold">파나나</span>
           <input
-            value={value.sku}
+            value={(value as any).sku}
             onChange={(e) => onChange({ type: "paid_item", sku: e.target.value })}
             list={listId}
             className="w-28 rounded-lg border border-[#ff3d4a]/35 bg-black/20 px-2 py-1 text-[12px] font-extrabold text-[#ffd0d4] outline-none"
           />
+        </span>
+      ) : null}
+
+      {type === "condition" ? (
+        <span className="inline-flex flex-wrap items-center gap-2 text-[#c9b8ff]">
+          <span className="text-[11px] font-extrabold">조건</span>
+          <input
+            value={(value as any).expr || ""}
+            onChange={(e) => onChange({ type: "condition", expr: e.target.value, costPanana: (value as any).costPanana || 0 })}
+            placeholder="trust>=70"
+            className="w-28 rounded-lg border border-[#7c5cff]/35 bg-black/20 px-2 py-1 text-[12px] font-extrabold text-[#e6dcff] outline-none placeholder:text-[#e6dcff]/35"
+          />
+          <span className="text-[11px] font-extrabold">비용</span>
+          <input
+            value={Number((value as any).costPanana || 0)}
+            onChange={(e) =>
+              onChange({
+                type: "condition",
+                expr: (value as any).expr || "",
+                costPanana: Number(e.target.value) || 0,
+              })
+            }
+            className="w-16 rounded-lg border border-[#7c5cff]/35 bg-black/20 px-2 py-1 text-[12px] font-extrabold text-[#e6dcff] outline-none"
+          />
+          <span className="text-[11px] font-extrabold">P</span>
+        </span>
+      ) : null}
+
+      {type === "ending_route" ? (
+        <span className="inline-flex flex-wrap items-center gap-2 text-[#c9b8ff]">
+          <span className="text-[11px] font-extrabold">엔딩키</span>
+          <input
+            value={(value as any).endingKey || ""}
+            onChange={(e) =>
+              onChange({
+                type: "ending_route",
+                endingKey: e.target.value,
+                epMin: (value as any).epMin || 0,
+                costPanana: (value as any).costPanana || 0,
+              })
+            }
+            placeholder="partner / ruin / ... (옵션)"
+            className="w-32 rounded-lg border border-[#7c5cff]/35 bg-black/20 px-2 py-1 text-[12px] font-extrabold text-[#e6dcff] outline-none placeholder:text-[#e6dcff]/35"
+          />
+          <span className="text-[11px] font-extrabold">EP≥</span>
+          <input
+            value={Number((value as any).epMin || 0)}
+            onChange={(e) =>
+              onChange({
+                type: "ending_route",
+                endingKey: (value as any).endingKey || "",
+                epMin: Number(e.target.value) || 0,
+                costPanana: (value as any).costPanana || 0,
+              })
+            }
+            className="w-14 rounded-lg border border-[#7c5cff]/35 bg-black/20 px-2 py-1 text-[12px] font-extrabold text-[#e6dcff] outline-none"
+          />
+          <span className="text-[11px] font-extrabold">비용</span>
+          <input
+            value={Number((value as any).costPanana || 0)}
+            onChange={(e) =>
+              onChange({
+                type: "ending_route",
+                endingKey: (value as any).endingKey || "",
+                epMin: (value as any).epMin || 0,
+                costPanana: Number(e.target.value) || 0,
+              })
+            }
+            className="w-16 rounded-lg border border-[#7c5cff]/35 bg-black/20 px-2 py-1 text-[12px] font-extrabold text-[#e6dcff] outline-none"
+          />
+          <span className="text-[11px] font-extrabold">P</span>
         </span>
       ) : null}
     </div>

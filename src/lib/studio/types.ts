@@ -17,18 +17,22 @@ export type PromptSystemLayer = {
   fewShotPairs: FewShotPair[];
 };
 
+// 로어북 합성 정책(override/append)
+export type StudioMergeMode = "override" | "append";
+
 export type PromptLorebookItem = {
   id: string;
   key: string;
   value: string;
+  // 캐릭터 로어북도 mergeMode를 저장/보존할 수 있게 허용(현재 합성 엔진은 프로젝트/씬 합성에서 주로 사용)
+  mergeMode?: StudioMergeMode;
   unlock:
     | { type: "public" }
     | { type: "affection"; min: number }
-    | { type: "paid_item"; sku: string };
+    | { type: "paid_item"; sku: string }
+    | { type: "condition"; expr: string; costPanana?: number }
+    | { type: "ending_route"; endingKey?: string; epMin?: number; costPanana?: number };
 };
-
-// 프로젝트/씬 로어북은 합성 정책(override/append)을 함께 가질 수 있음
-export type StudioMergeMode = "override" | "append";
 
 export type StudioLorebookItem = PromptLorebookItem & {
   mergeMode: StudioMergeMode;
@@ -45,6 +49,9 @@ export type StudioPromptState = {
   system: PromptSystemLayer;
   lorebook: PromptLorebookItem[];
   author: PromptAuthorNote;
+  meta?: {
+    operatorMemo?: string;
+  };
 };
 
 export type TriggerCondition =
@@ -60,7 +67,9 @@ export type TriggerIf = {
 export type TriggerAction =
   | { type: "variable_mod"; var: string; op: "+" | "-"; value: number }
   | { type: "system_message"; text: string }
-  | { type: "status_effect"; key: string; turns: number };
+  | { type: "status_effect"; key: string; turns: number }
+  | { type: "join"; name: string }
+  | { type: "leave"; name: string };
 
 export type TriggerThen = {
   actions: TriggerAction[];
@@ -76,5 +85,8 @@ export type TriggerRule = {
 
 export type TriggerRulesPayload = {
   rules: TriggerRule[];
+  // (선택) 변수 표시 라벨(콘텐츠별 커스텀)
+  // 예: { contract: "광고 계약확률", stress: "스트레스" }
+  varLabels?: Record<string, string>;
 };
 

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { SurfaceCard } from "@/components/SurfaceCard";
 import { myPageDummy } from "@/lib/myPage";
+import { fetchMyUserProfile } from "@/lib/pananaApp/userProfiles";
 
 function BackIcon() {
   return (
@@ -107,11 +108,31 @@ export function MyPageClient() {
   const data = useMemo(() => myPageDummy, []);
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [loggedIn, setLoggedIn] = useState(false);
+  const [nickname, setNickname] = useState<string>("");
 
   // NOTE: 추후 DB/Auth 연동 시 교체. 지금은 더미 플래그.
   useEffect(() => {
     if (typeof window === "undefined") return;
     setLoggedIn(window.localStorage.getItem("panana_logged_in") === "1");
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      const p = await fetchMyUserProfile();
+      if (!alive) return;
+      const nick = String(p?.nickname || "").trim();
+      if (nick) setNickname(nick);
+    };
+    load();
+    const onFocus = () => {
+      load();
+    };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      alive = false;
+      window.removeEventListener("focus", onFocus);
+    };
   }, []);
 
   return (
@@ -133,7 +154,7 @@ export function MyPageClient() {
             <div className="flex items-center gap-4">
               <div className="h-[58px] w-[58px] overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10" />
               <div className="min-w-0">
-                <div className="text-[14px] font-bold text-white/85">{data.name}</div>
+                <div className="text-[14px] font-bold text-white/85">{nickname || data.name}</div>
                 <div className="mt-1 text-[12px] font-semibold text-white/45">{data.handle}</div>
               </div>
             </div>

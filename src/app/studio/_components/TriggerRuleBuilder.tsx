@@ -3,6 +3,27 @@
 import { useMemo } from "react";
 import type { TriggerCondition, TriggerRule, TriggerRulesPayload } from "@/lib/studio/types";
 import { cn } from "@/lib/utils/cn";
+import { VarLabelResolutionPreview, type VarLabelScope } from "@/app/studio/_components/VarLabelResolutionPreview";
+
+function normalizeVarKey(input: string) {
+  return String(input || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "")
+    .slice(0, 48);
+}
+
+function normalizeVarLabels(input: TriggerRulesPayload["varLabels"]): Record<string, string> {
+  const src = input && typeof input === "object" ? input : {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(src)) {
+    const key = normalizeVarKey(k);
+    const label = String(v || "").trim().slice(0, 24);
+    if (!key || !label) continue;
+    out[key] = label;
+  }
+  return out;
+}
 
 function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -127,18 +148,36 @@ export function TriggerRuleBuilder({
   subtitle,
   value,
   onChange,
+  nameSuggestions = [],
   showJsonPreview = true,
+  labelScope,
+  contextVarLabels,
 }: {
   title: string;
   subtitle?: string;
   value: TriggerRulesPayload;
   onChange: (next: TriggerRulesPayload) => void;
+  nameSuggestions?: string[];
   showJsonPreview?: boolean;
+  labelScope?: "project" | "scene" | "character";
+  // 다른 스코프에서 내려오는 라벨(충돌/최종 적용 미리보기용)
+  contextVarLabels?: Partial<Record<VarLabelScope, Record<string, string>>>;
 }) {
   const rules = value.rules;
+  const varLabels = useMemo(() => normalizeVarLabels((value as any)?.varLabels), [value]);
+  const previewMaps = useMemo(() => {
+    const baseProject = normalizeVarLabels((contextVarLabels as any)?.project);
+    const baseScene = normalizeVarLabels((contextVarLabels as any)?.scene);
+    const baseCharacter = normalizeVarLabels((contextVarLabels as any)?.character);
+
+    const project = labelScope === "project" ? varLabels : baseProject;
+    const scene = labelScope === "scene" ? varLabels : baseScene;
+    const character = labelScope === "character" ? varLabels : baseCharacter;
+    return { project, scene, character };
+  }, [contextVarLabels, labelScope, varLabels]);
 
   const updateRule = (id: string, patch: Partial<TriggerRule>) => {
-    onChange({ rules: rules.map((r) => (r.id === id ? { ...r, ...patch } : r)) });
+    onChange({ ...value, rules: rules.map((r) => (r.id === id ? { ...r, ...patch } : r)) });
   };
 
   const jsonPreview = useMemo(() => JSON.stringify({ rules }, null, 2), [rules]);
@@ -172,6 +211,101 @@ export function TriggerRuleBuilder({
         </button>
       </div>
 
+      {/* 변수 라벨(표시명) 설정 */}
+      <div className="mt-4 rounded-2xl border border-white/10 bg-black/15 p-4">
+        <div className="flex items-end justify-between gap-3">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="text-[13px] font-extrabold text-white/85">변수 라벨(표시명)</div>
+              {labelScope ? (
+                <span className="rounded-full bg-white/[0.06] px-2 py-[2px] text-[10px] font-extrabold text-white/60 ring-1 ring-white/10">
+                  {labelScope === "character" ? "캐릭터(최우선)" : labelScope === "scene" ? "씬(중간)" : "프로젝트(기본)"}
+                </span>
+              ) : null}
+              <span className="text-[10px] font-extrabold text-white/35">
+                적용 우선순위: <span className="text-white/55">캐릭터 &gt; 씬 &gt; 프로젝트</span>
+              </span>
+            </div>
+            <div className="mt-1 text-[11px] font-semibold text-white/35">
+              채팅에서 <span className="text-white/60">변수키(영문)</span>를 그대로 노출하지 않도록, 콘텐츠별로 표시명을 지정합니다.
+              <span className="ml-2 text-white/45">예: contract → 광고 계약확률</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="rounded-lg bg-white/[0.06] px-3 py-2 text-[11px] font-extrabold text-white/75 ring-1 ring-white/10 hover:bg-white/[0.08]"
+            onClick={() => {
+              const next = { ...varLabels };
+              // 빈 엔트리 한 개 추가(키는 임시로 unique)
+              const seedBase = "new_var";
+              let k = seedBase;
+              for (let i = 2; i < 99 && next[k]; i++) k = `${seedBase}_${i}`;
+              next[k] = "표시명";
+              onChange({ ...value, varLabels: next });
+            }}
+          >
+            + 라벨 추가
+          </button>
+        </div>
+
+        {!Object.keys(varLabels).length ? (
+          <div className="mt-3 rounded-xl border border-dashed border-white/10 bg-white/[0.02] px-4 py-3 text-[12px] font-semibold text-white/45">
+            아직 라벨이 없어요. <span className="text-white/70">+ 라벨 추가</span>로 입력하세요.
+          </div>
+        ) : (
+          <div className="mt-4 space-y-2">
+            {Object.entries(varLabels).map(([k, label]) => (
+              <div key={k} className="flex flex-wrap items-center gap-2">
+                <input
+                  value={k}
+                  onChange={(e) => {
+                    const next = { ...varLabels };
+                    const prevKey = k;
+                    const nextKey = normalizeVarKey(e.target.value);
+                    const v = next[prevKey];
+                    delete next[prevKey];
+                    if (nextKey) next[nextKey] = v;
+                    onChange({ ...value, varLabels: next });
+                  }}
+                  className="w-[160px] rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-[12px] font-extrabold text-white/80 outline-none placeholder:text-white/25"
+                  placeholder="변수키 (예: contract)"
+                />
+                <span className="text-white/35">→</span>
+                <input
+                  value={label}
+                  onChange={(e) => {
+                    const next = { ...varLabels, [k]: String(e.target.value || "").slice(0, 24) };
+                    onChange({ ...value, varLabels: next });
+                  }}
+                  className="min-w-[180px] flex-1 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-[12px] font-extrabold text-white/80 outline-none placeholder:text-white/25"
+                  placeholder="표시명 (예: 광고 계약확률)"
+                />
+                <button
+                  type="button"
+                  className="rounded-lg bg-white/[0.03] px-3 py-2 text-[12px] font-extrabold text-white/55 ring-1 ring-white/10 hover:bg-white/[0.05]"
+                  onClick={() => {
+                    const next = { ...varLabels };
+                    delete next[k];
+                    onChange({ ...value, varLabels: next });
+                  }}
+                >
+                  삭제
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4">
+        <VarLabelResolutionPreview
+          editingScope={labelScope}
+          project={previewMaps.project}
+          scene={previewMaps.scene}
+          character={previewMaps.character}
+        />
+      </div>
+
       <div className="mt-4 space-y-4">
         {rules.map((r, idx) => (
           <div key={r.id} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
@@ -184,7 +318,7 @@ export function TriggerRuleBuilder({
                 <button
                   type="button"
                   className="rounded-lg bg-white/[0.03] px-3 py-2 text-[12px] font-extrabold text-white/55 ring-1 ring-white/10 hover:bg-white/[0.05]"
-                  onClick={() => onChange({ rules: rules.filter((x) => x.id !== r.id) })}
+                  onClick={() => onChange({ ...value, rules: rules.filter((x) => x.id !== r.id) })}
                 >
                   🗑
                 </button>
@@ -313,6 +447,52 @@ export function TriggerRuleBuilder({
                         </ActionRow>
                       ) : null}
 
+                      {a.type === "join" ? (
+                        <ActionRow label="결과 유형: 참여자 합류 (join)">
+                          <input
+                            value={(a as any).name || ""}
+                            onChange={(e) =>
+                              updateRule(r.id, {
+                                then: { actions: r.then.actions.map((x, i) => (i === aIdx ? ({ ...a, name: e.target.value } as any) : x)) },
+                              })
+                            }
+                            list={`panana-join-suggest-${r.id}-${aIdx}`}
+                            className="min-w-[220px] flex-1 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-[12px] font-extrabold text-white/75 outline-none placeholder:text-white/25"
+                            placeholder="예: 김희진"
+                          />
+                          {nameSuggestions.length ? (
+                            <datalist id={`panana-join-suggest-${r.id}-${aIdx}`}>
+                              {nameSuggestions.map((n) => (
+                                <option key={n} value={n} />
+                              ))}
+                            </datalist>
+                          ) : null}
+                        </ActionRow>
+                      ) : null}
+
+                      {a.type === "leave" ? (
+                        <ActionRow label="결과 유형: 참여자 퇴장 (leave)">
+                          <input
+                            value={(a as any).name || ""}
+                            onChange={(e) =>
+                              updateRule(r.id, {
+                                then: { actions: r.then.actions.map((x, i) => (i === aIdx ? ({ ...a, name: e.target.value } as any) : x)) },
+                              })
+                            }
+                            list={`panana-leave-suggest-${r.id}-${aIdx}`}
+                            className="min-w-[220px] flex-1 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-[12px] font-extrabold text-white/75 outline-none placeholder:text-white/25"
+                            placeholder="예: 김희진"
+                          />
+                          {nameSuggestions.length ? (
+                            <datalist id={`panana-leave-suggest-${r.id}-${aIdx}`}>
+                              {nameSuggestions.map((n) => (
+                                <option key={n} value={n} />
+                              ))}
+                            </datalist>
+                          ) : null}
+                        </ActionRow>
+                      ) : null}
+
                       <div className="mt-2 flex justify-end">
                         <button
                           type="button"
@@ -325,13 +505,42 @@ export function TriggerRuleBuilder({
                     </div>
                   ))}
 
-                  <button
-                    type="button"
-                    className="w-full rounded-xl border border-dashed border-white/15 bg-white/[0.01] px-4 py-3 text-[12px] font-extrabold text-white/55 hover:bg-white/[0.03]"
-                    onClick={() => updateRule(r.id, { then: { actions: [...r.then.actions, { type: "variable_mod", var: "affection", op: "+", value: 1 }] } })}
-                  >
-                    + 액션 추가
-                  </button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      className="w-full rounded-xl border border-dashed border-white/15 bg-white/[0.01] px-4 py-3 text-[12px] font-extrabold text-white/55 hover:bg-white/[0.03]"
+                      onClick={() =>
+                        updateRule(r.id, { then: { actions: [...r.then.actions, { type: "system_message", text: "" }] } })
+                      }
+                    >
+                      + 시스템 메시지
+                    </button>
+                    <button
+                      type="button"
+                      className="w-full rounded-xl border border-dashed border-white/15 bg-white/[0.01] px-4 py-3 text-[12px] font-extrabold text-white/55 hover:bg-white/[0.03]"
+                      onClick={() =>
+                        updateRule(r.id, {
+                          then: { actions: [...r.then.actions, { type: "variable_mod", var: "affection", op: "+", value: 1 }] },
+                        })
+                      }
+                    >
+                      + 변수 변경
+                    </button>
+                    <button
+                      type="button"
+                      className="w-full rounded-xl border border-dashed border-white/15 bg-white/[0.01] px-4 py-3 text-[12px] font-extrabold text-white/55 hover:bg-white/[0.03]"
+                      onClick={() => updateRule(r.id, { then: { actions: [...r.then.actions, { type: "join", name: "" }] } })}
+                    >
+                      + 참여자 합류
+                    </button>
+                    <button
+                      type="button"
+                      className="w-full rounded-xl border border-dashed border-white/15 bg-white/[0.01] px-4 py-3 text-[12px] font-extrabold text-white/55 hover:bg-white/[0.03]"
+                      onClick={() => updateRule(r.id, { then: { actions: [...r.then.actions, { type: "leave", name: "" }] } })}
+                    >
+                      + 참여자 퇴장
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

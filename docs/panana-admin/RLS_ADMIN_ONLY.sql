@@ -33,6 +33,7 @@ using (user_id = auth.uid() and active = true);
 alter table public.panana_categories enable row level security;
 alter table public.panana_characters enable row level security;
 alter table public.panana_character_categories enable row level security;
+alter table public.panana_character_posts enable row level security;
 alter table public.panana_home_hero_cards enable row level security;
 alter table public.panana_notices enable row level security;
 alter table public.panana_billing_products enable row level security;
@@ -45,6 +46,7 @@ alter table public.panana_site_settings enable row level security;
 drop policy if exists "panana_categories_public_read" on public.panana_categories;
 drop policy if exists "panana_characters_public_read" on public.panana_characters;
 drop policy if exists "panana_character_categories_public_read" on public.panana_character_categories;
+drop policy if exists "panana_character_posts_public_read" on public.panana_character_posts;
 drop policy if exists "panana_home_hero_cards_public_read" on public.panana_home_hero_cards;
 drop policy if exists "panana_notices_public_read_published" on public.panana_notices;
 drop policy if exists "panana_billing_products_public_read" on public.panana_billing_products;
@@ -72,6 +74,12 @@ with check (exists (select 1 from public.panana_admin_users a where a.user_id = 
 drop policy if exists "panana_character_categories_admin_all" on public.panana_character_categories;
 create policy "panana_character_categories_admin_all"
 on public.panana_character_categories for all
+using (exists (select 1 from public.panana_admin_users a where a.user_id = auth.uid() and a.active = true))
+with check (exists (select 1 from public.panana_admin_users a where a.user_id = auth.uid() and a.active = true));
+
+drop policy if exists "panana_character_posts_admin_all" on public.panana_character_posts;
+create policy "panana_character_posts_admin_all"
+on public.panana_character_posts for all
 using (exists (select 1 from public.panana_admin_users a where a.user_id = auth.uid() and a.active = true))
 with check (exists (select 1 from public.panana_admin_users a where a.user_id = auth.uid() and a.active = true));
 

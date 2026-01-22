@@ -73,13 +73,13 @@ export function ProfileImageClient({ character }: { character: CharacterProfile 
       </header>
 
       <main className="mx-auto w-full max-w-[420px] px-0 pb-10 pt-2">
-        <div className="w-full bg-black/30">
+        <div className="w-full bg-black/40">
           {src ? (
-            <div className="relative aspect-[4/5] w-full">
+            <div className="relative aspect-[4/3] w-full">
               <Image src={src} alt={`${character.name} 프로필 이미지`} fill className="object-cover" priority />
             </div>
           ) : (
-            <div className="aspect-[4/5] w-full bg-[radial-gradient(1000px_420px_at_30%_20%,rgba(255,77,167,0.20),transparent_55%),radial-gradient(900px_380px_at_70%_70%,rgba(255,255,255,0.10),transparent_55%),linear-gradient(135deg,rgba(255,255,255,0.10),rgba(255,255,255,0.02))]" />
+            <div className="aspect-[4/3] w-full bg-[radial-gradient(1000px_420px_at_30%_20%,rgba(255,77,167,0.20),transparent_55%),radial-gradient(900px_380px_at_70%_70%,rgba(255,255,255,0.10),transparent_55%),linear-gradient(135deg,rgba(255,255,255,0.10),rgba(255,255,255,0.02))]" />
           )}
         </div>
       </main>

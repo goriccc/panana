@@ -6,9 +6,6 @@ export type StudioCharacterSummary = {
   updatedAt: string; // ISO date
 };
 
-export const studioCharacters: StudioCharacterSummary[] = [
-  { id: "guide", name: "가이드", genre: "로판남주", status: "draft", updatedAt: "2026-01-21" },
-  { id: "seol-a", name: "김설아", genre: "현대", status: "published", updatedAt: "2026-01-20" },
-  { id: "gyemnam", name: "가족자것입은게겐남", genre: "코미디", status: "draft", updatedAt: "2026-01-18" },
-];
+// NOTE: Studio는 DB 기반으로 동작합니다. 더미 데이터는 혼동을 유발하므로 비웁니다.
+export const studioCharacters: StudioCharacterSummary[] = [];
 

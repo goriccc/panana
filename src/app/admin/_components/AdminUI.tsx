@@ -53,7 +53,7 @@ export function AdminInput({
   onChange,
   placeholder,
 }: {
-  label: string;
+  label: React.ReactNode;
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
@@ -78,7 +78,7 @@ export function AdminTextarea({
   placeholder,
   rows = 6,
 }: {
-  label: string;
+  label: React.ReactNode;
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;

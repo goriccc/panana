@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useStudioStore } from "@/lib/studio/store";
+import { studioGetCharacter, studioSavePromptPayload } from "@/lib/studio/db";
 
 function FieldRow({
   checked,
@@ -33,6 +34,8 @@ function FieldRow({
 export function AuthorNoteTab({ characterId }: { characterId: string }) {
   const prompt = useStudioStore((s) => s.getPrompt(characterId));
   const setPrompt = useStudioStore((s) => s.setPrompt);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   const author = prompt.author;
   const persist = (nextAuthor: typeof author) => {
@@ -85,11 +88,31 @@ export function AuthorNoteTab({ characterId }: { characterId: string }) {
           <button
             type="button"
             className="rounded-xl bg-white/[0.06] px-4 py-3 text-[12px] font-extrabold text-white/80 ring-1 ring-white/10 hover:bg-white/[0.08]"
-            onClick={() => alert("저장(더미) 완료")}
+            disabled={saving}
+            onClick={async () => {
+              setErr(null);
+              setSaving(true);
+              try {
+                const c = await studioGetCharacter(characterId);
+                if (!c) throw new Error("캐릭터를 찾을 수 없어요.");
+                const current = useStudioStore.getState().getPrompt(characterId);
+                await studioSavePromptPayload({
+                  projectId: c.project_id,
+                  characterId,
+                  payload: { system: current.system, author: current.author, meta: current.meta },
+                  status: "draft",
+                });
+              } catch (e: any) {
+                setErr(e?.message || "저장에 실패했어요.");
+              } finally {
+                setSaving(false);
+              }
+            }}
           >
-            저장
+            {saving ? "저장 중..." : "저장"}
           </button>
         </div>
+        {err ? <div className="mt-3 text-[12px] font-semibold text-[#ff9aa1]">{err}</div> : null}
       </div>
     </div>
   );

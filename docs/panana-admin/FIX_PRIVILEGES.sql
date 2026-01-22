@@ -10,6 +10,7 @@ grant usage on schema public to authenticated;
 grant select, insert, update, delete on table public.panana_categories to authenticated;
 grant select, insert, update, delete on table public.panana_characters to authenticated;
 grant select, insert, update, delete on table public.panana_character_categories to authenticated;
+grant select, insert, update, delete on table public.panana_character_posts to authenticated;
 grant select, insert, update, delete on table public.panana_home_hero_cards to authenticated;
 grant select, insert, update, delete on table public.panana_notices to authenticated;
 grant select, insert, update, delete on table public.panana_billing_products to authenticated;
