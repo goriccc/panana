@@ -113,6 +113,7 @@ export function MyPageClient() {
   const [pananaHandle, setPananaHandle] = useState<string>("");
   const { data: session, status } = useSession();
   const loggedIn = status === "authenticated";
+  const localIdt = useMemo(() => ensurePananaIdentity(), []);
   const avatarUrl = useMemo(() => {
     const custom = String((session as any)?.profileImageUrl || "").trim();
     const providerImg = String((session as any)?.user?.image || "").trim();
@@ -140,7 +141,7 @@ export function MyPageClient() {
         const snick = String((session as any)?.nickname || "").trim();
         const sname = String((session as any)?.user?.name || "").trim();
         const semail = String((session as any)?.user?.email || "").trim();
-        const fallback = pn || snick || sname || semail;
+        const fallback = pn || snick || sname || semail || String(localIdt.nickname || "").trim();
         if (fallback) setNickname(fallback);
       }
     };
@@ -186,8 +187,20 @@ export function MyPageClient() {
                 )}
               </div>
               <div className="min-w-0">
-                <div className="text-[14px] font-bold text-white/85">{nickname || data.name}</div>
-                <div className="mt-1 text-[12px] font-semibold text-white/45">{pananaHandle || data.handle}</div>
+                <div className="text-[14px] font-bold text-white/85">
+                  {nickname ? (
+                    nickname
+                  ) : (
+                    <span className="inline-block h-[14px] w-[110px] animate-pulse rounded bg-white/10 align-middle" aria-hidden="true" />
+                  )}
+                </div>
+                <div className="mt-1 text-[12px] font-semibold text-white/45">
+                  {pananaHandle ? (
+                    pananaHandle
+                  ) : (
+                    <span className="inline-block h-[12px] w-[90px] animate-pulse rounded bg-white/10 align-middle" aria-hidden="true" />
+                  )}
+                </div>
               </div>
             </div>
 

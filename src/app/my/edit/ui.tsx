@@ -24,7 +24,7 @@ function BackIcon() {
 
 export function MyEditClient() {
   const data = useMemo(() => myPageDummy, []);
-  const [name, setName] = useState(data.name);
+  const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -42,6 +42,11 @@ export function MyEditClient() {
       else {
         const pn = String((session as any)?.pananaNickname || "").trim();
         if (pn) setName(pn);
+        else {
+          const idt = ensurePananaIdentity();
+          const ln = String(idt.nickname || "").trim();
+          if (ln && !name) setName(ln);
+        }
       }
     })();
     return () => {
