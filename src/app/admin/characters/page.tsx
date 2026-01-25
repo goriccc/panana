@@ -25,6 +25,7 @@ type CharacterRow = {
   profileImageUrl: string;
   postsCount: number;
   studioCharacterId: string | null;
+  safetySupported: boolean; // 세이프티 지원(성인 대화 가능)
   active: boolean;
   categoryIds: string[]; // 홈 카테고리 노출 연결 (FK)
   adminNotes: string; // 어드민 내부 운영 메모(비공개)
@@ -61,6 +62,7 @@ export default function AdminCharactersPage() {
   const [studioCharacterId, setStudioCharacterId] = useState<string>("");
   const [categoryIds, setCategoryIds] = useState<string[]>([]);
   const [notes, setNotes] = useState("");
+  const [safetySupported, setSafetySupported] = useState(false);
 
   const [studioPreview, setStudioPreview] = useState<{
     character?: {
@@ -86,6 +88,7 @@ export default function AdminCharactersPage() {
 
   const [uploading, setUploading] = useState(false);
   const [missingAdminNotesColumn, setMissingAdminNotesColumn] = useState(false);
+  const [missingSafetySupportedColumn, setMissingSafetySupportedColumn] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
@@ -145,8 +148,26 @@ export default function AdminCharactersPage() {
     setErr(null);
     setLoading(true);
     try {
-      const baseCharSelect =
-        "id, slug, name, tagline, handle, hashtags, mbti, intro_title, intro_lines, mood_title, mood_lines, followers_count, following_count, profile_image_url, posts_count, studio_character_id, active";
+      const baseCharSelect = [
+        "id",
+        "slug",
+        "name",
+        "tagline",
+        "handle",
+        "hashtags",
+        "mbti",
+        "intro_title",
+        "intro_lines",
+        "mood_title",
+        "mood_lines",
+        "followers_count",
+        "following_count",
+        "profile_image_url",
+        "posts_count",
+        "studio_character_id",
+        "active",
+        ...(missingSafetySupportedColumn ? [] : ["safety_supported"]),
+      ].join(", ");
       const charSelect = missingAdminNotesColumn ? baseCharSelect : `${baseCharSelect}, admin_notes`;
 
       const [catRes, charRes0, mapRes, studioCharRes, studioProjRes] = await Promise.all([
@@ -171,17 +192,46 @@ export default function AdminCharactersPage() {
       if (charRes.error) {
         const msg = String((charRes.error as any)?.message || "");
         const code = String((charRes.error as any)?.code || "");
-        const isMissing =
+        const missingAdminNotes =
           code === "42703" ||
           msg.includes("admin_notes") ||
-          msg.includes("column") && msg.includes("admin_notes") && msg.includes("does not exist");
-        if (isMissing && !missingAdminNotesColumn) {
+          (msg.includes("column") && msg.includes("admin_notes") && msg.includes("does not exist"));
+        const missingSafety =
+          code === "42703" ||
+          msg.includes("safety_supported") ||
+          (msg.includes("column") && msg.includes("safety_supported") && msg.includes("does not exist"));
+
+        if (missingSafety && !missingSafetySupportedColumn) {
+          setMissingSafetySupportedColumn(true);
+          // retry with safety_supported omitted
+          const baseRetry = [
+            "id",
+            "slug",
+            "name",
+            "tagline",
+            "handle",
+            "hashtags",
+            "mbti",
+            "intro_title",
+            "intro_lines",
+            "mood_title",
+            "mood_lines",
+            "followers_count",
+            "following_count",
+            "profile_image_url",
+            "posts_count",
+            "studio_character_id",
+            "active",
+          ].join(", ");
+          const retrySelect = missingAdminNotesColumn ? baseRetry : `${baseRetry}, admin_notes`;
+          const retry = await supabase.from("panana_characters").select(retrySelect).order("updated_at", { ascending: false });
+          if (retry.error) throw retry.error;
+          charRes = retry as any;
+          setErr("DB에 safety_supported 컬럼이 없어요. `docs/panana-admin/MIGRATE_CHARACTER_SAFETY_SUPPORTED.sql` 실행 후 스파이시 지원 캐릭터 설정이 활성화됩니다.");
+        } else if (missingAdminNotes && !missingAdminNotesColumn) {
           setMissingAdminNotesColumn(true);
           // retry without admin_notes
-          const retry = await supabase
-            .from("panana_characters")
-            .select(baseCharSelect)
-            .order("updated_at", { ascending: false });
+          const retry = await supabase.from("panana_characters").select(baseCharSelect).order("updated_at", { ascending: false });
           if (retry.error) throw retry.error;
           charRes = retry as any;
           setErr("DB에 admin_notes 컬럼이 없어요. `docs/panana-admin/MIGRATE_CHARACTER_ADMIN_NOTES.sql`을 실행하면 메모 저장이 활성화됩니다.");
@@ -220,6 +270,7 @@ export default function AdminCharactersPage() {
         profileImageUrl: r.profile_image_url || "",
         postsCount: Number(r.posts_count || 0),
         studioCharacterId: r.studio_character_id || null,
+        safetySupported: Boolean(r.safety_supported),
         active: Boolean(r.active),
         categoryIds: map.get(r.id) || [],
         adminNotes: r.admin_notes || "",
@@ -267,6 +318,7 @@ export default function AdminCharactersPage() {
       setStudioCharacterId("");
       setCategoryIds([]);
       setNotes("");
+      setSafetySupported(false);
       setStudioPreview(null);
       setStudioAutofilled({});
       return;
@@ -289,6 +341,7 @@ export default function AdminCharactersPage() {
     setStudioCharacterId(selected.studioCharacterId || "");
     setCategoryIds(selected.categoryIds || []);
     setNotes(selected.adminNotes || "");
+    setSafetySupported(Boolean(selected.safetySupported));
     setStudioPreview(null);
     setStudioAutofilled({});
   }, [selectedId, selected]);
@@ -309,6 +362,7 @@ export default function AdminCharactersPage() {
 
       const sc: any = sChar || {};
       const memo = String((sPrompt as any)?.payload?.meta?.operatorMemo || "").trim();
+      const nsfwFilterOff = Boolean((sPrompt as any)?.payload?.author?.nsfwFilterOff);
       setStudioPreview({
         character: sCharErr ? null : (sChar as any),
         operatorMemo: sPromptErr ? "" : memo,
@@ -342,6 +396,12 @@ export default function AdminCharactersPage() {
       if (!tagline.trim() && sc?.tagline) {
         setTagline(String(sc.tagline));
         filled.tagline = true;
+      }
+
+      // 3) 스파이시 지원: Studio prompt의 nsfwFilterOff(성인 전용) → Panana 노출용 safety_supported
+      if (!missingSafetySupportedColumn && !safetySupported && nsfwFilterOff) {
+        setSafetySupported(true);
+        (filled as any).safety = true;
       }
 
       // intro/mood는 어드민 기본값("소개합니다!","요즘 어때?")만 있고 라인이 비어있으면 사실상 미설정으로 보고 채움
@@ -758,6 +818,30 @@ export default function AdminCharactersPage() {
                 rows={4}
               />
 
+              <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                <div className="text-[12px] font-extrabold text-white/70">스파이시(성인 전용) 지원</div>
+                <div className="mt-3 flex items-center justify-between rounded-xl border border-white/10 bg-black/15 px-4 py-3">
+                  <div className="min-w-0">
+                    <div className="text-[12px] font-semibold text-white/70">스파이시 지원 캐릭터로 표시</div>
+                    <div className="mt-1 text-[11px] font-semibold text-white/35">
+                      홈에서 스파이시 토글(ON) 시 이 캐릭터만 노출됩니다.
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={safetySupported}
+                    disabled={missingSafetySupportedColumn}
+                    onChange={(e) => setSafetySupported(e.target.checked)}
+                    className="h-4 w-4 accent-[#ff4da7]"
+                  />
+                </div>
+                {missingSafetySupportedColumn ? (
+                  <div className="mt-2 text-[11px] font-semibold text-[#ff9aa1]">
+                    DB 컬럼이 없어서 비활성화돼요. `docs/panana-admin/MIGRATE_CHARACTER_SAFETY_SUPPORTED.sql` 실행 후 다시 시도해주세요.
+                  </div>
+                ) : null}
+              </div>
+
               <div className="flex gap-2">
                 <AdminButton
                   onClick={async () => {
@@ -780,6 +864,7 @@ export default function AdminCharactersPage() {
                         profile_image_url: profileImageUrl.trim(),
                         posts_count: Number(postsCount) || 0,
                         studio_character_id: studioCharacterId || null,
+                        ...(missingSafetySupportedColumn ? {} : { safety_supported: Boolean(safetySupported) }),
                       };
                       const patchWithNotes = { ...patch, admin_notes: notes.trim() || null } as any;
 

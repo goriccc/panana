@@ -3,6 +3,31 @@
 import { useMemo, useState } from "react";
 import { useStudioStore } from "@/lib/studio/store";
 import { studioGetCharacter, studioSavePromptPayload } from "@/lib/studio/db";
+import { getBrowserSupabase } from "@/lib/supabase/browser";
+
+async function mustAccessToken() {
+  const supabase = getBrowserSupabase();
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  const token = data.session?.access_token || "";
+  if (!token) throw new Error("로그인이 필요해요.");
+  return token;
+}
+
+async function syncSafetySupported(args: { studioCharacterId: string; nsfwFilterOff: boolean }) {
+  const token = await mustAccessToken();
+  const res = await fetch("/api/studio/characters/safety-sync", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(args),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data?.ok) throw new Error(data?.error || "스파이시 동기화에 실패했어요.");
+  return data as { ok: true; updated: number };
+}
 
 function FieldRow({
   checked,
@@ -36,6 +61,7 @@ export function AuthorNoteTab({ characterId }: { characterId: string }) {
   const setPrompt = useStudioStore((s) => s.setPrompt);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [syncInfo, setSyncInfo] = useState<{ ok: boolean; message: string } | null>(null);
 
   const author = prompt.author;
   const persist = (nextAuthor: typeof author) => {
@@ -91,6 +117,7 @@ export function AuthorNoteTab({ characterId }: { characterId: string }) {
             disabled={saving}
             onClick={async () => {
               setErr(null);
+              setSyncInfo(null);
               setSaving(true);
               try {
                 const c = await studioGetCharacter(characterId);
@@ -102,6 +129,25 @@ export function AuthorNoteTab({ characterId }: { characterId: string }) {
                   payload: { system: current.system, author: current.author, meta: current.meta },
                   status: "draft",
                 });
+                // Studio의 "NSFW 필터 해제" 설정을 Panana 노출 캐릭터(safety_supported)로 자동 동기화
+                // - 어드민을 거치지 않아도 홈 스파이시 필터/채팅 허용이 즉시 반영되게 한다.
+                try {
+                  const r = await syncSafetySupported({
+                    studioCharacterId: characterId,
+                    nsfwFilterOff: Boolean(current.author?.nsfwFilterOff),
+                  });
+                  if (r.updated <= 0) {
+                    setSyncInfo({
+                      ok: false,
+                      message:
+                        "스파이시 동기화: 적용 0건 (이 Studio 캐릭터가 어드민 `캐릭터 관리`의 홈 노출 캐릭터(panana_characters)와 아직 연결되지 않았을 수 있어요.)",
+                    });
+                  } else {
+                    setSyncInfo({ ok: true, message: `스파이시 동기화 완료 (${r.updated}건)` });
+                  }
+                } catch (e: any) {
+                  setSyncInfo({ ok: false, message: `스파이시 동기화 실패: ${e?.message || "알 수 없는 오류"}` });
+                }
               } catch (e: any) {
                 setErr(e?.message || "저장에 실패했어요.");
               } finally {
@@ -113,6 +159,11 @@ export function AuthorNoteTab({ characterId }: { characterId: string }) {
           </button>
         </div>
         {err ? <div className="mt-3 text-[12px] font-semibold text-[#ff9aa1]">{err}</div> : null}
+        {syncInfo ? (
+          <div className={`mt-2 text-[12px] font-semibold ${syncInfo.ok ? "text-white/55" : "text-[#ff9aa1]"}`}>
+            {syncInfo.message}
+          </div>
+        ) : null}
       </div>
     </div>
   );

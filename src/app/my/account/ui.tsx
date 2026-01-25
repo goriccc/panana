@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { TopBar } from "@/components/TopBar";
 import { useSession } from "next-auth/react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { fetchMyAccountInfo, type Gender } from "@/lib/pananaApp/accountInfo";
 
 function PencilIcon() {
   return (
@@ -27,6 +28,39 @@ function PencilIcon() {
 
 export function AccountClient() {
   const { data: session, status } = useSession();
+  const [birth, setBirth] = useState<string | null>(null);
+  const [gender, setGender] = useState<Gender | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const info = await fetchMyAccountInfo();
+      if (!alive || !info) return;
+      setBirth(info.birth);
+      setGender(info.gender);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const birthText = useMemo(() => {
+    const v = String(birth || "");
+    if (v.length !== 8) return "—";
+    const y = v.slice(0, 4);
+    const m = v.slice(4, 6);
+    const d = v.slice(6, 8);
+    return `${y}년 ${Number(m)}월 ${Number(d)}일`;
+  }, [birth]);
+
+  const genderText = useMemo(() => {
+    if (!gender) return "—";
+    if (gender === "female") return "여성";
+    if (gender === "male") return "남성";
+    if (gender === "both") return "둘 다";
+    return "공개 안 함";
+  }, [gender]);
+
   const providerLabel = useMemo(() => {
     const p = String((session as any)?.provider || "").toLowerCase();
     if (p === "google") return "구글";
@@ -63,11 +97,11 @@ export function AccountClient() {
 
           <div className="flex items-center justify-between px-5 py-5">
             <div className="text-[13px] font-semibold text-white/70">생년월일</div>
-            <div className="text-[13px] font-semibold text-white/60">2000년 1월 1일</div>
+            <div className="text-[13px] font-semibold text-white/60">{birthText}</div>
           </div>
           <div className="flex items-center justify-between px-5 py-5">
             <div className="text-[13px] font-semibold text-white/70">성별</div>
-            <div className="text-[13px] font-semibold text-white/60">남성</div>
+            <div className="text-[13px] font-semibold text-white/60">{genderText}</div>
           </div>
 
           <div className="border-t border-white/10" />

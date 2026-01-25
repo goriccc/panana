@@ -42,7 +42,7 @@ grant select (id, slug, title, sort_order, active) on table public.panana_catego
 grant select (
   id, slug, name, tagline, profile_image_url, posts_count, active,
   handle, hashtags, mbti, intro_title, intro_lines, mood_title, mood_lines,
-  followers_count, following_count, studio_character_id, updated_at
+  followers_count, following_count, studio_character_id, safety_supported, updated_at
 ) on table public.panana_characters to anon, authenticated;
 
 -- admin_notes 같은 내부 컬럼은 권한을 주지 않습니다.
@@ -113,7 +113,8 @@ select
   mood_lines,
   followers_count,
   following_count,
-  studio_character_id
+  studio_character_id,
+  safety_supported
 from public.panana_characters
 where active = true
 order by updated_at desc;
@@ -132,7 +133,8 @@ select
   ch.name as title,
   ch.tagline as description,
   ch.hashtags as tags,
-  nullif(ch.profile_image_url,'') as character_profile_image_url
+  nullif(ch.profile_image_url,'') as character_profile_image_url,
+  ch.safety_supported as safety_supported
 from public.panana_character_categories cc
 join public.panana_categories c on c.id = cc.category_id
 join public.panana_characters ch on ch.id = cc.character_id

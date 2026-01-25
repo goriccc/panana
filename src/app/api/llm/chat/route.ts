@@ -33,6 +33,8 @@ const BodySchema = z.object({
   sceneId: z.string().min(1).optional(),
   // 프론트 UX 옵션: 응답 길이를 짧게(2~3문장) 유도
   concise: z.boolean().optional(),
+  // 홈 "스파이시" 토글이 켜졌을 때 성인 대화 허용을 요청(캐릭터가 지원할 때만 서버가 허용)
+  allowUnsafe: z.boolean().optional(),
   // optional overrides (otherwise DB settings used)
   model: z.string().optional(),
   temperature: z.number().min(0).max(1).optional(),
@@ -66,6 +68,13 @@ function getSupabaseServer() {
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !anonKey) throw new Error("Missing Supabase env");
   return createClient(url, anonKey, { auth: { persistSession: false } });
+}
+
+function getSupabaseAdminIfPossible() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceKey) return null;
+  return createClient(url, serviceKey, { auth: { persistSession: false } });
 }
 
 async function loadSettings(provider: "anthropic" | "gemini" | "deepseek") {
@@ -282,15 +291,25 @@ async function callDeepSeek(args: {
 
 async function loadPananaCharacterBySlug(slug: string) {
   const supabase = getSupabaseServer();
-  const { data, error } = await supabase
-    .from("panana_public_characters_v")
-    .select(
-      "slug, name, handle, hashtags, mbti, intro_title, intro_lines, mood_title, mood_lines, studio_character_id"
-    )
-    .eq("slug", slug)
-    .maybeSingle();
-  if (error) throw error;
-  return data as
+  // 하위호환: safety_supported 컬럼/뷰가 아직 없을 수 있음 → fallback select
+  const trySelect = async (withSafety: boolean) => {
+    const select = withSafety
+      ? "slug, name, handle, hashtags, mbti, intro_title, intro_lines, mood_title, mood_lines, studio_character_id, safety_supported"
+      : "slug, name, handle, hashtags, mbti, intro_title, intro_lines, mood_title, mood_lines, studio_character_id";
+    return await supabase.from("panana_public_characters_v").select(select).eq("slug", slug).maybeSingle();
+  };
+
+  const first = await trySelect(true);
+  if (first.error) {
+    const msg = String((first.error as any)?.message || "");
+    if (msg.includes("safety_supported")) {
+      const retry = await trySelect(false);
+      if (retry.error) throw retry.error;
+      return retry.data as any;
+    }
+    throw first.error;
+  }
+  return first.data as
     | {
         slug: string;
         name: string;
@@ -302,6 +321,7 @@ async function loadPananaCharacterBySlug(slug: string) {
         mood_title: string | null;
         mood_lines: string[] | null;
         studio_character_id: string | null;
+        safety_supported?: boolean | null;
       }
     | null;
 }
@@ -360,7 +380,7 @@ function composeSystemPrompt(args: {
   const p = args.panana;
   const name = p?.name || "캐릭터";
   const handle = p?.handle ? (p.handle.startsWith("@") ? p.handle : `@${p.handle}`) : "";
-  const tags = (p?.hashtags || []).map((t) => (t.startsWith("#") ? t : `#${t}`)).join(" ");
+  const tags = (p?.hashtags || []).map((t: string) => (t.startsWith("#") ? t : `#${t}`)).join(" ");
   const mbti = p?.mbti ? `MBTI: ${p.mbti}` : "";
 
   const s = args.studioPrompt?.system || {};
@@ -389,7 +409,8 @@ function composeSystemPrompt(args: {
   const authorNote = a?.authorNote ? String(a.authorNote) : "";
 
   return [
-    `너는 "${name}" 캐릭터로서 유저와 1:1 채팅을 한다.`,
+    `너는 "${name}" 캐릭터로서 "{{call_sign}}"(상대방)과 1:1 채팅을 한다.`,
+    `상대방을 "유저"라고 부르지 말고, 반드시 "{{call_sign}}" 또는 상황에 맞는 호칭으로 부른다.`,
     handle || tags || mbti ? `프로필: ${[handle, tags, mbti].filter(Boolean).join("  ")}` : null,
     s?.personalitySummary ? `성격/정체성:\n${String(s.personalitySummary)}` : null,
     s?.speechGuide ? `말투 가이드:\n${String(s.speechGuide)}` : null,
@@ -428,7 +449,9 @@ export async function POST(req: Request) {
     const temperature = body.temperature ?? settings?.temperature ?? 0.7;
     const maxTokens = body.max_tokens ?? settings?.max_tokens ?? 1024;
     const topP = body.top_p ?? settings?.top_p ?? 1.0;
-    const allowUnsafe = settings?.nsfw_filter === false;
+    // allowUnsafe 기본값은 운영 설정(nsfw_filter=false)이며,
+    // 유저가 홈에서 스파이시 토글을 켠 경우(body.allowUnsafe=true)라도 캐릭터가 safety_supported=true일 때만 허용한다.
+    let allowUnsafe = settings?.nsfw_filter === false;
 
     // characterSlug가 있으면: Studio(저작) + Panana(노출) 정보를 로드해 system prompt를 강화
     let system = body.messages.find((m) => m.role === "system")?.content;
@@ -439,6 +462,9 @@ export async function POST(req: Request) {
     if (body.characterSlug) {
       try {
         const panana = await loadPananaCharacterBySlug(body.characterSlug);
+        if (body.allowUnsafe && panana && Boolean((panana as any)?.safety_supported)) {
+          allowUnsafe = true;
+        }
         const studioId = panana?.studio_character_id || null;
         if (studioId) {
           const [studioPrompt, studioLorebook, projectRules, sceneRules, characterRules] = await Promise.all([
@@ -448,6 +474,22 @@ export async function POST(req: Request) {
             body.sceneId ? loadStudioRules({ characterId: studioId, scope: "scene", sceneId: body.sceneId }).catch(() => null) : Promise.resolve(null),
             loadStudioRules({ characterId: studioId, scope: "character" }).catch(() => null),
           ]);
+
+          // Studio 설정(nsfwFilterOff) → Panana 노출 플래그(safety_supported) 자동 동기화
+          // - 홈 스파이시 필터가 DB 플래그를 보므로, 드리프트가 있으면 서버에서 바로 맞춰준다.
+          const nsfwFilterOff = Boolean((studioPrompt as any)?.author?.nsfwFilterOff);
+          if (body.allowUnsafe && nsfwFilterOff) {
+            allowUnsafe = true;
+          }
+          const currentSafety = Boolean((panana as any)?.safety_supported);
+          if (nsfwFilterOff !== currentSafety) {
+            const sbAdmin = getSupabaseAdminIfPossible();
+            if (sbAdmin) {
+              // eslint-disable-next-line @typescript-eslint/no-floating-promises
+              sbAdmin.from("panana_characters").update({ safety_supported: nsfwFilterOff }).eq("studio_character_id", studioId);
+            }
+          }
+
           const filteredLorebook = filterLorebookRows(studioLorebook as any, body.runtime as any).filter((x: any) => x?.active !== false);
           system = composeSystemPrompt({ panana, studioPrompt, studioLorebook: filteredLorebook });
           // 트리거 실행 순서: 프로젝트(기반) → 씬(상황) → 캐릭터(최종)
@@ -475,6 +517,7 @@ export async function POST(req: Request) {
     }
 
     const nonSystem = body.messages.filter((m) => m.role !== "system");
+    const userTurns = nonSystem.filter((m) => m.role === "user").length;
 
     // ===== Trigger Runtime: rules 평가 → runtime 업데이트 → system events 생성 =====
     const lastUser = [...nonSystem].reverse().find((m) => m.role === "user")?.content || "";
@@ -493,6 +536,15 @@ export async function POST(req: Request) {
       });
       nextChatState = applied.state;
       runtimeEvents = applied.events || [];
+    }
+
+    // ===== UX: 초반(첫 턴) 로어북/합류/획득 같은 시스템 이벤트가 즉시 튀어나오면 몰입이 깨짐 =====
+    // - 상태(state)는 적용하되(events로 반영된 participants/variables 포함),
+    // - 화면 노출/프롬프트 주입용 이벤트는 2턴부터만 보여준다.
+    if (userTurns <= 1 && runtimeEvents.length) {
+      runtimeEvents = runtimeEvents.filter((e) => e.type === "var_delta"); // 첫 턴에는 var 변화도 보통 불필요하지만, 필요 시만 남김
+      // 기본 정책: 첫 턴에는 이벤트를 아예 숨김(가장 자연스러움)
+      runtimeEvents = [];
     }
 
     // ===== runtime 변수 템플릿 치환 (하위호환: 값이 없으면 원문 유지) =====

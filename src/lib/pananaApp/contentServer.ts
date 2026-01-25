@@ -21,6 +21,7 @@ type PublicCategoryCardRow = {
   description: string;
   tags: string[] | null;
   character_profile_image_url: string | null;
+  safety_supported?: boolean | null;
 };
 
 type PublicCharacterRow = {
@@ -52,14 +53,39 @@ export async function fetchHomeCategoriesFromDb(): Promise<Category[] | null> {
   }
 
   // 2) 모든 카드(카테고리-캐릭터 join)
-  const { data: cards, error: cardsErr } = await supabase
-    .from("panana_public_category_cards_v")
-    .select("category_slug, category_title, category_sort_order, item_sort_order, character_slug, author_handle, title, description, tags, character_profile_image_url")
-    .order("category_sort_order", { ascending: true })
-    .order("item_sort_order", { ascending: true });
+  let cards: any[] | null = null;
+  let cardsErr: any = null;
+  {
+    const res = await supabase
+      .from("panana_public_category_cards_v")
+      .select(
+        "category_slug, category_title, category_sort_order, item_sort_order, character_slug, author_handle, title, description, tags, character_profile_image_url, safety_supported"
+      )
+      .order("category_sort_order", { ascending: true })
+      .order("item_sort_order", { ascending: true });
+    cards = res.data as any;
+    cardsErr = res.error;
+  }
+  // 하위호환: safety_supported 컬럼/뷰가 아직 없을 수 있음 → fallback select
   if (cardsErr) {
-    console.error("[contentServer] panana_public_category_cards_v error:", cardsErr);
-    return null;
+    const msg = String(cardsErr?.message || "");
+    if (msg.includes("safety_supported")) {
+      const retry = await supabase
+        .from("panana_public_category_cards_v")
+        .select(
+          "category_slug, category_title, category_sort_order, item_sort_order, character_slug, author_handle, title, description, tags, character_profile_image_url"
+        )
+        .order("category_sort_order", { ascending: true })
+        .order("item_sort_order", { ascending: true });
+      if (retry.error) {
+        console.error("[contentServer] panana_public_category_cards_v error:", retry.error);
+        return null;
+      }
+      cards = retry.data as any;
+    } else {
+      console.error("[contentServer] panana_public_category_cards_v error:", cardsErr);
+      return null;
+    }
   }
 
   const bySlug = new Map<string, ContentCardItem[]>();
@@ -73,6 +99,7 @@ export async function fetchHomeCategoriesFromDb(): Promise<Category[] | null> {
       description: r.description || "",
       tags: (r.tags || []).map((t) => (t.startsWith("#") ? t : `#${t}`)),
       imageUrl: r.character_profile_image_url || undefined,
+      safetySupported: Boolean((r as any)?.safety_supported),
     });
     bySlug.set(r.category_slug, arr);
   });
@@ -96,14 +123,34 @@ export async function fetchCategoryFromDb(slug: string): Promise<Category | null
     return null;
   }
 
-  const { data: cards, error: cardsErr } = await supabase
-    .from("panana_public_category_cards_v")
-    .select("category_slug, item_sort_order, character_slug, author_handle, title, description, tags, character_profile_image_url")
-    .eq("category_slug", slug)
-    .order("item_sort_order", { ascending: true });
+  let cards: any[] | null = null;
+  let cardsErr: any = null;
+  {
+    const res = await supabase
+      .from("panana_public_category_cards_v")
+      .select("category_slug, item_sort_order, character_slug, author_handle, title, description, tags, character_profile_image_url, safety_supported")
+      .eq("category_slug", slug)
+      .order("item_sort_order", { ascending: true });
+    cards = res.data as any;
+    cardsErr = res.error;
+  }
   if (cardsErr) {
-    console.error("[contentServer] panana_public_category_cards_v (by slug) error:", cardsErr);
-    return null;
+    const msg = String(cardsErr?.message || "");
+    if (msg.includes("safety_supported")) {
+      const retry = await supabase
+        .from("panana_public_category_cards_v")
+        .select("category_slug, item_sort_order, character_slug, author_handle, title, description, tags, character_profile_image_url")
+        .eq("category_slug", slug)
+        .order("item_sort_order", { ascending: true });
+      if (retry.error) {
+        console.error("[contentServer] panana_public_category_cards_v (by slug) error:", retry.error);
+        return null;
+      }
+      cards = retry.data as any;
+    } else {
+      console.error("[contentServer] panana_public_category_cards_v (by slug) error:", cardsErr);
+      return null;
+    }
   }
 
   const items: ContentCardItem[] = (cards as any as PublicCategoryCardRow[]).map((r) => ({
@@ -114,6 +161,7 @@ export async function fetchCategoryFromDb(slug: string): Promise<Category | null
     description: r.description || "",
     tags: (r.tags || []).map((t) => (t.startsWith("#") ? t : `#${t}`)),
     imageUrl: r.character_profile_image_url || undefined,
+    safetySupported: Boolean((r as any)?.safety_supported),
   }));
 
   return { slug: String(cat.slug), name: String((cat as any).title), items };
@@ -154,5 +202,19 @@ export async function fetchCharacterProfileFromDb(slug: string): Promise<Charact
     photos: Array.from({ length: Number(r.posts_count || 0) }).map((_, i) => ({ id: `db-${r.slug}-${i + 1}` })),
     sections: [],
   };
+}
+
+// 세이프티(성인 전용) 지원 여부만 빠르게 조회(채팅 라우트 강제 차단 UX에 사용)
+export async function fetchCharacterSafetySupportedFromDb(slug: string): Promise<boolean | null> {
+  const supabase = getSupabaseServer();
+  const { data, error } = await supabase.from("panana_public_characters_v").select("slug, safety_supported").eq("slug", slug).maybeSingle();
+  if (error) {
+    const msg = String((error as any)?.message || "");
+    // 하위호환: 컬럼/뷰가 아직 없을 수 있음
+    if (msg.includes("safety_supported")) return null;
+    console.error("[contentServer] panana_public_characters_v safety_supported error:", error);
+    return null;
+  }
+  return Boolean((data as any)?.safety_supported);
 }
 

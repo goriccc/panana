@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getCharacter } from "@/lib/characters";
-import { fetchCharacterProfileFromDb } from "@/lib/pananaApp/contentServer";
+import { fetchCharacterProfileFromDb, fetchCharacterSafetySupportedFromDb } from "@/lib/pananaApp/contentServer";
 import { CharacterChatClient } from "./ui";
 
 export function generateMetadata({ params }: { params: { slug: string } }): Metadata {
@@ -16,6 +16,7 @@ export function generateMetadata({ params }: { params: { slug: string } }): Meta
 
 export default async function CharacterChatPage({ params }: { params: { slug: string } }) {
   const fromDb = await fetchCharacterProfileFromDb(params.slug).catch(() => null);
+  const safetySupported = await fetchCharacterSafetySupportedFromDb(params.slug).catch(() => null);
   const c = fromDb || getCharacter(params.slug);
   if (!c) notFound();
   return (
@@ -24,6 +25,7 @@ export default async function CharacterChatPage({ params }: { params: { slug: st
       characterSlug={c.slug}
       backHref={`/c/${c.slug}`}
       characterAvatarUrl={(c as any).profileImageUrl || (c as any).profile_image_url || undefined}
+      safetySupported={safetySupported}
     />
   );
 }

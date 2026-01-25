@@ -115,6 +115,7 @@ export function MyPageClient() {
   const [pananaHandle, setPananaHandle] = useState<string>(() => String(localIdt.handle || "").trim().toLowerCase());
   const { data: session, status } = useSession();
   const loggedIn = status === "authenticated";
+  const isMember = Boolean((session as any)?.membershipActive);
   const avatarUrl = useMemo(() => {
     const custom = String((session as any)?.profileImageUrl || "").trim();
     const providerImg = String((session as any)?.user?.image || "").trim();
@@ -260,17 +261,10 @@ export function MyPageClient() {
             >
               로그인하고 더 많은 기능 둘러보기
             </Link>
-
-            <Link
-              href="/my/membership"
-              className="mt-4 block w-full rounded-2xl border border-panana-pink/60 bg-white px-5 py-4 text-center text-[13px] font-extrabold text-panana-pink"
-            >
-              멤버십 가입하고 무제한 이용하기
-            </Link>
           </>
         )}
 
-        {loggedIn ? (
+        {loggedIn && !isMember ? (
           <Link
             href="/my/membership"
             className="mt-4 block w-full rounded-xl border border-panana-pink/60 bg-white px-4 py-3 text-center text-[13px] font-bold text-panana-pink"

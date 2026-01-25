@@ -14,7 +14,17 @@ function resolveUrl(maybePathOrUrl: string) {
   return publicUrlFromStoragePath(maybePathOrUrl);
 }
 
-function AirportMediaBlock({ image, video }: { image: string; video: string }) {
+function AirportMediaBlock({
+  image,
+  video,
+  showNext,
+  onNext,
+}: {
+  image: string;
+  video: string;
+  showNext: boolean;
+  onNext: () => void;
+}) {
   if (!image && !video) {
     return <IllustrationPlaceholder label="panana AIRPORT" className="mt-5 h-[240px] w-full" />;
   }
@@ -82,14 +92,27 @@ function AirportMediaBlock({ image, video }: { image: string; video: string }) {
             preload="auto"
           />
         ) : null}
+
+        {showNext ? (
+          <button
+            type="button"
+            aria-label="다음 썸네일"
+            onClick={onNext}
+            className="absolute right-3 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-black/35 ring-1 ring-white/15 hover:bg-black/45"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path d="M10 6l6 6-6 6" stroke="rgba(255,255,255,0.8)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        ) : null}
       </div>
     </div>
   );
 }
 
 export default function AirportStartClient() {
-  const [imagePath, setImagePath] = useState("");
-  const [videoPath, setVideoPath] = useState("");
+  const [sets, setSets] = useState<Array<{ image: string; video: string }>>([]);
+  const [idx, setIdx] = useState(0);
   const [intro, setIntro] = useState<string | null>(null);
 
   const fallbackIntro = useMemo(
@@ -108,9 +131,9 @@ export default function AirportStartClient() {
 
         if (!alive) return;
 
-        const first = sets.find((s) => Boolean(s.image_path || s.video_path)) || sets[0];
-        setImagePath(first?.image_path || "");
-        setVideoPath(first?.video_path || "");
+        const normalized = (sets || []).map((s) => ({ image: s.image_path || "", video: s.video_path || "" })).filter((s) => s.image || s.video);
+        setSets(normalized);
+        setIdx(0);
         setIntro(copy.map((c) => c.text).filter(Boolean).join("\n") || null);
       } catch {
         // 네트워크/권한 문제면 더미로 유지
@@ -120,6 +143,8 @@ export default function AirportStartClient() {
       alive = false;
     };
   }, []);
+
+  const current = sets[idx] || { image: "", video: "" };
 
   return (
     <>
@@ -131,7 +156,12 @@ export default function AirportStartClient() {
         <SurfaceCard className="px-6 py-6" variant="outglow">
           <div className="text-center text-[18px] font-semibold tracking-[-0.01em] text-white/90">파나나 공항</div>
 
-          <AirportMediaBlock image={imagePath} video={videoPath} />
+          <AirportMediaBlock
+            image={current.image}
+            video={current.video}
+            showNext={sets.length > 1}
+            onNext={() => setIdx((v) => (sets.length ? (v + 1) % sets.length : 0))}
+          />
 
           <div className="mt-5 whitespace-pre-line text-center text-[13px] leading-[1.45] text-white/60">
             {intro || fallbackIntro}

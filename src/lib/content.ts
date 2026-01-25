@@ -6,6 +6,8 @@ export type ContentCardItem = {
   description: string;
   tags: string[];
   imageUrl?: string;
+  // 스파이시 지원 캐릭터(성인 대화 가능) 여부. 홈 스파이시 토글(ON) 시 필터링에 사용.
+  safetySupported?: boolean;
 };
 
 export type Category = {
@@ -21,6 +23,7 @@ const demoItems: ContentCardItem[] = Array.from({ length: 12 }).map((_, i) => ({
   title: "여사친 김설아",
   description: "오랜 소꿉친구에게 갑자기 크리스마스에 고백을 해버렸는데...",
   tags: ["#여사친", "#고백공격"],
+  safetySupported: true,
 }));
 
 export const categories: Category[] = [

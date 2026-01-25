@@ -1,6 +1,6 @@
 import { getBrowserSupabase } from "@/lib/supabase/browser";
 
-export type AirportSection = "immigration" | "complete";
+export type AirportSection = "immigration" | "immigration_chat" | "complete";
 
 export type AirportThumbnailSetRow = {
   id: string;

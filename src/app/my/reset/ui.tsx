@@ -1,15 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { SurfaceCard } from "@/components/SurfaceCard";
 import { TopBar } from "@/components/TopBar";
+import { ensurePananaIdentity } from "@/lib/pananaApp/identity";
 
 function ResetConfirmModal({
   open,
+  title,
+  message,
+  confirmText,
   onClose,
   onConfirm,
 }: {
   open: boolean;
+  title: string;
+  message: string;
+  confirmText: string;
   onClose: () => void;
   onConfirm: () => void;
 }) {
@@ -17,27 +24,25 @@ function ResetConfirmModal({
   return (
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" />
-      <div className="absolute inset-0 grid place-items-center px-6">
-        <SurfaceCard variant="outglow" className="w-full max-w-[520px] p-6">
-          <div className="text-center text-[16px] font-semibold text-white/90">알림</div>
+      <div className="absolute inset-0 grid place-items-center px-3">
+        <SurfaceCard variant="outglow" className="w-[min(420px,calc(100vw-24px))] p-6">
+          <div className="text-center text-[16px] font-semibold text-white/90">{title}</div>
           <div className="mt-4 whitespace-pre-line text-center text-[14px] leading-[1.45] text-white/70">
-            초기화 후에는 다시 되돌릴 수 없어요.
-            {"\n"}
-            정말 다시 시작하시나요?
+            {message}
           </div>
 
           <div className="mt-6 flex gap-4">
             <button
               type="button"
               onClick={onConfirm}
-              className="flex-1 basis-0 rounded-xl bg-white px-4 py-3 text-center text-[15px] font-semibold text-[#0B0C10]"
+              className="flex-1 basis-0 whitespace-nowrap rounded-xl bg-white px-4 py-3 text-center text-[15px] font-semibold text-[#0B0C10]"
             >
-              초기화
+              {confirmText}
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 basis-0 rounded-xl bg-panana-pink px-4 py-3 text-center text-[15px] font-semibold text-white"
+              className="flex-1 basis-0 whitespace-nowrap rounded-xl bg-panana-pink px-4 py-3 text-center text-[15px] font-semibold text-white"
             >
               유지하기
             </button>
@@ -48,8 +53,50 @@ function ResetConfirmModal({
   );
 }
 
+function clearLocalByPrefix(prefix: string) {
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(prefix)) keys.push(k);
+    }
+    for (const k of keys) localStorage.removeItem(k);
+  } catch {
+    // ignore
+  }
+}
+
+function clearLocalChatData(pananaId?: string) {
+  try {
+    // MY 목록
+    localStorage.removeItem("panana_my_chats_v1");
+  } catch {}
+
+  // 캐릭터별 로컬 대화/런타임
+  clearLocalByPrefix(`panana_chat_history_v1:${String(pananaId || "").trim() || "anon"}:`);
+  clearLocalByPrefix("panana_chat_runtime:");
+}
+
 export function ResetClient() {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState<null | "chat" | "service">(null);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+
+  const modal = useMemo(() => {
+    if (!open) return null;
+    if (open === "chat") {
+      return {
+        title: "대화 내용 초기화",
+        confirmText: "초기화",
+        message: "초기화 후에는 다시 되돌릴 수 없어요.\n정말 모든 대화 내용을 삭제할까요?",
+      };
+    }
+    return {
+      title: "서비스 이용 초기화",
+      confirmText: "완전 초기화",
+      message: "초기화 후에는 다시 되돌릴 수 없어요.\n입국 심사부터 다시 시작할까요?\n(보유한 파나나 포인트는 유지돼요)",
+    };
+  }, [open]);
 
   return (
     <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.10),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">
@@ -57,6 +104,7 @@ export function ResetClient() {
 
       <main className="mx-auto w-full max-w-[420px] px-0 pb-20 pt-2">
         <div className="border-t border-white/10">
+          {status ? <div className="px-5 pt-5 text-[12px] font-semibold text-white/60">{status}</div> : null}
           <div className="flex items-start justify-between gap-4 px-5 py-5">
             <div>
               <div className="text-[14px] font-semibold text-white/80">대화 내용 초기화</div>
@@ -67,7 +115,8 @@ export function ResetClient() {
             <button
               type="button"
               className="shrink-0 whitespace-nowrap text-[13px] font-extrabold text-[#ff4f9a]"
-              onClick={() => setOpen(true)}
+              disabled={busy}
+              onClick={() => setOpen("chat")}
             >
               초기화
             </button>
@@ -87,7 +136,8 @@ export function ResetClient() {
             <button
               type="button"
               className="shrink-0 whitespace-nowrap text-[13px] font-extrabold text-[#ff4f9a]"
-              onClick={() => setOpen(true)}
+              disabled={busy}
+              onClick={() => setOpen("service")}
             >
               초기화
             </button>
@@ -98,10 +148,46 @@ export function ResetClient() {
       </main>
 
       <ResetConfirmModal
-        open={open}
-        onClose={() => setOpen(false)}
-        onConfirm={() => {
-          setOpen(false);
+        open={Boolean(open)}
+        title={modal?.title || "알림"}
+        message={modal?.message || ""}
+        confirmText={modal?.confirmText || "확인"}
+        onClose={() => setOpen(null)}
+        onConfirm={async () => {
+          if (!open) return;
+          setStatus(null);
+          setBusy(true);
+          try {
+            const idt = ensurePananaIdentity();
+            const pananaId = String(idt.id || "").trim();
+
+            const res = await fetch("/api/me/reset", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ kind: open, pananaId }),
+            });
+            const data = await res.json().catch(() => null);
+            if (!res.ok || !data?.ok) throw new Error(String(data?.error || "초기화에 실패했어요."));
+
+            // 로컬 정리
+            clearLocalChatData(pananaId);
+            try {
+              localStorage.removeItem("panana_airport_draft");
+            } catch {}
+
+            if (open === "service") {
+              // 서비스 이용 초기화: 입국심사부터 다시
+              window.location.href = "/airport";
+              return;
+            }
+
+            setStatus("대화 내용이 초기화 되었어요.");
+          } catch (e: any) {
+            setStatus(e?.message || "초기화에 실패했어요.");
+          } finally {
+            setBusy(false);
+            setOpen(null);
+          }
         }}
       />
     </div>

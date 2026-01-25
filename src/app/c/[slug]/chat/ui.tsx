@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchMyUserProfile } from "@/lib/pananaApp/userProfiles";
 import { loadRuntime, saveRuntime } from "@/lib/pananaApp/chatRuntime";
@@ -143,18 +144,30 @@ export function CharacterChatClient({
   characterSlug,
   backHref,
   characterAvatarUrl,
+  safetySupported,
 }: {
   characterName: string;
   characterSlug: string;
   backHref: string;
   characterAvatarUrl?: string;
+  safetySupported: boolean | null;
 }) {
+  const router = useRouter();
+  const [safetyBlocked, setSafetyBlocked] = useState(false);
   const [sending, setSending] = useState(false);
   const [showTyping, setShowTyping] = useState(false);
   const [value, setValue] = useState("");
   const [messages, setMessages] = useState<Msg[]>([]);
   const [err, setErr] = useState<string | null>(null);
-  const [userName, setUserName] = useState<string>("");
+  const [userName, setUserName] = useState<string>(() => {
+    // 템플릿 변수(user_name/call_sign) 치환이 항상 되도록: 로컬 identity 닉네임을 즉시 기본값으로 사용
+    try {
+      const idt = ensurePananaIdentity();
+      return String(idt.nickname || "").trim();
+    } catch {
+      return "";
+    }
+  });
   const [varLabels, setVarLabels] = useState<Record<string, string>>({});
   const [rt, setRt] = useState<ChatRuntimeState>({
     variables: {},
@@ -171,6 +184,19 @@ export function CharacterChatClient({
   const typingReqIdRef = useRef<number>(0);
   const typingTimerRef = useRef<number | null>(null);
   const [provider, setProvider] = useState<Provider>("anthropic");
+
+  useEffect(() => {
+    // 스파이시 ON + 캐릭터 미지원이면 강제 차단(직접 URL 접근 방지)
+    let on = false;
+    try {
+      on = localStorage.getItem("panana_safety_on") === "1";
+    } catch {}
+    if (on && safetySupported === false) {
+      setSafetyBlocked(true);
+      const t = window.setTimeout(() => router.replace("/home"), 700);
+      return () => window.clearTimeout(t);
+    }
+  }, [router, safetySupported]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -221,6 +247,7 @@ export function CharacterChatClient({
   };
 
   useEffect(() => {
+    if (safetyBlocked) return;
     let alive = true;
     (async () => {
       const p = await fetchMyUserProfile();
@@ -234,6 +261,7 @@ export function CharacterChatClient({
   }, []);
 
   useEffect(() => {
+    if (safetyBlocked) return;
     let alive = true;
     (async () => {
       const loaded = await loadRuntime(characterSlug);
@@ -246,6 +274,7 @@ export function CharacterChatClient({
   }, [characterSlug]);
 
   useEffect(() => {
+    if (safetyBlocked) return;
     // 이전 대화 불러오기(우선: DB, 실패 시 local fallback)
     (async () => {
       // 0) 서버에서 pananaId 확정(=DB row 존재 보장) 후 그 ID로 저장/로드 통일
@@ -319,6 +348,7 @@ export function CharacterChatClient({
 
   useEffect(() => {
     // 메시지 변경 시 히스토리 저장(로컬 백업 + DB 동기화)
+    if (safetyBlocked) return;
     const pid = pananaIdRef.current || getPananaId();
     if (!pid) return;
     // 너무 잦은 저장 방지(짧은 debounce)
@@ -337,6 +367,7 @@ export function CharacterChatClient({
 
   useEffect(() => {
     // 뒤로가기/탭 종료 등에서 DB 저장 유실 방지
+    if (safetyBlocked) return;
     const onPageHide = () => {
       const pid = pananaIdRef.current;
       if (!pid) return;
@@ -349,10 +380,12 @@ export function CharacterChatClient({
 
   // "MY" 리스트용: 대화 진입만 해도 목록에 기록
   useEffect(() => {
+    if (safetyBlocked) return;
     recordMyChat({ characterSlug, characterName, avatarUrl: characterAvatarUrl });
   }, [characterAvatarUrl, characterName, characterSlug]);
 
   const send = async () => {
+    if (safetyBlocked) return;
     const text = value.trim();
     if (!text) return;
 
@@ -372,9 +405,16 @@ export function CharacterChatClient({
       if (typingReqIdRef.current === reqId) setShowTyping(true);
     }, 650);
     try {
+      const idt = ensurePananaIdentity();
+      const identityNick = String(idt.nickname || "").trim();
+      const resolvedUserName = String(userName || identityNick || idt.handle || "너").trim();
       const runtimeVariables = {
         ...(rt.variables || {}),
-        ...(userName ? { user_name: userName } : {}),
+        // 템플릿 치환용: 서버에서 buildTemplateVars()가 call_sign까지 채울 수 있게 user_name을 항상 보낸다.
+        ...(resolvedUserName ? { user_name: resolvedUserName, call_sign: resolvedUserName } : {}),
+        // 기타 유저 식별자도 변수로 제공(콘텐츠에서 {{user_handle}} 등을 쓸 수 있게)
+        ...(idt.handle ? { user_handle: String(idt.handle), panana_handle: String(idt.handle) } : {}),
+        ...(idt.id ? { panana_id: String(idt.id) } : {}),
       };
       const res = await fetch("/api/llm/chat", {
         method: "POST",
@@ -383,6 +423,15 @@ export function CharacterChatClient({
           provider,
           characterSlug,
           concise: true,
+          // 홈 스파이시 토글(ON)일 때만 성인 대화 허용을 서버에 요청한다.
+          // 실제 허용 여부는 서버에서 캐릭터 safety_supported를 보고 최종 결정한다.
+          allowUnsafe: (() => {
+            try {
+              return localStorage.getItem("panana_safety_on") === "1";
+            } catch {
+              return false;
+            }
+          })(),
           runtime: {
             variables: runtimeVariables,
             chat: {
@@ -461,6 +510,26 @@ export function CharacterChatClient({
   return (
     <div className="h-dvh overflow-hidden bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.12),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white flex flex-col">
       <style>{`@keyframes pananaDot{0%,100%{transform:translateY(0);opacity:.55}50%{transform:translateY(-4px);opacity:1}}`}</style>
+      {safetyBlocked ? (
+        <div className="mx-auto flex w-full max-w-[420px] flex-1 flex-col items-center justify-center px-6 text-center">
+          <div className="w-full rounded-3xl border border-white/10 bg-white/[0.04] px-6 py-6">
+            <div className="text-[16px] font-extrabold tracking-[-0.01em] text-white/90">스파이시 지원 캐릭터만 이용할 수 있어요</div>
+            <div className="mt-2 text-[13px] font-semibold text-white/55">
+              현재 스파이시가 켜져 있어요. 이 캐릭터는 스파이시(성인 전용) 대화를 지원하지 않아서 홈으로 이동할게요.
+            </div>
+            <button
+              type="button"
+              onClick={() => router.replace("/home")}
+              className="mt-5 w-full rounded-2xl bg-[#ff4da7] px-4 py-3 text-[13px] font-extrabold text-white shadow-[0_10px_30px_rgba(255,77,167,0.28)]"
+            >
+              홈으로 이동
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {!safetyBlocked ? (
+        <>
       <header className="mx-auto w-full max-w-[420px] shrink-0 px-5 pt-3">
         <div className="relative flex h-11 items-center">
           <Link href={backHref} aria-label="뒤로가기" className="absolute left-0 p-2">
@@ -560,6 +629,8 @@ export function CharacterChatClient({
           </div>
         </div>
       </div>
+        </>
+      ) : null}
     </div>
   );
 }

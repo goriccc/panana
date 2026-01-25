@@ -1,9 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { TopBar } from "@/components/TopBar";
-
-type Gender = "female" | "male" | "both" | "private";
+import { fetchMyAccountInfo, type Gender, updateMyAccountInfo } from "@/lib/pananaApp/accountInfo";
 
 function RadioRow({
   label,
@@ -38,8 +37,32 @@ function RadioRow({
 }
 
 export function AccountEditClient() {
-  const [birth, setBirth] = useState("19990101");
-  const [gender, setGender] = useState<Gender>("female");
+  const [birth, setBirth] = useState("");
+  const [gender, setGender] = useState<Gender>("private");
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+
+  const prettyBirth = useMemo(() => {
+    const v = String(birth || "");
+    if (v.length !== 8) return "";
+    const y = v.slice(0, 4);
+    const m = v.slice(4, 6);
+    const d = v.slice(6, 8);
+    return `${y}년 ${Number(m)}월 ${Number(d)}일`;
+  }, [birth]);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const info = await fetchMyAccountInfo();
+      if (!alive || !info) return;
+      if (info.birth) setBirth(String(info.birth));
+      if (info.gender) setGender(info.gender);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   return (
     <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.10),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">
@@ -52,6 +75,8 @@ export function AccountEditClient() {
             <div className="mt-2 text-[11px] font-semibold text-white/35">
               캐릭터 추천에 도움이 돼요! 정보는 안전하게 보관돼요!
             </div>
+            {prettyBirth ? <div className="mt-2 text-[11px] font-semibold text-white/45">현재: {prettyBirth}</div> : null}
+            {status ? <div className="mt-2 text-[12px] font-semibold text-[#ff9aa1]">{status}</div> : null}
           </div>
 
           <div className="border-t border-white/10" />
@@ -90,13 +115,24 @@ export function AccountEditClient() {
         <div className="px-5">
           <button
             type="button"
-            className="mt-10 w-full rounded-2xl bg-panana-pink px-5 py-4 text-[15px] font-extrabold text-white"
-            onClick={() => {
-              // TODO: 어드민/백엔드 연동 시 저장 로직으로 대체
-              console.log({ birth, gender });
+            disabled={saving || birth.length !== 8}
+            className="mt-10 w-full rounded-2xl bg-panana-pink px-5 py-4 text-[15px] font-extrabold text-white disabled:opacity-50"
+            onClick={async () => {
+              setStatus(null);
+              setSaving(true);
+              try {
+                const res = await updateMyAccountInfo({ birth, gender });
+                if (!res.ok) {
+                  setStatus(res.error);
+                  return;
+                }
+                setStatus("저장 완료!");
+              } finally {
+                setSaving(false);
+              }
             }}
           >
-            저장하기
+            {saving ? "저장 중..." : "저장하기"}
           </button>
         </div>
       </main>

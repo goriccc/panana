@@ -2,14 +2,32 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { HomeHeader } from "@/components/HomeHeader";
 import { ContentCard } from "@/components/ContentCard";
 import { categories as fallbackCategories, type Category, type ContentCardItem } from "@/lib/content";
 import { loadMyChats, type MyChatItem } from "@/lib/pananaApp/myChats";
+import { useSession } from "next-auth/react";
 
 export function HomeClient({ categories }: { categories?: Category[] }) {
-  const source = categories?.length ? categories : fallbackCategories;
+  const [safetyOn, setSafetyOn] = useState(false);
+  useEffect(() => {
+    try {
+      setSafetyOn(localStorage.getItem("panana_safety_on") === "1");
+    } catch {}
+  }, []);
+
+  const sourceBase = categories?.length ? categories : fallbackCategories;
+  const source = useMemo(() => {
+    if (!safetyOn) return sourceBase;
+    // 스파이시 ON: 스파이시 지원 캐릭터만 노출(홈/찾기 공통)
+    return (sourceBase || [])
+      .map((c) => ({
+        ...c,
+        items: (c.items || []).filter((it) => Boolean((it as any)?.safetySupported)),
+      }))
+      .filter((c) => (c.items || []).length > 0);
+  }, [safetyOn, sourceBase]);
   const topCategories = source.map((c) => ({
     ...c,
     items: c.items.slice(0, 4),
@@ -29,8 +47,15 @@ export function HomeClient({ categories }: { categories?: Category[] }) {
   const [heroList, setHeroList] = useState<ContentCardItem[]>([]);
   const [heroIdx, setHeroIdx] = useState(0);
   const [heroPaused, setHeroPaused] = useState(false);
-  const [activeTab, setActiveTab] = useState<"my" | "home" | "challenge" | "ranking">("home");
+  const [activeTab, setActiveTab] = useState<"my" | "home" | "challenge" | "ranking" | "search">("home");
   const [myChats, setMyChats] = useState<MyChatItem[]>([]);
+  const [myChatsSafetyMap, setMyChatsSafetyMap] = useState<Record<string, boolean>>({});
+  const { status } = useSession();
+  const loggedIn = status === "authenticated";
+
+  const [searchQ, setSearchQ] = useState("");
+  const [searchLimit, setSearchLimit] = useState(8);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const hero = heroList[heroIdx] || null;
 
@@ -79,26 +104,236 @@ export function HomeClient({ categories }: { categories?: Category[] }) {
   }, [heroPaused, heroList.length]);
 
   useEffect(() => {
-    const load = () => {
+    const load = async () => {
       const list = loadMyChats();
       setMyChats(list);
       // 대화한 캐릭터가 있으면 첫 진입에 MY를 자동 선택(요청 UX)
       if (list.length) setActiveTab("my");
+
+      // 각 캐릭터의 safety_supported 정보를 한 번에 가져오기
+      if (list.length > 0) {
+        try {
+          const slugs = list.map((it) => it.characterSlug).filter(Boolean);
+          if (slugs.length > 0) {
+            const res = await fetch("/api/me/characters-safety", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ slugs }),
+            });
+            const data = await res.json().catch(() => null);
+            if (res.ok && data?.ok && data?.results) {
+              setMyChatsSafetyMap(data.results);
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
     };
     load();
-    const onFocus = () => load();
+    const onFocus = () => {
+      load();
+    };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, []);
 
+  const searchCandidates = useMemo(() => {
+    // heroCandidates는 이미 slug dedupe가 되어있음
+    return heroCandidates;
+  }, [heroCandidates]);
+
+  const recommendedTags = useMemo(() => ["#현실연애", "#롤플주의", "#고백도전", "#연애감정", "#환승연애"], []);
+
+  const filtered = useMemo(() => {
+    const q = String(searchQ || "").trim().toLowerCase();
+    if (!q) return [];
+    return searchCandidates.filter((it) => {
+      const title = String(it.title || "").toLowerCase();
+      const desc = String(it.description || "").toLowerCase();
+      const slug = String(it.characterSlug || "").toLowerCase();
+      const tags = Array.isArray(it.tags) ? it.tags.join(" ").toLowerCase() : "";
+      const author = String(it.author || "").toLowerCase();
+      return title.includes(q) || desc.includes(q) || slug.includes(q) || tags.includes(q) || author.includes(q);
+    });
+  }, [searchCandidates, searchQ]);
+
+  useEffect(() => {
+    setSearchLimit(8);
+  }, [searchQ]);
+
+  useEffect(() => {
+    if (activeTab !== "search") return;
+    // 탭 클릭 직후 바로 포커스가 들어가야 스샷처럼 테마 핑크 포커싱이 보인다.
+    window.setTimeout(() => {
+      searchInputRef.current?.focus();
+    }, 0);
+  }, [activeTab]);
+
   return (
-    <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.18),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">
-      <HomeHeader active={activeTab} showMy={myChats.length > 0} onChange={setActiveTab} />
+    <div
+      className={[
+        "min-h-dvh text-white",
+        activeTab === "search"
+          ? "bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.10),transparent_60%),linear-gradient(#07070B,#0B0C10)]"
+          : "bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.18),transparent_60%),linear-gradient(#07070B,#0B0C10)]",
+      ].join(" ")}
+    >
+      <HomeHeader
+        active={activeTab}
+        onChange={setActiveTab}
+        safetyOn={safetyOn}
+        onSafetyChange={(next) => {
+          setSafetyOn(next);
+          try {
+            localStorage.setItem("panana_safety_on", next ? "1" : "0");
+          } catch {}
+        }}
+      />
 
       <main className="mx-auto w-full max-w-[420px] px-5 pb-10 pt-5">
-        {activeTab === "my" && myChats.length ? (
-          <div className="mb-6 overflow-hidden rounded-[16px] border border-white/10 bg-white/[0.03]">
-            {myChats.slice(0, 20).map((it) => (
+        {activeTab === "search" ? (
+          <div className="pb-10">
+            <div
+              className={[
+                "h-[46px] rounded-full border bg-white/[0.03] px-4 ring-1 transition",
+                // 스샷처럼: 기본 상태에서도 테마 핑크가 살짝 보이고, 포커스 때 더 강하게
+                "border-panana-pink/25 ring-panana-pink/15",
+                "focus-within:border-panana-pink/60 focus-within:ring-panana-pink/40",
+              ].join(" ")}
+            >
+              <div className="flex h-full items-center gap-3">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <path
+                    d="M21 21l-4.3-4.3m1.8-5.2a7 7 0 11-14 0 7 7 0 0114 0z"
+                    stroke="rgba(255,77,167,0.92)"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                <input
+                  ref={searchInputRef}
+                  value={searchQ}
+                  onChange={(e) => setSearchQ(e.target.value)}
+                  placeholder="어떤 만남을 찾아볼까요?"
+                  className="h-full w-full bg-transparent text-[14px] font-semibold leading-none text-white/85 outline-none placeholder:text-white/25"
+                />
+                {/* 높이 고정: clear 버튼 공간을 항상 확보 */}
+                <div className="h-7 w-7">
+                  {searchQ.trim() ? (
+                  <button
+                    type="button"
+                    aria-label="검색어 지우기"
+                    onClick={() => setSearchQ("")}
+                    className="grid h-7 w-7 place-items-center rounded-full bg-white/10 ring-1 ring-white/10 hover:bg-white/15"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                      <path d="M18 6L6 18" stroke="rgba(255,255,255,0.75)" strokeWidth="2.4" strokeLinecap="round" />
+                      <path d="M6 6l12 12" stroke="rgba(255,255,255,0.75)" strokeWidth="2.4" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+
+            {!searchQ.trim() ? (
+              <div className="mt-10 text-center">
+                <div className="text-[14px] font-extrabold text-white/80">무엇을 찾을지 고민된다면</div>
+                <div className="mt-2 text-[12px] font-semibold text-white/45">추천 검색어로 시작해보세요!</div>
+
+                <div className="mt-8 space-y-4 text-[12px] font-extrabold text-panana-pink/90">
+                  {recommendedTags.map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setSearchQ(t.replace(/^#/, ""))}
+                      className="block w-full text-center"
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="mt-6 space-y-4">
+                  {filtered.slice(0, searchLimit).map((it) => {
+                    const slug = String(it.characterSlug || "").trim();
+                    const name = String(it.title || "").trim() || slug || "캐릭터";
+                    const tags = Array.isArray(it.tags) ? it.tags.slice(0, 2) : [];
+                    const img = String(it.imageUrl || "").trim();
+                    return (
+                      <div key={slug} className="flex items-center justify-between gap-3">
+                        <div className="flex min-w-0 items-center gap-3">
+                          <Link
+                            href={slug ? `/c/${slug}` : "/home"}
+                            aria-label={`${name} 상세로 이동`}
+                            className="relative h-10 w-10 flex-none overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10"
+                          >
+                            {img ? (
+                              <Image src={img} alt="" fill sizes="40px" className="object-cover" />
+                            ) : (
+                              <Image src="/dumyprofile.png" alt="" fill sizes="40px" className="object-cover opacity-90" />
+                            )}
+                          </Link>
+                          <div className="min-w-0">
+                            <div className="truncate text-[14px] font-semibold text-white/85">{name}</div>
+                            <div className="mt-1 text-[11px] font-semibold text-[#ff8fc3]">
+                              {(tags.length ? tags : ["#추천"]).join("  ")}
+                            </div>
+                          </div>
+                        </div>
+
+                        <Link
+                          href={slug ? `/c/${slug}/chat` : "/home"}
+                          className="flex-none rounded-xl border border-panana-pink/60 bg-white px-3 py-2 text-[12px] font-extrabold text-panana-pink"
+                        >
+                          메세지
+                        </Link>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {filtered.length > searchLimit ? (
+                  <div className="mt-10 text-center">
+                    <button
+                      type="button"
+                      className="text-[13px] font-extrabold text-panana-pink/90"
+                      onClick={() => setSearchLimit((v) => v + 8)}
+                    >
+                      더 보기
+                    </button>
+                  </div>
+                ) : null}
+              </>
+            )}
+          </div>
+        ) : null}
+
+        {activeTab === "my" && !loggedIn ? (
+          <Link
+            href="/login?return=/home"
+            className="mb-4 block w-full rounded-2xl border border-panana-pink/60 bg-white px-5 py-4 text-center text-[13px] font-extrabold text-panana-pink"
+          >
+            로그인하고 메세지 관리기능을 이용하기
+          </Link>
+        ) : null}
+
+        {activeTab === "my" ? (() => {
+          const filtered = myChats.filter((it) => {
+            // 스파이시 OFF(safetyOn=false)일 때: safetySupported가 true인 캐릭터는 숨김
+            if (!safetyOn) {
+              const safetySupported = myChatsSafetyMap[it.characterSlug];
+              if (safetySupported === true) return false;
+            }
+            return true;
+          });
+          return filtered.length > 0 ? (
+            <div className="mb-6 overflow-hidden rounded-[16px] border border-white/10 bg-white/[0.03]">
+              {filtered.slice(0, 20).map((it) => (
               <Link
                 key={it.characterSlug}
                 href={`/c/${it.characterSlug}/chat`}
@@ -122,17 +357,41 @@ export function HomeClient({ categories }: { categories?: Category[] }) {
                   대화
                 </div>
               </Link>
-            ))}
+              ))}
+            </div>
+          ) : null;
+        })() : null}
+
+        {activeTab === "my" && (() => {
+          const filtered = myChats.filter((it) => {
+            if (!safetyOn) {
+              const safetySupported = myChatsSafetyMap[it.characterSlug];
+              if (safetySupported === true) return false;
+            }
+            return true;
+          });
+          return filtered.length === 0 && myChats.length > 0;
+        })() ? (
+          <div className="min-h-[58vh]">
+            <div className="flex h-full min-h-[58vh] flex-col items-center justify-center text-center">
+              <div className="text-[16px] font-extrabold text-white/85">텅 비어있어요!</div>
+              <div className="mt-2 text-[12px] font-semibold text-white/50">마음에 드는 친구와 대화를 시작해보세요!</div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab("home");
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                }}
+                className="mt-8 w-full max-w-[340px] rounded-2xl bg-panana-pink px-6 py-4 text-[14px] font-extrabold text-white"
+              >
+                홈으로 이동하여 대화 상대 찾아보기
+              </button>
+            </div>
           </div>
         ) : null}
 
-        {activeTab === "my" && !myChats.length ? (
-          <div className="mb-6 rounded-[16px] border border-white/10 bg-white/[0.03] px-5 py-6 text-[13px] font-semibold text-white/60">
-            아직 대화한 캐릭터가 없어요. 홈에서 캐릭터를 선택해 대화를 시작해 보세요.
-          </div>
-        ) : null}
-
-        {activeTab === "my" ? null : (
+        {activeTab === "my" || activeTab === "search" ? null : (
           <>
         {/* 상단 큰 카드(향후: 공지/추천/바로가기) */}
         <Link

@@ -67,6 +67,9 @@ export function buildTemplateVars(args: { runtimeVariables?: Record<string, any>
       if (aNum <= 30) vars.call_sign = userName; // 초기엔 이름 그대로
       else if (aNum <= 70) vars.call_sign = userName;
       else vars.call_sign = `${userName}야`;
+    } else {
+      // 값이 비어 {{call_sign}}이 남는 것을 방지(최소한의 기본 호칭)
+      vars.call_sign = "너";
     }
   }
 
