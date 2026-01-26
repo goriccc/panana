@@ -370,8 +370,9 @@ export function HomeClient({ categories }: { categories?: Category[] }) {
             }
             return true;
           });
-          return filtered.length === 0 && myChats.length > 0;
-        })() ? (
+          // 한 번도 대화한 적이 없거나, 필터링 후 비어있을 때 빈 상태 표시
+          return filtered.length === 0;
+        })() && loggedIn ? (
           <div className="min-h-[58vh]">
             <div className="flex h-full min-h-[58vh] flex-col items-center justify-center text-center">
               <div className="text-[16px] font-extrabold text-white/85">텅 비어있어요!</div>
