@@ -321,6 +321,12 @@ export function CharacterChatClient({
     }
   }, [keyboardHeight, composerHeight]);
 
+  useEffect(() => {
+    if (showTyping) {
+      endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+    }
+  }, [showTyping, keyboardHeight, composerHeight]);
+
   const resetTyping = () => {
     typingReqIdRef.current = 0;
     if (typingTimerRef.current != null) {
