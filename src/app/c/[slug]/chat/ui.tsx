@@ -212,6 +212,7 @@ export function CharacterChatClient({
   });
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [composerHeight, setComposerHeight] = useState(0);
   const composerRef = useRef<HTMLDivElement | null>(null);
   
   // 프로필 이미지 미리 로드 (캐시에 저장)
@@ -260,7 +261,6 @@ export function CharacterChatClient({
 
     if (window.visualViewport) {
       window.visualViewport.addEventListener("resize", updateKeyboardHeight, { passive: true });
-      window.visualViewport.addEventListener("scroll", updateKeyboardHeight, { passive: true });
       updateKeyboardHeight();
     } else {
       window.addEventListener("resize", updateKeyboardHeight, { passive: true });
@@ -288,7 +288,6 @@ export function CharacterChatClient({
     return () => {
       if (window.visualViewport) {
         window.visualViewport.removeEventListener("resize", updateKeyboardHeight);
-        window.visualViewport.removeEventListener("scroll", updateKeyboardHeight);
       } else {
         window.removeEventListener("resize", updateKeyboardHeight);
       }
@@ -301,11 +300,42 @@ export function CharacterChatClient({
       }
     };
   }, []);
+
+  // composer 높이 측정 (메시지 영역 패딩 보정)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const el = composerRef.current;
+    if (!el) return;
+
+    const update = () => {
+      setComposerHeight(el.getBoundingClientRect().height);
+    };
+    update();
+
+    let ro: ResizeObserver | null = null;
+    if ("ResizeObserver" in window) {
+      ro = new ResizeObserver(() => update());
+      ro.observe(el);
+    } else {
+      window.addEventListener("resize", update);
+    }
+
+    return () => {
+      if (ro) ro.disconnect();
+      else window.removeEventListener("resize", update);
+    };
+  }, []);
   
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages.length]);
+
+  useEffect(() => {
+    if (keyboardHeight > 0) {
+      endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+  }, [keyboardHeight, composerHeight]);
 
   const resetTyping = () => {
     typingReqIdRef.current = 0;
@@ -664,7 +694,9 @@ export function CharacterChatClient({
       {/* 메시지 영역만 스크롤(카톡 스타일). 입력창과 겹치지 않음 */}
       <main
         className="chat-scrollbar mx-auto w-full max-w-[420px] flex-1 min-h-0 overflow-y-auto px-5 pb-4 pt-4"
-        style={{ paddingBottom: keyboardHeight > 0 ? `${keyboardHeight + 64}px` : undefined }}
+        style={{
+          paddingBottom: `${Math.max(0, keyboardHeight) + Math.max(0, composerHeight) + 12}px`,
+        }}
       >
         {err ? <div className="mb-3 text-[12px] font-semibold text-[#ff9aa1]">{err}</div> : null}
         <div className="space-y-3">
@@ -690,7 +722,7 @@ export function CharacterChatClient({
       {/* composer */}
       <div
         ref={composerRef}
-        className="fixed left-0 right-0 bottom-0 z-40 border-t border-white/10 bg-[#0B0C10]/90 backdrop-blur transition-transform duration-200"
+        className="fixed left-0 right-0 bottom-0 z-40 border-t border-white/10 bg-[#0B0C10]/90 backdrop-blur"
         style={{ 
           transform: keyboardHeight > 0 ? `translateY(-${keyboardHeight}px)` : 'translateY(0)',
           paddingBottom: keyboardHeight > 0 ? '8px' : 'max(env(safe-area-inset-bottom), 16px)'
