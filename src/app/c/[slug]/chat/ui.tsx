@@ -212,7 +212,7 @@ export function CharacterChatClient({
   });
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const [composerHeight, setComposerHeight] = useState(0);
+  const [composerHeight, setComposerHeight] = useState(64);
   const composerRef = useRef<HTMLDivElement | null>(null);
   
   // 프로필 이미지 미리 로드 (캐시에 저장)
@@ -291,7 +291,8 @@ export function CharacterChatClient({
     if (!el) return;
 
     const update = () => {
-      setComposerHeight(el.getBoundingClientRect().height);
+      const next = el.getBoundingClientRect().height;
+      setComposerHeight(Math.max(64, next));
     };
     update();
 
@@ -311,7 +312,7 @@ export function CharacterChatClient({
   
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
   }, [messages.length]);
 
   useEffect(() => {
