@@ -72,6 +72,7 @@ export function HomeClient({
     initialMenuVisibility || defaultMenuVisibility
   );
   const [myChats, setMyChats] = useState<MyChatItem[]>([]);
+  const [hasAnyMyChats, setHasAnyMyChats] = useState(false);
   const [myChatsSafetyMap, setMyChatsSafetyMap] = useState<Record<string, boolean>>({});
   const [myChatsLoading, setMyChatsLoading] = useState(true);
   const { status } = useSession();
@@ -166,6 +167,7 @@ export function HomeClient({
     const load = async () => {
       const list = loadMyChats();
       setMyChats(list);
+      if (list.length > 0) setHasAnyMyChats(true);
       // 대화한 캐릭터가 있으면 첫 진입에 MY를 자동 선택(요청 UX)
       if (list.length) setActiveTab("my");
       if (firstLoad) {
@@ -201,6 +203,10 @@ export function HomeClient({
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, []);
+
+  useEffect(() => {
+    if (myChats.length > 0) setHasAnyMyChats(true);
+  }, [myChats.length]);
 
   const searchCandidates = useMemo(() => {
     // heroCandidates는 이미 slug dedupe가 되어있음
@@ -457,8 +463,8 @@ export function HomeClient({
         })() : null}
 
         {activeTab === "my" && (() => {
-          // 한 번도 대화한 적이 없거나, 필터링 후 비어있을 때 빈 상태 표시
-          return !myChatsLoading && myTabFiltered.length === 0;
+          // 대화 이력이 한 번이라도 있으면 빈 상태를 절대 노출하지 않는다.
+          return !myChatsLoading && !hasAnyMyChats && myTabFiltered.length === 0;
         })() && loggedIn ? (
           <div className="min-h-[58vh]">
             <div className="flex h-full min-h-[58vh] flex-col items-center justify-center text-center">

@@ -217,6 +217,8 @@ export function CharacterChatClient({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const isAtBottomRef = useRef(true);
   const lastKeyboardHeightRef = useRef(0);
+  const forceScrollRef = useRef(false);
+  const isInputFocusedRef = useRef(false);
   
   // 프로필 이미지 미리 로드 (캐시에 저장)
   useEffect(() => {
@@ -252,6 +254,7 @@ export function CharacterChatClient({
     };
 
     const handleFocus = () => {
+      isInputFocusedRef.current = true;
       if (focusRafId != null) {
         window.cancelAnimationFrame(focusRafId);
         focusRafId = null;
@@ -273,6 +276,7 @@ export function CharacterChatClient({
     };
 
     const handleBlur = () => {
+      isInputFocusedRef.current = false;
       if (focusRafId != null) {
         window.cancelAnimationFrame(focusRafId);
         focusRafId = null;
@@ -282,9 +286,14 @@ export function CharacterChatClient({
       initialHeight = window.innerHeight;
     };
 
+    let onViewportChange: (() => void) | null = null;
     if (window.visualViewport) {
-      window.visualViewport.addEventListener("resize", updateKeyboardHeight, { passive: true });
-      window.visualViewport.addEventListener("scroll", updateKeyboardHeight, { passive: true });
+      onViewportChange = () => {
+        if (!isInputFocusedRef.current && lastKeyboardHeightRef.current === 0) return;
+        updateKeyboardHeight();
+      };
+      window.visualViewport.addEventListener("resize", onViewportChange, { passive: true });
+      window.visualViewport.addEventListener("scroll", onViewportChange, { passive: true });
       updateKeyboardHeight();
     } else {
       window.addEventListener("resize", updateKeyboardHeight, { passive: true });
@@ -298,8 +307,10 @@ export function CharacterChatClient({
 
     return () => {
       if (window.visualViewport) {
-        window.visualViewport.removeEventListener("resize", updateKeyboardHeight);
-        window.visualViewport.removeEventListener("scroll", updateKeyboardHeight);
+        if (onViewportChange) {
+          window.visualViewport.removeEventListener("resize", onViewportChange);
+          window.visualViewport.removeEventListener("scroll", onViewportChange);
+        }
       } else {
         window.removeEventListener("resize", updateKeyboardHeight);
       }
@@ -344,8 +355,9 @@ export function CharacterChatClient({
   useEffect(() => {
     let rafId = 0;
     const run = () => {
-      if (!isAtBottomRef.current) return;
+      if (!isAtBottomRef.current && !forceScrollRef.current) return;
       endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+      forceScrollRef.current = false;
     };
     rafId = window.requestAnimationFrame(run);
     return () => {
@@ -534,6 +546,7 @@ export function CharacterChatClient({
     if (!text) return;
 
     setErr(null);
+    forceScrollRef.current = true;
     setMessages((prev) => [...prev, { id: `u-${Date.now()}`, from: "user", text }]);
     setValue("");
 
