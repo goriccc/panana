@@ -702,14 +702,23 @@ export default function AdminCharactersPage() {
                     className="w-full rounded-xl border border-white/10 bg-black/25 px-4 py-3 text-[13px] font-semibold text-white/80 outline-none"
                   >
                     <option value="">(연결 안 함)</option>
-                    {studioCharacters.map((c) => {
-                      const p = studioProjects.find((x) => x.id === c.project_id)?.title || c.project_id;
-                      return (
-                        <option key={c.id} value={c.id}>
-                          [{p}] {c.name} ({c.slug})
-                        </option>
-                      );
-                    })}
+                    {studioCharacters
+                      .filter((c) => {
+                        // 이미 다른 캐릭터에 연결된 Studio 캐릭터는 제외
+                        // 단, 현재 선택된 캐릭터가 이미 연결한 것은 제외하지 않음 (자기 자신은 선택 가능)
+                        const alreadyLinked = rows.some(
+                          (r) => r.studioCharacterId === c.id && r.id !== selectedId
+                        );
+                        return !alreadyLinked;
+                      })
+                      .map((c) => {
+                        const p = studioProjects.find((x) => x.id === c.project_id)?.title || c.project_id;
+                        return (
+                          <option key={c.id} value={c.id}>
+                            [{p}] {c.name} ({c.slug})
+                          </option>
+                        );
+                      })}
                   </select>
                 </div>
                 <div className="mt-2 text-[11px] font-semibold text-white/35">

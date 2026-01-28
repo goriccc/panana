@@ -197,6 +197,7 @@ create table if not exists public.panana_site_settings (
   robots_index boolean not null default true,
   footer_line_1 text not null default '© Panana',
   footer_line_2 text not null default '',
+  recommendation_settings jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -206,7 +207,24 @@ create trigger panana_site_settings_touch
 before update on public.panana_site_settings
 for each row execute function public.panana_touch_updated_at();
 
--- 11) Seed(선택) - 빈 프로젝트에서도 어드민 화면이 바로 보이도록 최소 데이터
+-- 11) 인기 캐릭터 캐시
+create table if not exists public.panana_popular_cache (
+  id uuid primary key default gen_random_uuid(),
+  key text not null,
+  payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_panana_popular_cache_key_updated
+on public.panana_popular_cache (key, updated_at desc);
+
+drop trigger if exists panana_popular_cache_touch on public.panana_popular_cache;
+create trigger panana_popular_cache_touch
+before update on public.panana_popular_cache
+for each row execute function public.panana_touch_updated_at();
+
+-- 12) Seed(선택) - 빈 프로젝트에서도 어드민 화면이 바로 보이도록 최소 데이터
 insert into public.panana_categories (slug, title, sort_order, active)
 values
   ('for-me', '나에게 맞는', 1, true),

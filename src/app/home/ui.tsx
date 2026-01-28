@@ -5,11 +5,28 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { HomeHeader } from "@/components/HomeHeader";
+import { AlertModal } from "@/components/AlertModal";
 import { ContentCard } from "@/components/ContentCard";
 import { categories as fallbackCategories, type Category, type ContentCardItem } from "@/lib/content";
 import { loadMyChats, type MyChatItem } from "@/lib/pananaApp/myChats";
+import { ensurePananaIdentity } from "@/lib/pananaApp/identity";
+import { fetchAdultStatus } from "@/lib/pananaApp/adultVerification";
 import { useSession } from "next-auth/react";
 import type { MenuVisibility } from "@/lib/pananaApp/contentServer";
+import {
+  buildAnswerSignals,
+  defaultRecommendationSettings,
+  getBehaviorSignals,
+  getOrCreateAbBucket,
+  loadRecoCache,
+  makeCacheKey,
+  mergeRecommendationSettings,
+  normalizeTag,
+  saveRecoCache,
+  trackBehaviorEvent,
+  type AirportPref,
+  type RecommendationSettings,
+} from "@/lib/pananaApp/recommendation";
 
 const defaultMenuVisibility: MenuVisibility = {
   my: true,
@@ -22,9 +39,11 @@ const defaultMenuVisibility: MenuVisibility = {
 export function HomeClient({
   categories,
   initialMenuVisibility,
+  initialRecommendationSettings,
 }: {
   categories?: Category[];
   initialMenuVisibility?: MenuVisibility;
+  initialRecommendationSettings?: RecommendationSettings;
 }) {
   const router = useRouter();
   // localStorage에서 즉시 읽어와서 초기 상태 설정 (깜빡임 방지)
@@ -36,10 +55,14 @@ export function HomeClient({
       return false;
     }
   });
+  const [adultVerified, setAdultVerified] = useState(false);
+  const [adultLoading, setAdultLoading] = useState(true);
+  const [adultModalOpen, setAdultModalOpen] = useState(false);
+  const effectiveSafetyOn = safetyOn && adultVerified;
 
   const sourceBase = categories?.length ? categories : fallbackCategories;
   const source = useMemo(() => {
-    if (!safetyOn) return sourceBase;
+    if (!effectiveSafetyOn) return sourceBase;
     // 스파이시 ON: 스파이시 지원 캐릭터만 노출(홈/찾기 공통)
     return (sourceBase || [])
       .map((c) => ({
@@ -47,13 +70,8 @@ export function HomeClient({
         items: (c.items || []).filter((it) => Boolean((it as any)?.safetySupported)),
       }))
       .filter((c) => (c.items || []).length > 0);
-  }, [safetyOn, sourceBase]);
-  const topCategories = source.map((c) => ({
-    ...c,
-    items: c.items.slice(0, 4),
-  }));
-
-  const heroCandidates = useMemo(() => {
+  }, [effectiveSafetyOn, sourceBase]);
+  const allItems = useMemo(() => {
     const all = (source || []).flatMap((c) => c.items || []);
     const bySlug = new Map<string, ContentCardItem>();
     for (const it of all) {
@@ -61,8 +79,10 @@ export function HomeClient({
       if (!key) continue;
       if (!bySlug.has(key)) bySlug.set(key, it);
     }
-    return Array.from(bySlug.values()).slice(0, 12);
+    return Array.from(bySlug.values());
   }, [source]);
+
+  const heroCandidates = useMemo(() => allItems.slice(0, 12), [allItems]);
 
   const [heroList, setHeroList] = useState<ContentCardItem[]>([]);
   const [heroIdx, setHeroIdx] = useState(0);
@@ -75,24 +95,128 @@ export function HomeClient({
   const [hasAnyMyChats, setHasAnyMyChats] = useState(false);
   const [myChatsSafetyMap, setMyChatsSafetyMap] = useState<Record<string, boolean>>({});
   const [myChatsLoading, setMyChatsLoading] = useState(true);
+  const [airportPref, setAirportPref] = useState<AirportPref | null>(null);
+  const [recommendationSettings, setRecommendationSettings] = useState<RecommendationSettings>(
+    mergeRecommendationSettings(initialRecommendationSettings || defaultRecommendationSettings)
+  );
+  const [abBucket, setAbBucket] = useState<"A" | "B">("A");
+  const [behaviorSignals, setBehaviorSignals] = useState<Array<{ tag: string; weight: number }>>([]);
+  const [cachedPersonalizedSlugs, setCachedPersonalizedSlugs] = useState<string[] | null>(null);
+  const [popularSlugs, setPopularSlugs] = useState<string[] | null>(null);
   const { status } = useSession();
   const loggedIn = status === "authenticated";
 
   // 메뉴 설정 업데이트 (서버에서 받은 값이 있으면 사용, 없으면 클라이언트에서 다시 로드)
   useEffect(() => {
-    if (!initialMenuVisibility) {
+    if (!initialMenuVisibility || !initialRecommendationSettings) {
       fetch("/api/site-settings")
         .then((res) => res.json())
         .then((data) => {
           if (data.menuVisibility) {
             setMenuVisibility(data.menuVisibility);
           }
+          if (data.recommendationSettings) {
+            setRecommendationSettings(mergeRecommendationSettings(data.recommendationSettings));
+          }
         })
         .catch((err) => {
-          console.error("Failed to load menu visibility:", err);
+          console.error("Failed to load site settings:", err);
         });
     }
-  }, [initialMenuVisibility]);
+  }, [initialMenuVisibility, initialRecommendationSettings]);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const status = await fetchAdultStatus();
+      if (!alive) return;
+      const verified = Boolean(status?.adultVerified);
+      setAdultVerified(verified);
+      setAdultLoading(false);
+      if (!verified) {
+        setSafetyOn(false);
+        try {
+          localStorage.setItem("panana_safety_on", "0");
+        } catch {}
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    setAbBucket(getOrCreateAbBucket(recommendationSettings));
+    setBehaviorSignals(getBehaviorSignals(recommendationSettings));
+  }, [recommendationSettings]);
+
+  useEffect(() => {
+    let alive = true;
+    const loadPopular = async () => {
+      try {
+        const res = await fetch("/api/popular-characters?limit=24&days=30&recentDays=7");
+        const data = await res.json().catch(() => null);
+        if (!alive) return;
+        if (res.ok && data?.ok && Array.isArray(data.items)) {
+          const slugs = data.items.map((it: any) => String(it?.slug || "").trim()).filter(Boolean);
+          setPopularSlugs(slugs.length ? slugs : null);
+        }
+      } catch {
+        // ignore
+      }
+    };
+    loadPopular();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+
+    const loadFromDraft = () => {
+      try {
+        const raw = localStorage.getItem("panana_airport_draft");
+        if (!raw) return;
+        const data = JSON.parse(raw);
+        if (data?.purpose && data?.mood && data?.characterType) {
+          setAirportPref({
+            purpose: String(data.purpose),
+            mood: String(data.mood),
+            characterType: String(data.characterType),
+          });
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    const loadFromServer = async () => {
+      try {
+        const idt = ensurePananaIdentity();
+        const pananaId = String(idt.id || "").trim();
+        if (!pananaId) return;
+        const res = await fetch(`/api/me/airport-response?pananaId=${encodeURIComponent(pananaId)}`);
+        const data = await res.json().catch(() => null);
+        if (!alive) return;
+        if (res.ok && data?.ok && data?.response?.purpose && data?.response?.mood && data?.response?.characterType) {
+          setAirportPref({
+            purpose: String(data.response.purpose),
+            mood: String(data.response.mood),
+            characterType: String(data.response.characterType),
+          });
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    loadFromDraft();
+    loadFromServer();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // 활성 탭이 숨겨진 경우 자동 전환
   useEffect(() => {
@@ -215,6 +339,105 @@ export function HomeClient({
 
   const recommendedTags = useMemo(() => ["#현실연애", "#롤플주의", "#고백도전", "#연애감정", "#환승연애"], []);
 
+  const answerSignals = useMemo(
+    () => buildAnswerSignals(airportPref, recommendationSettings.mapping),
+    [airportPref, recommendationSettings.mapping]
+  );
+
+  const combinedSignals = useMemo(() => {
+    if (!answerSignals.length) return [];
+    return abBucket === "B" ? [...answerSignals, ...behaviorSignals] : [...answerSignals];
+  }, [answerSignals, behaviorSignals, abBucket]);
+
+  const cacheKey = useMemo(
+    () => makeCacheKey({ bucket: abBucket, safetyOn: effectiveSafetyOn, signals: combinedSignals }),
+    [abBucket, effectiveSafetyOn, combinedSignals]
+  );
+
+  useEffect(() => {
+    const cached = loadRecoCache(cacheKey, recommendationSettings.cacheTtlSec);
+    setCachedPersonalizedSlugs(cached && cached.length ? cached : null);
+  }, [cacheKey, recommendationSettings.cacheTtlSec]);
+
+  const cachedPersonalizedItems = useMemo(() => {
+    if (!cachedPersonalizedSlugs?.length) return null;
+    const bySlug = new Map(allItems.map((it) => [it.characterSlug, it]));
+    const items = cachedPersonalizedSlugs.map((slug) => bySlug.get(slug)).filter(Boolean) as ContentCardItem[];
+    return items.length ? items : null;
+  }, [cachedPersonalizedSlugs, allItems]);
+
+  const personalizedItems = useMemo(() => {
+    if (!combinedSignals.length) return cachedPersonalizedItems;
+    const scored = allItems.map((it, idx) => {
+      const tags = (it.tags || []).map(normalizeTag).filter(Boolean);
+      const tagSet = new Set(tags);
+      let score = 0;
+      for (const sig of combinedSignals) {
+        const pref = normalizeTag(sig.tag);
+        if (!pref) continue;
+        for (const t of tagSet) {
+          if (t === pref || t.includes(pref) || pref.includes(t)) {
+            score += sig.weight;
+            break;
+          }
+        }
+      }
+      return { it, score, idx };
+    });
+
+    const ranked = scored
+      .filter((s) => s.score > 0)
+      .sort((a, b) => b.score - a.score || a.idx - b.idx)
+      .map((s) => s.it);
+
+    if (ranked.length > 0) return ranked.slice(0, 12);
+    return cachedPersonalizedItems;
+  }, [combinedSignals, allItems, cachedPersonalizedItems]);
+
+  useEffect(() => {
+    if (!personalizedItems?.length) return;
+    const slugs = personalizedItems.map((it) => it.characterSlug).filter(Boolean);
+    if (!slugs.length) return;
+    saveRecoCache(cacheKey, slugs);
+  }, [personalizedItems, cacheKey]);
+
+  const trackBehavior = (type: "click" | "chat_start" | "favorite", tags: string[]) => {
+    trackBehaviorEvent({ type, tags, settings: recommendationSettings });
+    setBehaviorSignals(getBehaviorSignals(recommendationSettings));
+  };
+
+  const topCategories = useMemo(() => {
+    const isForYou = (slug: string, name: string) => {
+      const s = String(slug || "").toLowerCase();
+      const n = String(name || "").toLowerCase();
+      return s.includes("for-you") || s.includes("for-me") || n.includes("나에게");
+    };
+    const isPopular = (slug: string, name: string) => {
+      const s = String(slug || "").toLowerCase();
+      const n = String(name || "").toLowerCase();
+      return s.includes("loved") || n.includes("모두에게");
+    };
+    const bySlug = new Map(allItems.map((it) => [it.characterSlug, it]));
+
+    return (source || []).map((c) => {
+      let items = c.items || [];
+      if (isForYou(c.slug, c.name) && personalizedItems?.length) {
+        items = personalizedItems;
+      } else if (isPopular(c.slug, c.name) && popularSlugs?.length) {
+        const popularItems = popularSlugs.map((slug) => bySlug.get(slug)).filter(Boolean) as ContentCardItem[];
+        if (popularItems.length) {
+          const fallback = items.filter((it) => !popularItems.find((p) => p.characterSlug === it.characterSlug));
+          items = [...popularItems, ...fallback];
+        }
+      }
+
+      return {
+        ...c,
+        items: (items || []).slice(0, 4),
+      };
+    });
+  }, [source, personalizedItems, popularSlugs, allItems]);
+
   const filtered = useMemo(() => {
     const q = String(searchQ || "").trim().toLowerCase();
     if (!q) return [];
@@ -234,15 +457,15 @@ export function HomeClient({
     if (!hasSafetyInfo) return [];
     
     return myChats.filter((it) => {
-      // 스파이시 OFF(safetyOn=false)일 때: safetySupported가 true인 캐릭터는 숨김
-      if (!safetyOn) {
+      // 스파이시 OFF(또는 성인 인증 미완료)일 때: safetySupported가 true인 캐릭터는 숨김
+      if (!effectiveSafetyOn) {
         const safetySupported = myChatsSafetyMap[it.characterSlug];
         // safety 정보가 없으면 일단 숨김 (안전하게 처리)
         if (safetySupported === true || safetySupported === undefined) return false;
       }
       return true;
     });
-  }, [myChats, myChatsSafetyMap, safetyOn]);
+  }, [myChats, myChatsSafetyMap, effectiveSafetyOn]);
 
   useEffect(() => {
     setSearchLimit(8);
@@ -268,8 +491,12 @@ export function HomeClient({
       <HomeHeader
         active={activeTab}
         onChange={setActiveTab}
-        safetyOn={safetyOn}
+        safetyOn={effectiveSafetyOn}
         onSafetyChange={(next) => {
+          if (next && !adultVerified) {
+            setAdultModalOpen(true);
+            return;
+          }
           setSafetyOn(next);
           try {
             localStorage.setItem("panana_safety_on", next ? "1" : "0");
@@ -350,6 +577,7 @@ export function HomeClient({
                     const slug = String(it.characterSlug || "").trim();
                     const name = String(it.title || "").trim() || slug || "캐릭터";
                     const tags = Array.isArray(it.tags) ? it.tags.slice(0, 2) : [];
+                    const tagsFull = Array.isArray(it.tags) ? it.tags : [];
                     const img = String(it.imageUrl || "").trim();
                     return (
                       <div key={slug} className="flex items-center justify-between gap-3">
@@ -360,6 +588,9 @@ export function HomeClient({
                             className="relative h-10 w-10 flex-none overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10"
                             prefetch={true}
                             onMouseEnter={() => slug && router.prefetch(`/c/${slug}`)}
+                            onClick={() => {
+                              if (tagsFull.length) trackBehavior("click", tagsFull);
+                            }}
                           >
                             {img ? (
                               <Image src={img} alt="" fill sizes="40px" className="object-cover" />
@@ -380,6 +611,9 @@ export function HomeClient({
                           className="flex-none rounded-xl border border-panana-pink/60 bg-white px-3 py-2 text-[12px] font-extrabold text-panana-pink"
                           prefetch={true}
                           onMouseEnter={() => slug && router.prefetch(`/c/${slug}/chat`)}
+                          onClick={() => {
+                            if (tagsFull.length) trackBehavior("chat_start", tagsFull);
+                          }}
                         >
                           메세지
                         </Link>
@@ -498,6 +732,9 @@ export function HomeClient({
               router.prefetch(`/c/${hero.characterSlug}`);
             }
           }}
+          onClick={() => {
+            if (hero?.tags?.length) trackBehavior("click", hero.tags);
+          }}
           onMouseLeave={() => setHeroPaused(false)}
           onFocus={() => setHeroPaused(true)}
           onBlur={() => setHeroPaused(false)}
@@ -531,33 +768,6 @@ export function HomeClient({
                 <span key={t}>{t}</span>
               ))}
             </div>
-
-            {/* rotation dots */}
-            {heroList.length > 1 ? (
-              <div className="mt-4 flex items-center gap-1.5">
-                {heroList.slice(0, 8).map((_, i) => {
-                  const active = i === heroIdx;
-                  return (
-                    <button
-                      key={i}
-                      type="button"
-                      aria-label={`상단 배너 ${i + 1}로 이동`}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setHeroIdx(i);
-                        setHeroPaused(true);
-                        window.setTimeout(() => setHeroPaused(false), 2500);
-                      }}
-                      className={[
-                        "h-1.5 w-1.5 rounded-full transition",
-                        active ? "bg-[#ffa9d6]" : "bg-white/20 hover:bg-white/35",
-                      ].join(" ")}
-                    />
-                  );
-                })}
-              </div>
-            ) : null}
           </div>
         </Link>
 
@@ -590,6 +800,7 @@ export function HomeClient({
                     tags={it.tags}
                     imageUrl={it.imageUrl}
                     href={`/c/${it.characterSlug}`}
+                    onClick={() => trackBehavior("click", it.tags || [])}
                   />
                 ))}
               </div>
@@ -600,6 +811,15 @@ export function HomeClient({
         )}
       </main>
 
+      <AlertModal
+        open={adultModalOpen && !adultVerified && !adultLoading}
+        title="성인 인증 필요"
+        message={"스파이시 콘텐츠를 이용하려면\n성인 인증이 필요해요."}
+        cancelHref="/home"
+        confirmHref="/adult/verify?return=/home"
+        cancelText="나중에"
+        confirmText="인증하기"
+      />
     </div>
   );
 }

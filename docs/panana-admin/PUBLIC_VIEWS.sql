@@ -310,7 +310,10 @@ select
   social_image_url,
   robots_index,
   footer_line_1,
-  footer_line_2
+  footer_line_2,
+  menu_visibility,
+  updated_at,
+  recommendation_settings
 from public.panana_site_settings
 order by updated_at desc
 limit 1;
@@ -330,4 +333,6 @@ grant select on public.panana_public_airport_media_v to anon, authenticated;
 grant select on public.panana_public_airport_thumbnail_sets_v to anon, authenticated;
 grant select on public.panana_public_airport_copy_v to anon, authenticated;
 grant select on public.panana_public_site_settings_v to anon, authenticated;
+-- panana_site_settings 직접 접근은 최소화(뷰만 공개)
+revoke all on table public.panana_site_settings from anon, authenticated;
 

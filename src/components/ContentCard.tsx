@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -9,6 +11,7 @@ export function ContentCard({
   tags,
   href,
   imageUrl,
+  onClick,
 }: {
   author: string;
   title: string;
@@ -16,6 +19,7 @@ export function ContentCard({
   tags: string[];
   href?: string;
   imageUrl?: string;
+  onClick?: () => void;
 }) {
   const router = useRouter();
   
@@ -57,6 +61,7 @@ export function ContentCard({
       href={href}
       prefetch={true}
       onMouseEnter={() => href && router.prefetch(href)}
+      onClick={onClick}
     >
       {body}
     </Link>

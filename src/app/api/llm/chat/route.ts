@@ -86,6 +86,26 @@ function getSupabaseAdminIfPossible() {
   return createClient(url, serviceKey, { auth: { persistSession: false } });
 }
 
+function isUuid(v: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(v || ""));
+}
+
+async function fetchAdultVerified(pananaId: string) {
+  const sbAdmin = getSupabaseAdminIfPossible();
+  if (!sbAdmin || !isUuid(pananaId)) return false;
+  try {
+    const { data, error } = await sbAdmin
+      .from("panana_users")
+      .select("adult_verified")
+      .eq("id", pananaId)
+      .maybeSingle();
+    if (error) return false;
+    return Boolean((data as any)?.adult_verified);
+  } catch {
+    return false;
+  }
+}
+
 async function loadSettings(provider: "anthropic" | "gemini" | "deepseek") {
   const supabase = getSupabaseServer();
   const { data, error } = await supabase
@@ -462,6 +482,8 @@ export async function POST(req: Request) {
     // allowUnsafe 기본값은 운영 설정(nsfw_filter=false)이며,
     // 유저가 홈에서 스파이시 토글을 켠 경우(body.allowUnsafe=true)라도 캐릭터가 safety_supported=true일 때만 허용한다.
     let allowUnsafe = settings?.nsfw_filter === false;
+    const pananaIdFromRuntime = String((body.runtime as any)?.variables?.panana_id || "").trim();
+    let adultVerified = false;
 
     // characterSlug가 있으면: Studio(저작) + Panana(노출) 정보를 로드해 system prompt를 강화
     let system = body.messages.find((m) => m.role === "system")?.content;
@@ -519,6 +541,12 @@ export async function POST(req: Request) {
         }
       } catch {
         // ignore: 기존 system 유지
+      }
+    }
+    if (allowUnsafe || body.allowUnsafe) {
+      adultVerified = await fetchAdultVerified(pananaIdFromRuntime);
+      if (!adultVerified) {
+        allowUnsafe = false;
       }
     }
     if (body.concise) {

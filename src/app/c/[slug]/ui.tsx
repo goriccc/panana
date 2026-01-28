@@ -7,6 +7,7 @@ import { useEffect, useMemo } from "react";
 import type { CharacterProfile } from "@/lib/characters";
 import type { ContentCardItem } from "@/lib/content";
 import { ContentCard } from "@/components/ContentCard";
+import { defaultRecommendationSettings, trackBehaviorEvent } from "@/lib/pananaApp/recommendation";
 
 function Stat({ value, label }: { value: number; label: string }) {
   return (
@@ -43,6 +44,7 @@ export function CharacterClient({
     router.prefetch(`/c/${character.slug}/chat`);
     router.prefetch(`/c/${character.slug}/profile-image`);
   }, [router, character.slug]);
+
 
   return (
     <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.12),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">
@@ -149,6 +151,15 @@ export function CharacterClient({
               className="group relative overflow-hidden rounded-xl px-4 py-3 text-center text-[14px] font-extrabold text-white ring-1 ring-white/10 transition active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-[#ff4da7]/40"
               prefetch={true}
               onMouseEnter={() => router.prefetch(`/c/${character.slug}/chat`)}
+              onClick={() => {
+                if (character.hashtags?.length) {
+                  trackBehaviorEvent({
+                    type: "chat_start",
+                    tags: character.hashtags,
+                    settings: defaultRecommendationSettings,
+                  });
+                }
+              }}
               style={{
                 backgroundImage:
                   "linear-gradient(110deg, rgba(255,77,167,1) 0%, rgba(255,126,201,1) 40%, rgba(255,77,167,1) 100%)",

@@ -9,6 +9,7 @@ import { loadRuntime, saveRuntime } from "@/lib/pananaApp/chatRuntime";
 import { recordMyChat } from "@/lib/pananaApp/myChats";
 import { loadChatHistory, saveChatHistory } from "@/lib/pananaApp/chatHistory";
 import { ensurePananaIdentity, setPananaId } from "@/lib/pananaApp/identity";
+import { fetchAdultStatus } from "@/lib/pananaApp/adultVerification";
 import type { ChatRuntimeEvent, ChatRuntimeState } from "@/lib/studio/chatRuntimeEngine";
 
 type Msg = { id: string; from: "bot" | "user" | "system"; text: string };
@@ -181,6 +182,8 @@ export function CharacterChatClient({
   const [messages, setMessages] = useState<Msg[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(true);
+  const [adultVerified, setAdultVerified] = useState(false);
+  const [adultLoading, setAdultLoading] = useState(true);
   const [userName, setUserName] = useState<string>(() => {
     // 템플릿 변수(user_name/call_sign) 치환이 항상 되도록: 로컬 identity 닉네임을 즉시 기본값으로 사용
     try {
@@ -227,6 +230,19 @@ export function CharacterChatClient({
       img.src = characterAvatarUrl;
     }
   }, [characterAvatarUrl]);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const status = await fetchAdultStatus();
+      if (!alive) return;
+      setAdultVerified(Boolean(status?.adultVerified));
+      setAdultLoading(false);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // 모바일 키보드 높이 감지 및 메시지 입력창 위치 조정
   useEffect(() => {
@@ -584,7 +600,7 @@ export function CharacterChatClient({
           // 실제 허용 여부는 서버에서 캐릭터 safety_supported를 보고 최종 결정한다.
           allowUnsafe: (() => {
             try {
-              return localStorage.getItem("panana_safety_on") === "1";
+                return localStorage.getItem("panana_safety_on") === "1" && adultVerified;
             } catch {
               return false;
             }
@@ -663,6 +679,36 @@ export function CharacterChatClient({
       setSending(false);
     }
   };
+
+  const needsAdultGate = Boolean(safetySupported) && !adultVerified && !adultLoading;
+  if (needsAdultGate) {
+    return (
+      <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.12),transparent_60%),linear-gradient(#07070B,#0B0C10)] px-5 pb-24 pt-10 text-white">
+        <div className="mx-auto w-full max-w-[420px]">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 text-center">
+            <div className="text-[16px] font-extrabold text-white/90">성인 인증이 필요해요</div>
+            <div className="mt-2 text-[12px] font-semibold text-white/55">
+              스파이시 캐릭터는 성인 인증 후에 이용할 수 있습니다.
+            </div>
+            <button
+              type="button"
+              onClick={() => router.push(`/adult/verify?return=/c/${characterSlug}/chat`)}
+              className="mt-5 w-full rounded-2xl bg-panana-pink px-5 py-4 text-[14px] font-extrabold text-white"
+            >
+              성인 인증하러 가기
+            </button>
+            <button
+              type="button"
+              onClick={() => router.push(backHref)}
+              className="mt-3 w-full rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-4 text-[13px] font-semibold text-white/70"
+            >
+              돌아가기
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-dvh overflow-hidden bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.12),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white flex flex-col">

@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import type { Category, ContentCardItem } from "@/lib/content";
 import type { CharacterProfile } from "@/lib/characters";
+import { defaultRecommendationSettings, mergeRecommendationSettings, type RecommendationSettings } from "@/lib/pananaApp/recommendation";
 
 function getSupabaseServer() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -263,4 +264,33 @@ export async function fetchMenuVisibilityFromDb(): Promise<MenuVisibility> {
   }
 
   return defaultVisibility;
+}
+
+export async function fetchRecommendationSettingsFromDb(): Promise<RecommendationSettings> {
+  const supabase = getSupabaseServer();
+  const { data, error } = await supabase
+    .from("panana_public_site_settings_v")
+    .select("recommendation_settings")
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    const msg = String((error as any)?.message || "");
+    if (msg.includes("recommendation_settings") || msg.includes("permission denied")) {
+      if (process.env.NODE_ENV !== "production") {
+        console.warn(
+          "[contentServer] recommendation_settings unavailable on panana_public_site_settings_v. Run docs/panana-admin/ADD_RECOMMENDATION_SETTINGS.sql and update PUBLIC_VIEWS.sql."
+        );
+      }
+      return defaultRecommendationSettings;
+    }
+    console.error("[contentServer] panana_public_site_settings_v recommendation_settings error:", error);
+    return defaultRecommendationSettings;
+  }
+
+  if (data?.recommendation_settings) {
+    return mergeRecommendationSettings(data.recommendation_settings as any);
+  }
+
+  return defaultRecommendationSettings;
 }
