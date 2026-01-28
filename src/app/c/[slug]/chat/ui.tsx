@@ -225,39 +225,40 @@ export function CharacterChatClient({
   // 모바일 키보드 높이 감지 및 메시지 입력창 위치 조정
   useEffect(() => {
     if (typeof window === "undefined") return;
-    
+
     let initialHeight = window.innerHeight;
-    
-    const updateKeyboardHeight = () => {
+    let rafId: number | null = null;
+
+    const calcKeyboardHeight = () => {
       if (window.visualViewport) {
         const viewport = window.visualViewport;
-        const currentHeight = window.innerHeight;
-        
-        // 키보드가 올라오면 visualViewport.height가 줄어듦
-        // 키보드 높이 = 전체 화면 높이 - 현재 보이는 뷰포트 높이
-        const keyboardHeight = currentHeight - viewport.height;
-        
-        // 키보드가 올라온 경우에만 조정 (최소 150px 이상 차이날 때)
-        if (keyboardHeight > 150) {
-          setKeyboardHeight(keyboardHeight);
-        } else {
-          setKeyboardHeight(0);
-        }
-      } else {
-        // visualViewport를 지원하지 않는 브라우저의 경우
-        // window.innerHeight 변화로 감지 (덜 정확하지만 fallback)
-        const currentHeight = window.innerHeight;
-        const heightDiff = initialHeight - currentHeight;
-        if (heightDiff > 150) {
-          setKeyboardHeight(heightDiff);
-        } else {
-          setKeyboardHeight(0);
-        }
+        const viewportBottom = viewport.offsetTop + viewport.height;
+        const keyboardHeight = window.innerHeight - viewportBottom;
+        return Math.max(0, keyboardHeight);
       }
+      const heightDiff = initialHeight - window.innerHeight;
+      return Math.max(0, heightDiff);
+    };
+
+    const updateKeyboardHeight = () => {
+      const next = calcKeyboardHeight();
+      setKeyboardHeight(next);
+    };
+
+    const startRafProbe = () => {
+      let start = performance.now();
+      const loop = () => {
+        updateKeyboardHeight();
+        if (performance.now() - start < 600) {
+          rafId = window.requestAnimationFrame(loop);
+        } else {
+          rafId = null;
+        }
+      };
+      rafId = window.requestAnimationFrame(loop);
     };
 
     if (window.visualViewport) {
-      // visualViewport 이벤트를 더 빠르게 감지
       window.visualViewport.addEventListener("resize", updateKeyboardHeight, { passive: true });
       window.visualViewport.addEventListener("scroll", updateKeyboardHeight, { passive: true });
       updateKeyboardHeight();
@@ -265,35 +266,23 @@ export function CharacterChatClient({
       window.addEventListener("resize", updateKeyboardHeight, { passive: true });
     }
 
-    // input focus/blur 이벤트로 즉시 반응
     const handleFocus = () => {
-      // focus 시 즉시 키보드가 올라온 것으로 가정하고 위치 조정
-      // 모바일 키보드의 일반적인 높이를 예상값으로 설정
-      const estimatedKeyboardHeight = 300;
-      setKeyboardHeight(estimatedKeyboardHeight);
-      
-      // 실제 키보드 높이를 빠르게 감지하기 위해 짧은 간격으로 여러 번 체크
-      const checkInterval = setInterval(() => {
-        updateKeyboardHeight();
-      }, 50);
-      
-      // 1초 후에는 실제 높이로 업데이트하고 체크 중단
-      setTimeout(() => {
-        clearInterval(checkInterval);
-        updateKeyboardHeight();
-      }, 1000);
+      startRafProbe();
     };
-    
+
     const handleBlur = () => {
-      // blur 시 즉시 키보드가 내려간 것으로 처리
+      if (rafId != null) {
+        window.cancelAnimationFrame(rafId);
+        rafId = null;
+      }
       setKeyboardHeight(0);
       initialHeight = window.innerHeight;
     };
 
-    const input = composerRef.current?.querySelector('input');
+    const input = composerRef.current?.querySelector("input");
     if (input) {
-      input.addEventListener('focus', handleFocus, { passive: true });
-      input.addEventListener('blur', handleBlur, { passive: true });
+      input.addEventListener("focus", handleFocus, { passive: true });
+      input.addEventListener("blur", handleBlur, { passive: true });
     }
 
     return () => {
@@ -304,8 +293,11 @@ export function CharacterChatClient({
         window.removeEventListener("resize", updateKeyboardHeight);
       }
       if (input) {
-        input.removeEventListener('focus', handleFocus);
-        input.removeEventListener('blur', handleBlur);
+        input.removeEventListener("focus", handleFocus);
+        input.removeEventListener("blur", handleBlur);
+      }
+      if (rafId != null) {
+        window.cancelAnimationFrame(rafId);
       }
     };
   }, []);
@@ -670,9 +662,9 @@ export function CharacterChatClient({
       </header>
 
       {/* 메시지 영역만 스크롤(카톡 스타일). 입력창과 겹치지 않음 */}
-      <main 
+      <main
         className="chat-scrollbar mx-auto w-full max-w-[420px] flex-1 min-h-0 overflow-y-auto px-5 pb-4 pt-4"
-        style={{ paddingBottom: keyboardHeight > 0 ? `${keyboardHeight + 80}px` : undefined }}
+        style={{ paddingBottom: keyboardHeight > 0 ? `${keyboardHeight + 64}px` : undefined }}
       >
         {err ? <div className="mb-3 text-[12px] font-semibold text-[#ff9aa1]">{err}</div> : null}
         <div className="space-y-3">
@@ -696,7 +688,7 @@ export function CharacterChatClient({
       </main>
 
       {/* composer */}
-      <div 
+      <div
         ref={composerRef}
         className="fixed left-0 right-0 bottom-0 z-40 border-t border-white/10 bg-[#0B0C10]/90 backdrop-blur transition-transform duration-200"
         style={{ 
@@ -704,8 +696,8 @@ export function CharacterChatClient({
           paddingBottom: keyboardHeight > 0 ? '8px' : 'max(env(safe-area-inset-bottom), 16px)'
         }}
       >
-        <div className="mx-auto w-full max-w-[420px] px-5 py-3">
-          <div className="flex items-center gap-3 rounded-full border border-panana-pink/35 bg-white/[0.04] px-4 py-3">
+        <div className="mx-auto w-full max-w-[420px] px-5 py-2.5">
+          <div className="flex items-center gap-2.5 rounded-full border border-panana-pink/35 bg-white/[0.04] px-3.5 py-2">
             <input
               value={value}
               onChange={(e) => setValue(e.target.value)}
@@ -718,7 +710,7 @@ export function CharacterChatClient({
                   send();
                 }
               }}
-              className="flex-1 bg-transparent text-[14px] font-semibold text-white/70 outline-none placeholder:text-white/30"
+              className="flex-1 bg-transparent text-[13px] font-semibold text-white/70 outline-none placeholder:text-white/30"
               placeholder="메시지를 입력하세요"
             />
             <button
@@ -726,9 +718,9 @@ export function CharacterChatClient({
               aria-label="전송"
               onClick={send}
               disabled={!value.trim() || sending}
-              className="grid h-9 w-9 place-items-center rounded-full bg-white/10 ring-1 ring-white/10"
+              className="grid h-8 w-8 place-items-center rounded-full bg-white/10 ring-1 ring-white/10"
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M4 12h12" stroke="rgba(255,255,255,0.85)" strokeWidth="2" strokeLinecap="round" />
                 <path
                   d="M13 5l7 7-7 7"
