@@ -304,6 +304,7 @@ export function CharacterChatClient({
   // composer 높이 측정 (메시지 영역 패딩 보정)
   useEffect(() => {
     if (typeof window === "undefined") return;
+    const win = window as Window;
     const el = composerRef.current;
     if (!el) return;
 
@@ -313,16 +314,16 @@ export function CharacterChatClient({
     update();
 
     let ro: ResizeObserver | null = null;
-    if ("ResizeObserver" in window) {
+    if (typeof ResizeObserver !== "undefined") {
       ro = new ResizeObserver(() => update());
       ro.observe(el);
     } else {
-      window.addEventListener("resize", update);
+      win.addEventListener("resize", update);
     }
 
     return () => {
       if (ro) ro.disconnect();
-      else window.removeEventListener("resize", update);
+      else win.removeEventListener("resize", update);
     };
   }, []);
   
