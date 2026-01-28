@@ -230,6 +230,7 @@ export function CharacterChatClient({
     if (typeof window === "undefined") return;
 
     let initialHeight = window.innerHeight;
+    let focusRafId: number | null = null;
 
     const calcKeyboardHeight = () => {
       if (window.visualViewport) {
@@ -248,6 +249,20 @@ export function CharacterChatClient({
     };
 
     const handleFocus = () => {
+      if (focusRafId != null) {
+        window.cancelAnimationFrame(focusRafId);
+        focusRafId = null;
+      }
+      const start = performance.now();
+      const tick = () => {
+        updateKeyboardHeight();
+        if (performance.now() - start < 400) {
+          focusRafId = window.requestAnimationFrame(tick);
+        } else {
+          focusRafId = null;
+        }
+      };
+      focusRafId = window.requestAnimationFrame(tick);
       updateKeyboardHeight();
       if (isAtBottomRef.current) {
         endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
@@ -255,12 +270,17 @@ export function CharacterChatClient({
     };
 
     const handleBlur = () => {
+      if (focusRafId != null) {
+        window.cancelAnimationFrame(focusRafId);
+        focusRafId = null;
+      }
       setKeyboardHeight(0);
       initialHeight = window.innerHeight;
     };
 
     if (window.visualViewport) {
       window.visualViewport.addEventListener("resize", updateKeyboardHeight, { passive: true });
+      window.visualViewport.addEventListener("scroll", updateKeyboardHeight, { passive: true });
       updateKeyboardHeight();
     } else {
       window.addEventListener("resize", updateKeyboardHeight, { passive: true });
@@ -275,12 +295,16 @@ export function CharacterChatClient({
     return () => {
       if (window.visualViewport) {
         window.visualViewport.removeEventListener("resize", updateKeyboardHeight);
+        window.visualViewport.removeEventListener("scroll", updateKeyboardHeight);
       } else {
         window.removeEventListener("resize", updateKeyboardHeight);
       }
       if (input) {
         input.removeEventListener("focus", handleFocus);
         input.removeEventListener("blur", handleBlur);
+      }
+      if (focusRafId != null) {
+        window.cancelAnimationFrame(focusRafId);
       }
     };
   }, []);
