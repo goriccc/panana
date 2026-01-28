@@ -216,6 +216,7 @@ export function CharacterChatClient({
   const composerRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const isAtBottomRef = useRef(true);
+  const lastKeyboardHeightRef = useRef(0);
   
   // 프로필 이미지 미리 로드 (캐시에 저장)
   useEffect(() => {
@@ -245,6 +246,8 @@ export function CharacterChatClient({
 
     const updateKeyboardHeight = () => {
       const next = calcKeyboardHeight();
+      if (Math.abs(next - lastKeyboardHeightRef.current) < 2) return;
+      lastKeyboardHeightRef.current = next;
       setKeyboardHeight(next);
     };
 
@@ -274,6 +277,7 @@ export function CharacterChatClient({
         window.cancelAnimationFrame(focusRafId);
         focusRafId = null;
       }
+      lastKeyboardHeightRef.current = 0;
       setKeyboardHeight(0);
       initialHeight = window.innerHeight;
     };
@@ -347,7 +351,7 @@ export function CharacterChatClient({
     return () => {
       if (rafId) window.cancelAnimationFrame(rafId);
     };
-  }, [messages.length, keyboardHeight, composerHeight, showTyping]);
+  }, [messages.length, showTyping]);
 
   const resetTyping = () => {
     typingReqIdRef.current = 0;
