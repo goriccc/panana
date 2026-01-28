@@ -441,7 +441,7 @@ export function HomeClient({
 
       return {
         ...c,
-        items: (items || []).slice(0, 4),
+        items: items || [],
       };
     });
   }, [source, personalizedItems, popularSlugs, allItems]);
