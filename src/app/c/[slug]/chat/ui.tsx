@@ -211,6 +211,8 @@ export function CharacterChatClient({
     return getSavedProvider();
   });
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const composerRef = useRef<HTMLDivElement | null>(null);
   
   // 프로필 이미지 미리 로드 (캐시에 저장)
   useEffect(() => {
@@ -219,6 +221,36 @@ export function CharacterChatClient({
       img.src = characterAvatarUrl;
     }
   }, [characterAvatarUrl]);
+
+  // 모바일 키보드 높이 감지 및 메시지 입력창 위치 조정
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    
+    const updateKeyboardHeight = () => {
+      if (window.visualViewport) {
+        const viewportHeight = window.visualViewport.height;
+        const windowHeight = window.innerHeight;
+        const heightDiff = windowHeight - viewportHeight;
+        setKeyboardHeight(Math.max(0, heightDiff));
+      } else {
+        // visualViewport를 지원하지 않는 브라우저의 경우
+        setKeyboardHeight(0);
+      }
+    };
+
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", updateKeyboardHeight);
+      window.visualViewport.addEventListener("scroll", updateKeyboardHeight);
+      updateKeyboardHeight();
+    }
+
+    return () => {
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener("resize", updateKeyboardHeight);
+        window.visualViewport.removeEventListener("scroll", updateKeyboardHeight);
+      }
+    };
+  }, []);
   
 
   useEffect(() => {
@@ -580,7 +612,10 @@ export function CharacterChatClient({
       </header>
 
       {/* 메시지 영역만 스크롤(카톡 스타일). 입력창과 겹치지 않음 */}
-      <main className="chat-scrollbar mx-auto w-full max-w-[420px] flex-1 min-h-0 overflow-y-auto px-5 pb-4 pt-4">
+      <main 
+        className="chat-scrollbar mx-auto w-full max-w-[420px] flex-1 min-h-0 overflow-y-auto px-5 pb-4 pt-4"
+        style={{ paddingBottom: keyboardHeight > 0 ? `${keyboardHeight + 80}px` : undefined }}
+      >
         {err ? <div className="mb-3 text-[12px] font-semibold text-[#ff9aa1]">{err}</div> : null}
         <div className="space-y-3">
           {messages.map((m) => (
@@ -603,7 +638,14 @@ export function CharacterChatClient({
       </main>
 
       {/* composer */}
-      <div className="shrink-0 border-t border-white/10 bg-[#0B0C10]/90 pb-[max(env(safe-area-inset-bottom),16px)] backdrop-blur">
+      <div 
+        ref={composerRef}
+        className="fixed left-0 right-0 z-40 border-t border-white/10 bg-[#0B0C10]/90 backdrop-blur transition-[bottom] duration-200"
+        style={{ 
+          bottom: keyboardHeight > 0 ? `${keyboardHeight}px` : `max(env(safe-area-inset-bottom, 0px), 0px)`,
+          paddingBottom: keyboardHeight > 0 ? '8px' : 'max(env(safe-area-inset-bottom), 16px)'
+        }}
+      >
         <div className="mx-auto w-full max-w-[420px] px-5 py-3">
           <div className="flex items-center gap-3 rounded-full border border-panana-pink/35 bg-white/[0.04] px-4 py-3">
             <input
