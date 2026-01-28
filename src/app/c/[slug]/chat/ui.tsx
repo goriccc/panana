@@ -228,17 +228,16 @@ export function CharacterChatClient({
     if (typeof window === "undefined") return;
 
     let initialHeight = window.innerHeight;
-    let rafId: number | null = null;
 
     const calcKeyboardHeight = () => {
       if (window.visualViewport) {
         const viewport = window.visualViewport;
         const viewportBottom = viewport.offsetTop + viewport.height;
         const keyboardHeight = window.innerHeight - viewportBottom;
-        return Math.max(0, keyboardHeight);
+        return keyboardHeight > 20 ? keyboardHeight : 0;
       }
       const heightDiff = initialHeight - window.innerHeight;
-      return Math.max(0, heightDiff);
+      return heightDiff > 20 ? heightDiff : 0;
     };
 
     const updateKeyboardHeight = () => {
@@ -246,38 +245,23 @@ export function CharacterChatClient({
       setKeyboardHeight(next);
     };
 
-    const startRafProbe = () => {
-      let start = performance.now();
-      const loop = () => {
-        updateKeyboardHeight();
-        if (performance.now() - start < 600) {
-          rafId = window.requestAnimationFrame(loop);
-        } else {
-          rafId = null;
-        }
-      };
-      rafId = window.requestAnimationFrame(loop);
+    const handleFocus = () => {
+      updateKeyboardHeight();
+      endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+    };
+
+    const handleBlur = () => {
+      setKeyboardHeight(0);
+      initialHeight = window.innerHeight;
     };
 
     if (window.visualViewport) {
       window.visualViewport.addEventListener("resize", updateKeyboardHeight, { passive: true });
+      window.visualViewport.addEventListener("scroll", updateKeyboardHeight, { passive: true });
       updateKeyboardHeight();
     } else {
       window.addEventListener("resize", updateKeyboardHeight, { passive: true });
     }
-
-    const handleFocus = () => {
-      startRafProbe();
-    };
-
-    const handleBlur = () => {
-      if (rafId != null) {
-        window.cancelAnimationFrame(rafId);
-        rafId = null;
-      }
-      setKeyboardHeight(0);
-      initialHeight = window.innerHeight;
-    };
 
     const input = composerRef.current?.querySelector("input");
     if (input) {
@@ -288,15 +272,13 @@ export function CharacterChatClient({
     return () => {
       if (window.visualViewport) {
         window.visualViewport.removeEventListener("resize", updateKeyboardHeight);
+        window.visualViewport.removeEventListener("scroll", updateKeyboardHeight);
       } else {
         window.removeEventListener("resize", updateKeyboardHeight);
       }
       if (input) {
         input.removeEventListener("focus", handleFocus);
         input.removeEventListener("blur", handleBlur);
-      }
-      if (rafId != null) {
-        window.cancelAnimationFrame(rafId);
       }
     };
   }, []);
@@ -333,8 +315,8 @@ export function CharacterChatClient({
   }, [messages.length]);
 
   useEffect(() => {
-    if (keyboardHeight > 0) {
-      endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    if (keyboardHeight > 0 || composerHeight > 0) {
+      endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
     }
   }, [keyboardHeight, composerHeight]);
 
