@@ -819,6 +819,7 @@ export function HomeClient({
         confirmHref="/adult/verify?return=/home"
         cancelText="나중에"
         confirmText="인증하기"
+        maxWidthClassName="max-w-[560px]"
       />
     </div>
   );
