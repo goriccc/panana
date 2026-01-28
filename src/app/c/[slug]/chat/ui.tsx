@@ -312,20 +312,15 @@ export function CharacterChatClient({
   
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-  }, [messages.length]);
-
-  useEffect(() => {
-    if (keyboardHeight > 0 || composerHeight > 0) {
+    let rafId = 0;
+    const run = () => {
       endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-    }
-  }, [keyboardHeight, composerHeight]);
-
-  useEffect(() => {
-    if (showTyping) {
-      endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-    }
-  }, [showTyping, keyboardHeight, composerHeight]);
+    };
+    rafId = window.requestAnimationFrame(run);
+    return () => {
+      if (rafId) window.cancelAnimationFrame(rafId);
+    };
+  }, [messages.length, keyboardHeight, composerHeight, showTyping]);
 
   const resetTyping = () => {
     typingReqIdRef.current = 0;
