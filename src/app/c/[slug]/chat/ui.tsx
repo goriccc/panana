@@ -683,8 +683,8 @@ export function CharacterChatClient({
   const needsAdultGate = Boolean(safetySupported) && !adultVerified && !adultLoading;
   if (needsAdultGate) {
     return (
-      <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.12),transparent_60%),linear-gradient(#07070B,#0B0C10)] px-5 pb-24 pt-10 text-white">
-        <div className="mx-auto w-full max-w-[420px]">
+    <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.12),transparent_60%),linear-gradient(#07070B,#0B0C10)] px-5 pb-24 pt-10 text-white">
+        <div className="mx-auto w-full max-w-[520px]">
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 text-center">
             <div className="text-[16px] font-extrabold text-white/90">성인 인증이 필요해요</div>
             <div className="mt-2 text-[12px] font-semibold text-white/55">

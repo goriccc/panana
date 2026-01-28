@@ -25,7 +25,7 @@ export function AlertModal({
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" />
       <div className="absolute inset-0 grid place-items-center px-6">
-        <SurfaceCard variant="outglow" className="w-full max-w-[520px] p-6">
+        <SurfaceCard variant="outglow" className="w-full max-w-[620px] p-6">
           <div className="text-center text-[16px] font-semibold text-white/90">{title}</div>
           <div className="mt-4 whitespace-pre-line text-center text-[14px] leading-[1.45] text-white/70">
             {message}
