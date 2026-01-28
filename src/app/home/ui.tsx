@@ -404,7 +404,7 @@ export function HomeClient({
           </div>
         ) : null}
 
-        {activeTab === "my" && !loggedIn ? (
+        {activeTab === "my" && !loggedIn && !hasAnyMyChats ? (
           <Link
             href="/login?return=/home"
             className="mb-4 block w-full rounded-2xl border border-panana-pink/60 bg-white px-5 py-4 text-center text-[13px] font-extrabold text-panana-pink"
