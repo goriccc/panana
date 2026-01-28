@@ -17,6 +17,15 @@ function sanitizeAssistantText(raw: string, tvars: Record<string, any>) {
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/[ \t]{2,}/g, " ");
+  // 4) 괄호 지문 안 "유저" → call_sign 치환
+  const callSign = String((tvars as any)?.call_sign || (tvars as any)?.user_name || "").trim();
+  if (callSign) {
+    const replaceInner = (inner: string) => String(inner || "").replace(/(유저|사용자)/g, callSign);
+    s = s.replace(/\(([^)]*)\)/g, (_m, inner) => `(${replaceInner(inner)})`);
+    s = s.replace(/（([^）]*)）/g, (_m, inner) => `（${replaceInner(inner)}）`);
+    s = s.replace(/\[([^\]]*)\]/g, (_m, inner) => `[${replaceInner(inner)}]`);
+    s = s.replace(/【([^】]*)】/g, (_m, inner) => `【${replaceInner(inner)}】`);
+  }
   return s.trim();
 }
 
@@ -411,6 +420,7 @@ function composeSystemPrompt(args: {
   return [
     `너는 "${name}" 캐릭터로서 "{{call_sign}}"(상대방)과 1:1 채팅을 한다.`,
     `상대방을 "유저"라고 부르지 말고, 반드시 "{{call_sign}}" 또는 상황에 맞는 호칭으로 부른다.`,
+    `지문(괄호 안 서술)에서도 "유저/사용자" 금지. 반드시 "{{call_sign}}"으로 표기한다.`,
     handle || tags || mbti ? `프로필: ${[handle, tags, mbti].filter(Boolean).join("  ")}` : null,
     s?.personalitySummary ? `성격/정체성:\n${String(s.personalitySummary)}` : null,
     s?.speechGuide ? `말투 가이드:\n${String(s.speechGuide)}` : null,

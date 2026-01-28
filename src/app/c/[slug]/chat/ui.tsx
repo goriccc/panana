@@ -214,6 +214,8 @@ export function CharacterChatClient({
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [composerHeight, setComposerHeight] = useState(64);
   const composerRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const isAtBottomRef = useRef(true);
   
   // 프로필 이미지 미리 로드 (캐시에 저장)
   useEffect(() => {
@@ -247,7 +249,9 @@ export function CharacterChatClient({
 
     const handleFocus = () => {
       updateKeyboardHeight();
-      endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+      if (isAtBottomRef.current) {
+        endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+      }
     };
 
     const handleBlur = () => {
@@ -257,7 +261,6 @@ export function CharacterChatClient({
 
     if (window.visualViewport) {
       window.visualViewport.addEventListener("resize", updateKeyboardHeight, { passive: true });
-      window.visualViewport.addEventListener("scroll", updateKeyboardHeight, { passive: true });
       updateKeyboardHeight();
     } else {
       window.addEventListener("resize", updateKeyboardHeight, { passive: true });
@@ -272,7 +275,6 @@ export function CharacterChatClient({
     return () => {
       if (window.visualViewport) {
         window.visualViewport.removeEventListener("resize", updateKeyboardHeight);
-        window.visualViewport.removeEventListener("scroll", updateKeyboardHeight);
       } else {
         window.removeEventListener("resize", updateKeyboardHeight);
       }
@@ -314,6 +316,7 @@ export function CharacterChatClient({
   useEffect(() => {
     let rafId = 0;
     const run = () => {
+      if (!isAtBottomRef.current) return;
       endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
     };
     rafId = window.requestAnimationFrame(run);
@@ -678,10 +681,18 @@ export function CharacterChatClient({
 
       {/* 메시지 영역만 스크롤(카톡 스타일). 입력창과 겹치지 않음 */}
       <main
+        ref={scrollRef}
         className="chat-scrollbar mx-auto w-full max-w-[420px] flex-1 min-h-0 overflow-y-auto px-5 pb-4 pt-4"
         style={{
           paddingBottom: `${Math.max(0, keyboardHeight) + Math.max(0, composerHeight) + 12}px`,
           scrollPaddingBottom: `${Math.max(0, keyboardHeight) + Math.max(0, composerHeight) + 12}px`,
+        }}
+        onScroll={() => {
+          const el = scrollRef.current;
+          if (!el) return;
+          const threshold = 80;
+          const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+          isAtBottomRef.current = atBottom;
         }}
       >
         {err ? <div className="mb-3 text-[12px] font-semibold text-[#ff9aa1]">{err}</div> : null}
