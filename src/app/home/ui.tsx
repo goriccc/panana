@@ -2,20 +2,40 @@
 
 import Link from "next/link";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { HomeHeader } from "@/components/HomeHeader";
 import { ContentCard } from "@/components/ContentCard";
 import { categories as fallbackCategories, type Category, type ContentCardItem } from "@/lib/content";
 import { loadMyChats, type MyChatItem } from "@/lib/pananaApp/myChats";
 import { useSession } from "next-auth/react";
+import type { MenuVisibility } from "@/lib/pananaApp/contentServer";
 
-export function HomeClient({ categories }: { categories?: Category[] }) {
-  const [safetyOn, setSafetyOn] = useState(false);
-  useEffect(() => {
+const defaultMenuVisibility: MenuVisibility = {
+  my: true,
+  home: true,
+  challenge: true,
+  ranking: true,
+  search: true,
+};
+
+export function HomeClient({
+  categories,
+  initialMenuVisibility,
+}: {
+  categories?: Category[];
+  initialMenuVisibility?: MenuVisibility;
+}) {
+  const router = useRouter();
+  // localStorage에서 즉시 읽어와서 초기 상태 설정 (깜빡임 방지)
+  const [safetyOn, setSafetyOn] = useState(() => {
+    if (typeof window === "undefined") return false;
     try {
-      setSafetyOn(localStorage.getItem("panana_safety_on") === "1");
-    } catch {}
-  }, []);
+      return localStorage.getItem("panana_safety_on") === "1";
+    } catch {
+      return false;
+    }
+  });
 
   const sourceBase = categories?.length ? categories : fallbackCategories;
   const source = useMemo(() => {
@@ -48,10 +68,48 @@ export function HomeClient({ categories }: { categories?: Category[] }) {
   const [heroIdx, setHeroIdx] = useState(0);
   const [heroPaused, setHeroPaused] = useState(false);
   const [activeTab, setActiveTab] = useState<"my" | "home" | "challenge" | "ranking" | "search">("home");
+  const [menuVisibility, setMenuVisibility] = useState<MenuVisibility>(
+    initialMenuVisibility || defaultMenuVisibility
+  );
   const [myChats, setMyChats] = useState<MyChatItem[]>([]);
   const [myChatsSafetyMap, setMyChatsSafetyMap] = useState<Record<string, boolean>>({});
+  const [myChatsLoading, setMyChatsLoading] = useState(true);
   const { status } = useSession();
   const loggedIn = status === "authenticated";
+
+  // 메뉴 설정 업데이트 (서버에서 받은 값이 있으면 사용, 없으면 클라이언트에서 다시 로드)
+  useEffect(() => {
+    if (!initialMenuVisibility) {
+      fetch("/api/site-settings")
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.menuVisibility) {
+            setMenuVisibility(data.menuVisibility);
+          }
+        })
+        .catch((err) => {
+          console.error("Failed to load menu visibility:", err);
+        });
+    }
+  }, [initialMenuVisibility]);
+
+  // 활성 탭이 숨겨진 경우 자동 전환
+  useEffect(() => {
+    if (!menuVisibility[activeTab]) {
+      // 우선순위: home > search > my > challenge > ranking
+      const fallbackOrder: Array<"my" | "home" | "challenge" | "ranking" | "search"> = [
+        "home",
+        "search",
+        "my",
+        "challenge",
+        "ranking",
+      ];
+      const nextTab = fallbackOrder.find((tab) => menuVisibility[tab]);
+      if (nextTab) {
+        setActiveTab(nextTab);
+      }
+    }
+  }, [menuVisibility, activeTab]);
 
   const [searchQ, setSearchQ] = useState("");
   const [searchLimit, setSearchLimit] = useState(8);
@@ -104,11 +162,16 @@ export function HomeClient({ categories }: { categories?: Category[] }) {
   }, [heroPaused, heroList.length]);
 
   useEffect(() => {
+    let firstLoad = true;
     const load = async () => {
       const list = loadMyChats();
       setMyChats(list);
       // 대화한 캐릭터가 있으면 첫 진입에 MY를 자동 선택(요청 UX)
       if (list.length) setActiveTab("my");
+      if (firstLoad) {
+        setMyChatsLoading(false);
+        firstLoad = false;
+      }
 
       // 각 캐릭터의 safety_supported 정보를 한 번에 가져오기
       if (list.length > 0) {
@@ -129,6 +192,7 @@ export function HomeClient({ categories }: { categories?: Category[] }) {
           // ignore
         }
       }
+
     };
     load();
     const onFocus = () => {
@@ -157,6 +221,22 @@ export function HomeClient({ categories }: { categories?: Category[] }) {
       return title.includes(q) || desc.includes(q) || slug.includes(q) || tags.includes(q) || author.includes(q);
     });
   }, [searchCandidates, searchQ]);
+
+  const myTabFiltered = useMemo(() => {
+    // safety 정보가 로드되기 전에는 필터링하지 않음 (깜빡임 방지)
+    const hasSafetyInfo = myChats.length === 0 || Object.keys(myChatsSafetyMap).length > 0;
+    if (!hasSafetyInfo) return [];
+    
+    return myChats.filter((it) => {
+      // 스파이시 OFF(safetyOn=false)일 때: safetySupported가 true인 캐릭터는 숨김
+      if (!safetyOn) {
+        const safetySupported = myChatsSafetyMap[it.characterSlug];
+        // safety 정보가 없으면 일단 숨김 (안전하게 처리)
+        if (safetySupported === true || safetySupported === undefined) return false;
+      }
+      return true;
+    });
+  }, [myChats, myChatsSafetyMap, safetyOn]);
 
   useEffect(() => {
     setSearchLimit(8);
@@ -189,6 +269,7 @@ export function HomeClient({ categories }: { categories?: Category[] }) {
             localStorage.setItem("panana_safety_on", next ? "1" : "0");
           } catch {}
         }}
+        menuVisibility={menuVisibility}
       />
 
       <main className="mx-auto w-full max-w-[420px] px-5 pb-10 pt-5">
@@ -271,6 +352,8 @@ export function HomeClient({ categories }: { categories?: Category[] }) {
                             href={slug ? `/c/${slug}` : "/home"}
                             aria-label={`${name} 상세로 이동`}
                             className="relative h-10 w-10 flex-none overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10"
+                            prefetch={true}
+                            onMouseEnter={() => slug && router.prefetch(`/c/${slug}`)}
                           >
                             {img ? (
                               <Image src={img} alt="" fill sizes="40px" className="object-cover" />
@@ -289,6 +372,8 @@ export function HomeClient({ categories }: { categories?: Category[] }) {
                         <Link
                           href={slug ? `/c/${slug}/chat` : "/home"}
                           className="flex-none rounded-xl border border-panana-pink/60 bg-white px-3 py-2 text-[12px] font-extrabold text-panana-pink"
+                          prefetch={true}
+                          onMouseEnter={() => slug && router.prefetch(`/c/${slug}/chat`)}
                         >
                           메세지
                         </Link>
@@ -322,22 +407,31 @@ export function HomeClient({ categories }: { categories?: Category[] }) {
           </Link>
         ) : null}
 
+        {activeTab === "my" && loggedIn && myChatsLoading ? (
+          <div className="mb-6 overflow-hidden rounded-[16px] border border-white/10 bg-white/[0.03]">
+            {Array.from({ length: 3 }).map((_, idx) => (
+              <div key={idx} className="flex items-center gap-3 border-b border-white/10 px-4 py-4 last:border-b-0">
+                <div className="h-10 w-10 rounded-full bg-white/10 ring-1 ring-white/10 animate-pulse" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-3 w-32 rounded-full bg-white/10 animate-pulse" />
+                  <div className="h-2.5 w-20 rounded-full bg-white/10 animate-pulse" />
+                </div>
+                <div className="h-6 w-12 rounded-full bg-white/10 ring-1 ring-white/10 animate-pulse" />
+              </div>
+            ))}
+          </div>
+        ) : null}
+
         {activeTab === "my" ? (() => {
-          const filtered = myChats.filter((it) => {
-            // 스파이시 OFF(safetyOn=false)일 때: safetySupported가 true인 캐릭터는 숨김
-            if (!safetyOn) {
-              const safetySupported = myChatsSafetyMap[it.characterSlug];
-              if (safetySupported === true) return false;
-            }
-            return true;
-          });
-          return filtered.length > 0 ? (
+          return myTabFiltered.length > 0 ? (
             <div className="mb-6 overflow-hidden rounded-[16px] border border-white/10 bg-white/[0.03]">
-              {filtered.slice(0, 20).map((it) => (
+              {myTabFiltered.slice(0, 20).map((it) => (
               <Link
                 key={it.characterSlug}
                 href={`/c/${it.characterSlug}/chat`}
                 className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4 last:border-b-0 hover:bg-white/[0.03]"
+                prefetch={true}
+                onMouseEnter={() => router.prefetch(`/c/${it.characterSlug}/chat`)}
               >
                 <div className="flex min-w-0 items-center gap-3">
                   <div className="relative h-10 w-10 flex-none overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10">
@@ -363,15 +457,8 @@ export function HomeClient({ categories }: { categories?: Category[] }) {
         })() : null}
 
         {activeTab === "my" && (() => {
-          const filtered = myChats.filter((it) => {
-            if (!safetyOn) {
-              const safetySupported = myChatsSafetyMap[it.characterSlug];
-              if (safetySupported === true) return false;
-            }
-            return true;
-          });
           // 한 번도 대화한 적이 없거나, 필터링 후 비어있을 때 빈 상태 표시
-          return filtered.length === 0;
+          return !myChatsLoading && myTabFiltered.length === 0;
         })() && loggedIn ? (
           <div className="min-h-[58vh]">
             <div className="flex h-full min-h-[58vh] flex-col items-center justify-center text-center">
@@ -398,7 +485,13 @@ export function HomeClient({ categories }: { categories?: Category[] }) {
         <Link
           href={hero ? `/c/${hero.characterSlug}` : "/home"}
           className="group block overflow-hidden rounded-[8px] border border-white/10 bg-white/[0.04] shadow-[0_18px_42px_rgba(0,0,0,0.45)]"
-          onMouseEnter={() => setHeroPaused(true)}
+          prefetch={true}
+          onMouseEnter={() => {
+            setHeroPaused(true);
+            if (hero?.characterSlug) {
+              router.prefetch(`/c/${hero.characterSlug}`);
+            }
+          }}
           onMouseLeave={() => setHeroPaused(false)}
           onFocus={() => setHeroPaused(true)}
           onBlur={() => setHeroPaused(false)}
@@ -472,6 +565,8 @@ export function HomeClient({ categories }: { categories?: Category[] }) {
                   href={`/category/${cat.slug}`}
                   aria-label={`${cat.name} 전체 보기`}
                   className="p-1"
+                  prefetch={true}
+                  onMouseEnter={() => router.prefetch(`/category/${cat.slug}`)}
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M9 6l6 6-6 6" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />

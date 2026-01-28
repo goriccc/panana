@@ -27,11 +27,13 @@ export function AdminButton({
   variant = "primary",
   onClick,
   type = "button",
+  disabled = false,
 }: {
   children: React.ReactNode;
   variant?: "primary" | "ghost" | "danger";
   onClick?: () => void;
   type?: "button" | "submit";
+  disabled?: boolean;
 }) {
   const cls =
     variant === "primary"
@@ -41,7 +43,14 @@ export function AdminButton({
         : "bg-white/[0.03] text-white/80 ring-1 ring-white/10 hover:bg-white/[0.05]";
 
   return (
-    <button type={type} onClick={onClick} className={`rounded-xl px-4 py-2 text-[12px] font-extrabold ${cls}`}>
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      className={`rounded-xl px-4 py-2 text-[12px] font-extrabold ${cls} ${
+        disabled ? "opacity-50 cursor-not-allowed" : ""
+      }`}
+    >
       {children}
     </button>
   );

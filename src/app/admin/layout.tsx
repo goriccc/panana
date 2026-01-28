@@ -22,8 +22,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               { href: "/admin/billing", label: "충전 상품" },
               { href: "/admin/membership", label: "멤버십" },
               { href: "/admin/llm", label: "LLM 설정" },
-              { href: "/admin/airport", label: "공항/입국 플로우" },
               { href: "/admin/site", label: "사이트(푸터/SEO)" },
+              { href: "/admin/menu", label: "메뉴관리" },
               { href: "/studio", label: "PananaAI Studio" },
             ].map((i) => (
               <Link

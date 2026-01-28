@@ -85,11 +85,13 @@ function recommendByTags({
 }
 
 export default async function CharacterPage({ params }: { params: { slug: string } }) {
-  const fromDb = await fetchCharacterProfileFromDb(params.slug).catch(() => null);
+  const [fromDb, cats] = await Promise.all([
+    fetchCharacterProfileFromDb(params.slug).catch(() => null),
+    fetchHomeCategoriesFromDb().catch(() => null),
+  ]);
   const c = fromDb || getCharacter(params.slug);
   if (!c) notFound();
 
-  const cats = await fetchHomeCategoriesFromDb().catch(() => null);
   const pool = (cats || []).flatMap((cat) => cat.items || []);
   const recommendedTalkCards = recommendByTags({
     characterSlug: c.slug,

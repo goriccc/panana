@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { HomeClient } from "./ui";
-import { fetchHomeCategoriesFromDb } from "@/lib/pananaApp/contentServer";
+import { fetchHomeCategoriesFromDb, fetchMenuVisibilityFromDb } from "@/lib/pananaApp/contentServer";
 
 export const metadata: Metadata = {
   title: "홈",
@@ -9,6 +9,9 @@ export const metadata: Metadata = {
 };
 
 export default async function HomePage() {
-  const cats = await fetchHomeCategoriesFromDb().catch(() => null);
-  return <HomeClient categories={cats || undefined} />;
+  const [cats, menuVisibility] = await Promise.all([
+    fetchHomeCategoriesFromDb().catch(() => null),
+    fetchMenuVisibilityFromDb().catch(() => null),
+  ]);
+  return <HomeClient categories={cats || undefined} initialMenuVisibility={menuVisibility || undefined} />;
 }

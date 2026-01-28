@@ -84,7 +84,12 @@ export function MyEditClient() {
     <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.10),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">
       <header className="mx-auto w-full max-w-[420px] px-5 pt-3">
         <div className="relative flex h-11 items-center">
-          <Link href="/my" aria-label="뒤로가기" className="absolute left-0 p-2">
+          <Link 
+            href="/my" 
+            aria-label="뒤로가기" 
+            className="absolute left-0 p-2"
+            prefetch={true}
+          >
             <BackIcon />
           </Link>
           <div className="mx-auto text-[18px] font-semibold tracking-[-0.01em] text-[#ffa9d6]">

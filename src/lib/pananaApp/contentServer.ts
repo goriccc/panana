@@ -70,6 +70,9 @@ export async function fetchHomeCategoriesFromDb(): Promise<Category[] | null> {
   if (cardsErr) {
     const msg = String(cardsErr?.message || "");
     if (msg.includes("safety_supported")) {
+      console.warn(
+        "[contentServer] safety_supported unavailable on panana_public_category_cards_v. Run docs/panana-admin/PUBLIC_VIEWS.sql (and migration) to expose/grant the column."
+      );
       const retry = await supabase
         .from("panana_public_category_cards_v")
         .select(
@@ -137,6 +140,9 @@ export async function fetchCategoryFromDb(slug: string): Promise<Category | null
   if (cardsErr) {
     const msg = String(cardsErr?.message || "");
     if (msg.includes("safety_supported")) {
+      console.warn(
+        "[contentServer] safety_supported unavailable on panana_public_category_cards_v. Run docs/panana-admin/PUBLIC_VIEWS.sql (and migration) to expose/grant the column."
+      );
       const retry = await supabase
         .from("panana_public_category_cards_v")
         .select("category_slug, item_sort_order, character_slug, author_handle, title, description, tags, character_profile_image_url")
@@ -211,10 +217,50 @@ export async function fetchCharacterSafetySupportedFromDb(slug: string): Promise
   if (error) {
     const msg = String((error as any)?.message || "");
     // 하위호환: 컬럼/뷰가 아직 없을 수 있음
-    if (msg.includes("safety_supported")) return null;
+    if (msg.includes("safety_supported")) {
+      console.warn(
+        "[contentServer] safety_supported unavailable on panana_public_characters_v. Run docs/panana-admin/PUBLIC_VIEWS.sql (and migration) to expose/grant the column."
+      );
+      return null;
+    }
     console.error("[contentServer] panana_public_characters_v safety_supported error:", error);
     return null;
   }
   return Boolean((data as any)?.safety_supported);
 }
 
+export type MenuVisibility = {
+  my: boolean;
+  home: boolean;
+  challenge: boolean;
+  ranking: boolean;
+  search: boolean;
+};
+
+export async function fetchMenuVisibilityFromDb(): Promise<MenuVisibility> {
+  const supabase = getSupabaseServer();
+  const defaultVisibility: MenuVisibility = {
+    my: true,
+    home: true,
+    challenge: true,
+    ranking: true,
+    search: true,
+  };
+
+  const { data, error } = await supabase
+    .from("panana_public_site_settings_v")
+    .select("menu_visibility")
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[contentServer] panana_public_site_settings_v menu_visibility error:", error);
+    return defaultVisibility;
+  }
+
+  if (data?.menu_visibility) {
+    return { ...defaultVisibility, ...(data.menu_visibility as MenuVisibility) };
+  }
+
+  return defaultVisibility;
+}

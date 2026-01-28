@@ -86,7 +86,12 @@ export function AccountClient() {
           <div className="px-5 py-5">
             <div className="flex items-center justify-between">
               <div className="text-[13px] font-extrabold text-white/85">내 정보</div>
-              <Link href="/my/account/edit" aria-label="내 정보 편집" className="p-2">
+              <Link 
+                href="/my/account/edit" 
+                aria-label="내 정보 편집" 
+                className="p-2"
+                prefetch={true}
+              >
                 <PencilIcon />
               </Link>
             </div>

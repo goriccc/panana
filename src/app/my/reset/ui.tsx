@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { PillToast, type PillToastType } from "@/components/PillToast";
 import { SurfaceCard } from "@/components/SurfaceCard";
 import { TopBar } from "@/components/TopBar";
 import { ensurePananaIdentity } from "@/lib/pananaApp/identity";
@@ -80,7 +81,8 @@ function clearLocalChatData(pananaId?: string) {
 export function ResetClient() {
   const [open, setOpen] = useState<null | "chat" | "service">(null);
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ type: PillToastType; message: string } | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
 
   const modal = useMemo(() => {
     if (!open) return null;
@@ -98,13 +100,35 @@ export function ResetClient() {
     };
   }, [open]);
 
+  const showToast = (type: PillToastType, message: string, durationMs?: number) => {
+    if (toastTimerRef.current != null) {
+      window.clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = null;
+    }
+    setToast({ type, message });
+    const ms = durationMs ?? (type === "success" ? 1500 : type === "warning" ? 2000 : 2500);
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, ms);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current != null) {
+        window.clearTimeout(toastTimerRef.current);
+        toastTimerRef.current = null;
+      }
+    };
+  }, []);
+
   return (
     <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.10),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">
+      <PillToast open={Boolean(toast)} type={toast?.type || "success"} message={toast?.message || ""} />
       <TopBar title="초기화" backHref="/my" />
 
       <main className="mx-auto w-full max-w-[420px] px-0 pb-20 pt-2">
         <div className="border-t border-white/10">
-          {status ? <div className="px-5 pt-5 text-[12px] font-semibold text-white/60">{status}</div> : null}
           <div className="flex items-start justify-between gap-4 px-5 py-5">
             <div>
               <div className="text-[14px] font-semibold text-white/80">대화 내용 초기화</div>
@@ -155,7 +179,6 @@ export function ResetClient() {
         onClose={() => setOpen(null)}
         onConfirm={async () => {
           if (!open) return;
-          setStatus(null);
           setBusy(true);
           try {
             const idt = ensurePananaIdentity();
@@ -181,9 +204,9 @@ export function ResetClient() {
               return;
             }
 
-            setStatus("대화 내용이 초기화 되었어요.");
+            showToast("success", "변경 사항이 저장되었습니다.");
           } catch (e: any) {
-            setStatus(e?.message || "초기화에 실패했어요.");
+            showToast("error", e?.message || "문제가 발생했습니다.");
           } finally {
             setBusy(false);
             setOpen(null);

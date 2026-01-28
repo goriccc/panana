@@ -6,21 +6,11 @@ import { IllustrationPlaceholder } from "@/components/IllustrationPlaceholder";
 import { PananaLogo } from "@/components/PananaLogo";
 import { ScreenShell } from "@/components/ScreenShell";
 import { SurfaceCard } from "@/components/SurfaceCard";
-import { fetchAirportThumbnailSets, publicUrlFromStoragePath } from "@/lib/pananaApp/airportPublic";
 
-function resolveUrl(maybePathOrUrl: string) {
-  if (!maybePathOrUrl) return "";
-  if (maybePathOrUrl.startsWith("http://") || maybePathOrUrl.startsWith("https://")) return maybePathOrUrl;
-  return publicUrlFromStoragePath(maybePathOrUrl);
-}
-
-function CompleteMediaBlock({ image, video }: { image: string; video: string }) {
-  if (!image && !video) {
+function CompleteMediaBlock({ imageUrl, videoUrl }: { imageUrl: string; videoUrl: string }) {
+  if (!imageUrl && !videoUrl) {
     return <IllustrationPlaceholder label="PANANA IMMIGRATION" className="mt-5 h-[260px] w-full" />;
   }
-
-  const imageUrl = resolveUrl(image);
-  const videoUrl = resolveUrl(video);
 
   const [videoReady, setVideoReady] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -34,16 +24,25 @@ function CompleteMediaBlock({ image, video }: { image: string; video: string }) 
     if (!el) return;
     if (!videoUrl) return;
 
-    const onReady = () => setVideoReady(true);
+    const onReady = () => {
+      setVideoReady(true);
+      // 동영상이 준비되면 즉시 재생
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      el.play().catch(() => {});
+    };
+    
+    // 여러 이벤트로 빠른 감지
     el.addEventListener("loadeddata", onReady);
     el.addEventListener("canplay", onReady);
-
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises
-    el.play().catch(() => {});
+    el.addEventListener("canplaythrough", onReady);
+    
+    // 동영상 로딩 즉시 시작
+    el.load();
 
     return () => {
       el.removeEventListener("loadeddata", onReady);
       el.removeEventListener("canplay", onReady);
+      el.removeEventListener("canplaythrough", onReady);
     };
   }, [videoUrl]);
 
@@ -70,7 +69,7 @@ function CompleteMediaBlock({ image, video }: { image: string; video: string }) 
             ref={videoRef}
             src={videoUrl}
             poster={imageUrl || undefined}
-            className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-300 ${
+            className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-200 ${
               videoReady ? "opacity-100" : "opacity-0"
             }`}
             muted
@@ -88,8 +87,10 @@ function CompleteMediaBlock({ image, video }: { image: string; video: string }) 
 export function AirportCompleteClient() {
   const [left, setLeft] = useState(10);
   const targetHref = useMemo(() => "/home", []);
-  const [imagePath, setImagePath] = useState("");
-  const [videoPath, setVideoPath] = useState("");
+  
+  // 로컬 파일 직접 사용: 입국통과 (3.png, 3_3.mp4)
+  const imageUrl = "/airport/3.png";
+  const videoUrl = "/airport/3_3.mp4";
 
   useEffect(() => {
     const t = window.setInterval(() => {
@@ -104,24 +105,6 @@ export function AirportCompleteClient() {
     }
   }, [left, targetHref]);
 
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const sets = await fetchAirportThumbnailSets("complete");
-        if (!alive) return;
-        const first = sets.find((s) => Boolean(s.image_path || s.video_path)) || sets[0];
-        setImagePath(first?.image_path || "");
-        setVideoPath(first?.video_path || "");
-      } catch {
-        // ignore
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
-
   return (
     <ScreenShell title="입국 완료">
       <div className="mb-7">
@@ -133,7 +116,7 @@ export function AirportCompleteClient() {
           축하해요! 입국 완료!
         </div>
 
-        <CompleteMediaBlock image={imagePath} video={videoPath} />
+        <CompleteMediaBlock imageUrl={imageUrl} videoUrl={videoUrl} />
 
         <div className="mt-5 text-center text-[13px] text-white/55">
           {left}초 후 자동 입장...

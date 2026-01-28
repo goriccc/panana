@@ -1,12 +1,11 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertModal } from "@/components/AlertModal";
 import { ScreenShell } from "@/components/ScreenShell";
 import { ensurePananaIdentity } from "@/lib/pananaApp/identity";
 import { fetchMyAccountInfo, type Gender, updateMyAccountInfo } from "@/lib/pananaApp/accountInfo";
-import { fetchAirportCopy, fetchAirportThumbnailSets, publicUrlFromStoragePath } from "@/lib/pananaApp/airportPublic";
 
 function useModalQuery(key: string) {
   const pathname = usePathname();
@@ -53,7 +52,7 @@ function RadioOptionRow({ active, label, onClick }: { active: boolean; label: st
       type="button"
       onClick={onClick}
       className={[
-        "flex w-full items-center gap-4 rounded-2xl bg-white/[0.04] px-5 py-5 text-left transition",
+        "flex w-full items-center gap-4 rounded-2xl bg-white/[0.04] px-5 py-3 text-left transition",
         active ? "bg-white/[0.055]" : "hover:bg-white/[0.06]",
       ].join(" ")}
     >
@@ -100,12 +99,6 @@ function Stepper({ step }: { step: 1 | 2 | 3 | 4 }) {
   );
 }
 
-function mediaUrlFromPathMaybe(pathOrUrl: string) {
-  const v = String(pathOrUrl || "").trim();
-  if (!v) return "";
-  if (v.startsWith("http://") || v.startsWith("https://")) return v;
-  return publicUrlFromStoragePath(v);
-}
 
 export function AirportChatClient() {
   const modal = useModalQuery("confirmSkip");
@@ -154,11 +147,57 @@ export function AirportChatClient() {
 
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
 
-  const [heroImageUrl, setHeroImageUrl] = useState<string>("");
-  const [heroVideoUrl, setHeroVideoUrl] = useState<string>("");
-  const [introText, setIntroText] = useState<string>("");
-  const [heroSets, setHeroSets] = useState<Array<{ imageUrl: string; videoUrl: string }>>([]);
-  const [heroIdx, setHeroIdx] = useState(0);
+  // 로컬 파일 직접 사용: 입국심사중 (2.png, 2_2.mp4)
+  const heroImageUrl = "/airport/2.png";
+  const heroVideoUrl = "/airport/2_2.mp4";
+  const introText = "입국 심사대 앞에 도착하였다. 친절한 입국 심사관을 마주하는데...";
+  const [videoReady, setVideoReady] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    if (!heroVideoUrl) return;
+
+    let playAttempted = false;
+    const attemptPlay = async () => {
+      if (playAttempted) return;
+      try {
+        await el.play();
+        playAttempted = true;
+        setVideoReady(true);
+      } catch (err) {
+        // 재생 실패 시 무시 (자동 재생 정책 등)
+        console.debug("Video autoplay failed:", err);
+      }
+    };
+
+    const onReady = () => {
+      setVideoReady(true);
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      attemptPlay();
+    };
+    
+    // 여러 이벤트로 빠른 감지
+    el.addEventListener("loadeddata", onReady);
+    el.addEventListener("canplay", onReady);
+    el.addEventListener("canplaythrough", onReady);
+    el.addEventListener("loadedmetadata", onReady);
+    
+    // 동영상 로딩 즉시 시작
+    el.load();
+    
+    // 마운트 직후에도 재생 시도
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    attemptPlay();
+
+    return () => {
+      el.removeEventListener("loadeddata", onReady);
+      el.removeEventListener("canplay", onReady);
+      el.removeEventListener("canplaythrough", onReady);
+      el.removeEventListener("loadedmetadata", onReady);
+    };
+  }, [heroVideoUrl]);
 
   useEffect(() => {
     if (sp.get("skip") === "1") modal.open();
@@ -169,31 +208,8 @@ export function AirportChatClient() {
     let alive = true;
     (async () => {
       try {
-        const [chatSets, fallbackSets, copyRows, info] = await Promise.all([
-          fetchAirportThumbnailSets("immigration_chat"),
-          fetchAirportThumbnailSets("immigration"),
-          fetchAirportCopy("immigration_intro"),
-          fetchMyAccountInfo(),
-        ]);
+        const info = await fetchMyAccountInfo();
         if (!alive) return;
-
-        const rawSets = (chatSets && chatSets.length ? chatSets : fallbackSets) || [];
-        const normalized = rawSets
-          .map((s) => ({
-            imageUrl: s.image_path ? mediaUrlFromPathMaybe(s.image_path) : "",
-            videoUrl: s.video_path ? mediaUrlFromPathMaybe(s.video_path) : "",
-          }))
-          .filter((s) => s.imageUrl || s.videoUrl);
-        setHeroSets(normalized);
-        setHeroIdx(0);
-
-        const first = normalized[0] || { imageUrl: "", videoUrl: "" };
-        setHeroImageUrl(first.imageUrl);
-        setHeroVideoUrl(first.videoUrl);
-
-        const c = copyRows?.find((r) => String(r.text || "").trim())?.text;
-        if (c) setIntroText(String(c));
-
         if (info?.birth) setBirth(String(info.birth));
         if (info?.gender) setGender(info.gender);
       } catch {
@@ -204,13 +220,6 @@ export function AirportChatClient() {
       alive = false;
     };
   }, []);
-
-  useEffect(() => {
-    const cur = heroSets[heroIdx];
-    if (!cur) return;
-    setHeroImageUrl(cur.imageUrl);
-    setHeroVideoUrl(cur.videoUrl);
-  }, [heroIdx, heroSets]);
 
   return (
     <>
@@ -232,41 +241,41 @@ export function AirportChatClient() {
 
           <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
             <div className="relative aspect-[16/10] w-full bg-black/20">
+              {heroImageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={heroImageUrl}
+                  alt=""
+                  className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-200 ${
+                    heroVideoUrl && videoReady ? "opacity-0" : "opacity-100"
+                  }`}
+                />
+              ) : null}
+              
               {heroVideoUrl ? (
                 <video
+                  ref={videoRef}
                   src={heroVideoUrl}
                   poster={heroImageUrl || undefined}
-                  className="h-full w-full object-cover"
+                  className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-200 ${
+                    videoReady ? "opacity-100" : "opacity-0"
+                  }`}
                   muted
                   playsInline
-                  loop
                   autoPlay
+                  loop
                   preload="auto"
                 />
-              ) : heroImageUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={heroImageUrl} alt="" className="h-full w-full object-cover" />
-              ) : (
+              ) : null}
+              
+              {!heroImageUrl && !heroVideoUrl ? (
                 <div className="grid h-full w-full place-items-center text-[12px] font-semibold text-white/35">미디어가 아직 없어요</div>
-              )}
-
-              {heroSets.length > 1 ? (
-                <button
-                  type="button"
-                  aria-label="다음 썸네일"
-                  onClick={() => setHeroIdx((v) => (heroSets.length ? (v + 1) % heroSets.length : 0))}
-                  className="absolute right-3 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-black/35 ring-1 ring-white/15 hover:bg-black/45"
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                    <path d="M10 6l6 6-6 6" stroke="rgba(255,255,255,0.8)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </button>
               ) : null}
             </div>
           </div>
 
           <div className="whitespace-pre-line text-center text-[13px] leading-[1.45] text-white/60">
-            {introText || "입국 심사대 앞에 도착하였다. 친절한 입국 심사관을 마주하는데..."}
+            {introText}
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
@@ -319,7 +328,7 @@ export function AirportChatClient() {
                       ))
                     : (
                         <>
-                        <div className="space-y-6">
+                        <div className="space-y-3">
                           <RadioOptionRow active={gender === "female"} label="여성" onClick={() => setGender("female")} />
                           <RadioOptionRow active={gender === "male"} label="남성" onClick={() => setGender("male")} />
                           <RadioOptionRow active={gender === "both"} label="둘 다" onClick={() => setGender("both")} />

@@ -2,7 +2,8 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useMemo } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo } from "react";
 import type { CharacterProfile } from "@/lib/characters";
 import type { ContentCardItem } from "@/lib/content";
 import { ContentCard } from "@/components/ContentCard";
@@ -33,8 +34,15 @@ export function CharacterClient({
   character: CharacterProfile;
   recommendedTalkCards: ContentCardItem[];
 }) {
+  const router = useRouter();
   const photos = useMemo(() => character.photos, [character.photos]);
   const isEmptyPosts = Number(character.photoCount || 0) <= 0;
+  
+  // 주요 링크 프리페칭
+  useEffect(() => {
+    router.prefetch(`/c/${character.slug}/chat`);
+    router.prefetch(`/c/${character.slug}/profile-image`);
+  }, [router, character.slug]);
 
   return (
     <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.12),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">
@@ -86,6 +94,8 @@ export function CharacterClient({
               href={`/c/${character.slug}/profile-image`}
               aria-label="프로필 이미지 보기"
               className="relative block h-[56px] w-[56px] overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10"
+              prefetch={true}
+              onMouseEnter={() => router.prefetch(`/c/${character.slug}/profile-image`)}
             >
               {character.profileImageUrl ? (
                 <Image
@@ -101,10 +111,20 @@ export function CharacterClient({
             <div className="min-w-0 flex-1">
               <div className="text-[14px] font-bold text-white/85">{character.name}</div>
               <div className="mt-1 flex items-center gap-5">
-                <Link href={`/c/${character.slug}/follows?tab=followers`} aria-label="팔로워 목록">
+                <Link 
+                  href={`/c/${character.slug}/follows?tab=followers`} 
+                  aria-label="팔로워 목록"
+                  prefetch={true}
+                  onMouseEnter={() => router.prefetch(`/c/${character.slug}/follows`)}
+                >
                   <Stat value={character.followers} label="팔로워" />
                 </Link>
-                <Link href={`/c/${character.slug}/follows?tab=following`} aria-label="팔로잉 목록">
+                <Link 
+                  href={`/c/${character.slug}/follows?tab=following`} 
+                  aria-label="팔로잉 목록"
+                  prefetch={true}
+                  onMouseEnter={() => router.prefetch(`/c/${character.slug}/follows`)}
+                >
                   <Stat value={character.following} label="팔로잉" />
                 </Link>
               </div>
@@ -127,6 +147,8 @@ export function CharacterClient({
             <Link
               href={`/c/${character.slug}/chat`}
               className="group relative overflow-hidden rounded-xl px-4 py-3 text-center text-[14px] font-extrabold text-white ring-1 ring-white/10 transition active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-[#ff4da7]/40"
+              prefetch={true}
+              onMouseEnter={() => router.prefetch(`/c/${character.slug}/chat`)}
               style={{
                 backgroundImage:
                   "linear-gradient(110deg, rgba(255,77,167,1) 0%, rgba(255,126,201,1) 40%, rgba(255,77,167,1) 100%)",

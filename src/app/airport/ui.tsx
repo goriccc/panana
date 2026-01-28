@@ -6,31 +6,21 @@ import { IllustrationPlaceholder } from "@/components/IllustrationPlaceholder";
 import { PananaLogo } from "@/components/PananaLogo";
 import { ScreenShell } from "@/components/ScreenShell";
 import { SurfaceCard } from "@/components/SurfaceCard";
-import { fetchAirportCopy, fetchAirportThumbnailSets, publicUrlFromStoragePath } from "@/lib/pananaApp/airportPublic";
-
-function resolveUrl(maybePathOrUrl: string) {
-  if (!maybePathOrUrl) return "";
-  if (maybePathOrUrl.startsWith("http://") || maybePathOrUrl.startsWith("https://")) return maybePathOrUrl;
-  return publicUrlFromStoragePath(maybePathOrUrl);
-}
 
 function AirportMediaBlock({
-  image,
-  video,
+  imageUrl,
+  videoUrl,
   showNext,
   onNext,
 }: {
-  image: string;
-  video: string;
+  imageUrl: string;
+  videoUrl: string;
   showNext: boolean;
   onNext: () => void;
 }) {
-  if (!image && !video) {
+  if (!imageUrl && !videoUrl) {
     return <IllustrationPlaceholder label="panana AIRPORT" className="mt-5 h-[240px] w-full" />;
   }
-
-  const imageUrl = resolveUrl(image);
-  const videoUrl = resolveUrl(video);
 
   const [videoReady, setVideoReady] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -45,17 +35,25 @@ function AirportMediaBlock({
     if (!el) return;
     if (!videoUrl) return;
 
-    const onReady = () => setVideoReady(true);
+    const onReady = () => {
+      setVideoReady(true);
+      // 동영상이 준비되면 즉시 재생
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      el.play().catch(() => {});
+    };
+    
+    // 여러 이벤트로 빠른 감지
     el.addEventListener("loadeddata", onReady);
     el.addEventListener("canplay", onReady);
-
-    // 병렬 로딩 시작
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises
-    el.play().catch(() => {});
+    el.addEventListener("canplaythrough", onReady);
+    
+    // 동영상 로딩 즉시 시작
+    el.load();
 
     return () => {
       el.removeEventListener("loadeddata", onReady);
       el.removeEventListener("canplay", onReady);
+      el.removeEventListener("canplaythrough", onReady);
     };
   }, [videoUrl]);
 
@@ -82,7 +80,7 @@ function AirportMediaBlock({
             ref={videoRef}
             src={videoUrl}
             poster={imageUrl || undefined}
-            className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-300 ${
+            className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-200 ${
               videoReady ? "opacity-100" : "opacity-0"
             }`}
             muted
@@ -111,40 +109,14 @@ function AirportMediaBlock({
 }
 
 export default function AirportStartClient() {
-  const [sets, setSets] = useState<Array<{ image: string; video: string }>>([]);
-  const [idx, setIdx] = useState(0);
-  const [intro, setIntro] = useState<string | null>(null);
+  // 로컬 파일 직접 사용: 입국심사 (1.png, 1_1.mp4)
+  const imageUrl = "/airport/1.png";
+  const videoUrl = "/airport/1_1.mp4";
 
   const fallbackIntro = useMemo(
     () => "공항에 도착하니 많은 인파로 붐비고 있다.\n입국심사대에 내 차례가 왔는데...",
     []
   );
-
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const [sets, copy] = await Promise.all([
-          fetchAirportThumbnailSets("immigration"),
-          fetchAirportCopy("immigration_intro"),
-        ]);
-
-        if (!alive) return;
-
-        const normalized = (sets || []).map((s) => ({ image: s.image_path || "", video: s.video_path || "" })).filter((s) => s.image || s.video);
-        setSets(normalized);
-        setIdx(0);
-        setIntro(copy.map((c) => c.text).filter(Boolean).join("\n") || null);
-      } catch {
-        // 네트워크/권한 문제면 더미로 유지
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  const current = sets[idx] || { image: "", video: "" };
 
   return (
     <>
@@ -157,14 +129,14 @@ export default function AirportStartClient() {
           <div className="text-center text-[18px] font-semibold tracking-[-0.01em] text-white/90">파나나 공항</div>
 
           <AirportMediaBlock
-            image={current.image}
-            video={current.video}
-            showNext={sets.length > 1}
-            onNext={() => setIdx((v) => (sets.length ? (v + 1) % sets.length : 0))}
+            imageUrl={imageUrl}
+            videoUrl={videoUrl}
+            showNext={false}
+            onNext={() => {}}
           />
 
           <div className="mt-5 whitespace-pre-line text-center text-[13px] leading-[1.45] text-white/60">
-            {intro || fallbackIntro}
+            {fallbackIntro}
           </div>
 
           <Link

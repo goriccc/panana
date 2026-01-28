@@ -65,7 +65,7 @@ function renderChatText(text: string) {
   );
 }
 
-function Bubble({ from, text, avatarUrl }: { from: Msg["from"]; text: string; avatarUrl?: string }) {
+function Bubble({ from, text, avatarUrl, onAvatarClick }: { from: Msg["from"]; text: string; avatarUrl?: string; onAvatarClick?: () => void }) {
   if (from === "user") {
     return (
       <div className="flex justify-end">
@@ -89,9 +89,20 @@ function Bubble({ from, text, avatarUrl }: { from: Msg["from"]; text: string; av
   return (
     <div className="flex w-full justify-start">
       <div className="flex max-w-[320px] items-end gap-2">
-        <div className="relative h-7 w-7 flex-none overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10">
-          {avatarUrl ? <Image src={avatarUrl} alt="" fill sizes="28px" className="rounded-full object-cover" /> : null}
-        </div>
+        {avatarUrl && onAvatarClick ? (
+          <button
+            type="button"
+            onClick={onAvatarClick}
+            className="relative h-7 w-7 flex-none overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10 transition-opacity hover:opacity-80 active:opacity-70"
+            aria-label="프로필 이미지 크게 보기"
+          >
+            <Image src={avatarUrl} alt="" fill sizes="28px" className="rounded-full object-cover" />
+          </button>
+        ) : (
+          <div className="relative h-7 w-7 flex-none overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10">
+            {avatarUrl ? <Image src={avatarUrl} alt="" fill sizes="28px" className="rounded-full object-cover" /> : null}
+          </div>
+        )}
         <div className="rounded-[22px] rounded-bl-[10px] bg-white/[0.06] px-4 py-3 text-[14px] font-semibold leading-[1.45] text-white/80">
           {renderChatText(text)}
         </div>
@@ -100,13 +111,24 @@ function Bubble({ from, text, avatarUrl }: { from: Msg["from"]; text: string; av
   );
 }
 
-function TypingDots({ avatarUrl }: { avatarUrl?: string }) {
+function TypingDots({ avatarUrl, onAvatarClick }: { avatarUrl?: string; onAvatarClick?: () => void }) {
   return (
     <div className="flex w-full justify-start">
       <div className="flex max-w-[320px] items-end gap-2">
-        <div className="relative h-7 w-7 flex-none overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10">
-          {avatarUrl ? <Image src={avatarUrl} alt="" fill sizes="28px" className="rounded-full object-cover" /> : null}
-        </div>
+        {avatarUrl && onAvatarClick ? (
+          <button
+            type="button"
+            onClick={onAvatarClick}
+            className="relative h-7 w-7 flex-none overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10 transition-opacity hover:opacity-80 active:opacity-70"
+            aria-label="프로필 이미지 크게 보기"
+          >
+            <Image src={avatarUrl} alt="" fill sizes="28px" className="rounded-full object-cover" />
+          </button>
+        ) : (
+          <div className="relative h-7 w-7 flex-none overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10">
+            {avatarUrl ? <Image src={avatarUrl} alt="" fill sizes="28px" className="rounded-full object-cover" /> : null}
+          </div>
+        )}
         <div className="rounded-[22px] rounded-bl-[10px] bg-white/[0.06] px-4 py-3 text-[14px] font-semibold leading-[1.45] text-white/80">
           <span className="inline-flex items-center gap-1">
             <span className="h-1.5 w-1.5 animate-[pananaDot_1s_infinite] rounded-full bg-white/60" />
@@ -153,12 +175,12 @@ export function CharacterChatClient({
   safetySupported: boolean | null;
 }) {
   const router = useRouter();
-  const [safetyBlocked, setSafetyBlocked] = useState(false);
   const [sending, setSending] = useState(false);
   const [showTyping, setShowTyping] = useState(false);
   const [value, setValue] = useState("");
   const [messages, setMessages] = useState<Msg[]>([]);
   const [err, setErr] = useState<string | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(true);
   const [userName, setUserName] = useState<string>(() => {
     // 템플릿 변수(user_name/call_sign) 치환이 항상 되도록: 로컬 identity 닉네임을 즉시 기본값으로 사용
     try {
@@ -183,20 +205,21 @@ export function CharacterChatClient({
   const warnedDbRef = useRef<boolean>(false);
   const typingReqIdRef = useRef<number>(0);
   const typingTimerRef = useRef<number | null>(null);
-  const [provider, setProvider] = useState<Provider>("anthropic");
-
+  // localStorage에서 즉시 읽어서 초기 상태 설정 (깜빡임 방지)
+  const [provider, setProvider] = useState<Provider>(() => {
+    if (typeof window === "undefined") return "anthropic";
+    return getSavedProvider();
+  });
+  const [avatarModalOpen, setAvatarModalOpen] = useState(false);
+  
+  // 프로필 이미지 미리 로드 (캐시에 저장)
   useEffect(() => {
-    // 스파이시 ON + 캐릭터 미지원이면 강제 차단(직접 URL 접근 방지)
-    let on = false;
-    try {
-      on = localStorage.getItem("panana_safety_on") === "1";
-    } catch {}
-    if (on && safetySupported === false) {
-      setSafetyBlocked(true);
-      const t = window.setTimeout(() => router.replace("/home"), 700);
-      return () => window.clearTimeout(t);
+    if (characterAvatarUrl && typeof window !== "undefined") {
+      const img = new window.Image();
+      img.src = characterAvatarUrl;
     }
-  }, [router, safetySupported]);
+  }, [characterAvatarUrl]);
+  
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -210,10 +233,6 @@ export function CharacterChatClient({
     }
     setShowTyping(false);
   };
-
-  useEffect(() => {
-    setProvider(getSavedProvider());
-  }, []);
 
   const getPananaId = () => {
     const idt = ensurePananaIdentity();
@@ -246,26 +265,17 @@ export function CharacterChatClient({
     }
   };
 
+  // 프로필과 런타임을 병렬로 로드
   useEffect(() => {
-    if (safetyBlocked) return;
     let alive = true;
     (async () => {
-      const p = await fetchMyUserProfile();
+      const [p, loaded] = await Promise.all([
+        fetchMyUserProfile().catch(() => null),
+        loadRuntime(characterSlug).catch(() => null),
+      ]);
       if (!alive) return;
       const nick = String(p?.nickname || "").trim();
       if (nick) setUserName(nick);
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (safetyBlocked) return;
-    let alive = true;
-    (async () => {
-      const loaded = await loadRuntime(characterSlug);
-      if (!alive) return;
       if (loaded) setRt(loaded);
     })();
     return () => {
@@ -274,11 +284,22 @@ export function CharacterChatClient({
   }, [characterSlug]);
 
   useEffect(() => {
-    if (safetyBlocked) return;
-    // 이전 대화 불러오기(우선: DB, 실패 시 local fallback)
+    let alive = true;
+    
+    // 1) 로컬 스토리지에서 즉시 메시지 로드 (깜빡임 방지)
+    const pidCandidate = getPananaId();
+    const localMessages = loadChatHistory({ pananaId: pidCandidate, characterSlug });
+    if (localMessages.length > 0) {
+      const rows = localMessages.map((m) => ({ id: m.id, from: m.from as any, text: m.text }));
+      savedMsgIdsRef.current = new Set(rows.map((m) => m.id));
+      setMessages(rows);
+      setHistoryLoading(false);
+    } else {
+      setHistoryLoading(true);
+    }
+
+    // 2) 서버에서 pananaId 확정 및 DB 메시지 로드 (백그라운드)
     (async () => {
-      // 0) 서버에서 pananaId 확정(=DB row 존재 보장) 후 그 ID로 저장/로드 통일
-      const pidCandidate = getPananaId();
       let pid = pidCandidate;
       try {
         const res = await fetch("/api/me/identity", {
@@ -298,11 +319,14 @@ export function CharacterChatClient({
         // ignore
       }
 
+      // DB에서 메시지 로드 (로컬과 다를 수 있으므로 업데이트)
       try {
         const res = await fetch(
           `/api/me/chat-messages?pananaId=${encodeURIComponent(pid)}&characterSlug=${encodeURIComponent(characterSlug)}&limit=120`
         );
         const data = await res.json().catch(() => null);
+        if (!alive) return;
+        
         if (res.ok && data?.ok && Array.isArray(data.messages)) {
           const rows = data.messages
             .map((m: any) => ({
@@ -314,11 +338,8 @@ export function CharacterChatClient({
           if (rows.length) {
             savedMsgIdsRef.current = new Set(rows.map((m: any) => m.id));
             setMessages(rows);
-            return;
           }
         } else if (!warnedDbRef.current) {
-          // DB가 비어있는 케이스를 제외하고(=정상) 에러 힌트를 남긴다.
-          // (테이블 미생성/서비스키 미설정/권한 문제 등)
           const errText = String(data?.error || "").trim();
           if (errText) {
             warnedDbRef.current = true;
@@ -336,19 +357,17 @@ export function CharacterChatClient({
         // ignore
       }
 
-      const prev = loadChatHistory({ pananaId: pid, characterSlug });
-      if (prev.length) {
-        const rows = prev.map((m) => ({ id: m.id, from: m.from as any, text: m.text }));
-        savedMsgIdsRef.current = new Set(rows.map((m) => m.id));
-        setMessages(rows);
-      }
+      if (alive) setHistoryLoading(false);
     })();
+    
+    return () => {
+      alive = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [characterSlug]);
 
   useEffect(() => {
     // 메시지 변경 시 히스토리 저장(로컬 백업 + DB 동기화)
-    if (safetyBlocked) return;
     const pid = pananaIdRef.current || getPananaId();
     if (!pid) return;
     // 너무 잦은 저장 방지(짧은 debounce)
@@ -367,7 +386,6 @@ export function CharacterChatClient({
 
   useEffect(() => {
     // 뒤로가기/탭 종료 등에서 DB 저장 유실 방지
-    if (safetyBlocked) return;
     const onPageHide = () => {
       const pid = pananaIdRef.current;
       if (!pid) return;
@@ -380,12 +398,10 @@ export function CharacterChatClient({
 
   // "MY" 리스트용: 대화 진입만 해도 목록에 기록
   useEffect(() => {
-    if (safetyBlocked) return;
     recordMyChat({ characterSlug, characterName, avatarUrl: characterAvatarUrl });
   }, [characterAvatarUrl, characterName, characterSlug]);
 
   const send = async () => {
-    if (safetyBlocked) return;
     const text = value.trim();
     if (!text) return;
 
@@ -510,29 +526,15 @@ export function CharacterChatClient({
   return (
     <div className="h-dvh overflow-hidden bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.12),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white flex flex-col">
       <style>{`@keyframes pananaDot{0%,100%{transform:translateY(0);opacity:.55}50%{transform:translateY(-4px);opacity:1}}`}</style>
-      {safetyBlocked ? (
-        <div className="mx-auto flex w-full max-w-[420px] flex-1 flex-col items-center justify-center px-6 text-center">
-          <div className="w-full rounded-3xl border border-white/10 bg-white/[0.04] px-6 py-6">
-            <div className="text-[16px] font-extrabold tracking-[-0.01em] text-white/90">스파이시 지원 캐릭터만 이용할 수 있어요</div>
-            <div className="mt-2 text-[13px] font-semibold text-white/55">
-              현재 스파이시가 켜져 있어요. 이 캐릭터는 스파이시(성인 전용) 대화를 지원하지 않아서 홈으로 이동할게요.
-            </div>
-            <button
-              type="button"
-              onClick={() => router.replace("/home")}
-              className="mt-5 w-full rounded-2xl bg-[#ff4da7] px-4 py-3 text-[13px] font-extrabold text-white shadow-[0_10px_30px_rgba(255,77,167,0.28)]"
-            >
-              홈으로 이동
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      {!safetyBlocked ? (
-        <>
+      <>
       <header className="mx-auto w-full max-w-[420px] shrink-0 px-5 pt-3">
         <div className="relative flex h-11 items-center">
-          <Link href={backHref} aria-label="뒤로가기" className="absolute left-0 p-2">
+          <Link 
+            href={backHref} 
+            aria-label="뒤로가기" 
+            className="absolute left-0 p-2"
+            prefetch={true}
+          >
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path
                 d="M15 6l-6 6 6 6"
@@ -582,9 +584,20 @@ export function CharacterChatClient({
         {err ? <div className="mb-3 text-[12px] font-semibold text-[#ff9aa1]">{err}</div> : null}
         <div className="space-y-3">
           {messages.map((m) => (
-            <Bubble key={m.id} from={m.from} text={m.text} avatarUrl={m.from === "bot" ? characterAvatarUrl : undefined} />
+            <Bubble 
+              key={m.id} 
+              from={m.from} 
+              text={m.text} 
+              avatarUrl={m.from === "bot" ? characterAvatarUrl : undefined}
+              onAvatarClick={m.from === "bot" && characterAvatarUrl ? () => setAvatarModalOpen(true) : undefined}
+            />
           ))}
-          {showTyping ? <TypingDots avatarUrl={characterAvatarUrl} /> : null}
+          {showTyping ? (
+            <TypingDots 
+              avatarUrl={characterAvatarUrl} 
+              onAvatarClick={characterAvatarUrl ? () => setAvatarModalOpen(true) : undefined}
+            />
+          ) : null}
           <div ref={endRef} />
         </div>
       </main>
@@ -629,7 +642,41 @@ export function CharacterChatClient({
           </div>
         </div>
       </div>
-        </>
+      </>
+
+      {/* 프로필 이미지 크게 보기 모달 */}
+      {avatarModalOpen && characterAvatarUrl ? (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+          onClick={() => setAvatarModalOpen(false)}
+        >
+          <div 
+            className="relative mx-4 w-full max-w-[400px]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setAvatarModalOpen(false)}
+              className="absolute -top-10 right-0 z-10 text-white/80 hover:text-white"
+              aria-label="닫기"
+            >
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                <path d="M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </button>
+            <div className="relative w-full overflow-hidden rounded-2xl bg-black/40 ring-2 ring-white/20">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={characterAvatarUrl}
+                alt={`${characterName} 프로필 이미지`}
+                className="h-auto w-full object-contain"
+                loading="eager"
+                decoding="async"
+              />
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );

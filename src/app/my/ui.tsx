@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { SurfaceCard } from "@/components/SurfaceCard";
 import { myPageDummy } from "@/lib/myPage";
@@ -107,6 +108,7 @@ function Stat({ value, label }: { value: number; label: string }) {
 }
 
 export function MyPageClient() {
+  const router = useRouter();
   const data = useMemo(() => myPageDummy, []);
   const [logoutOpen, setLogoutOpen] = useState(false);
   const localIdt = useMemo(() => ensurePananaIdentity(), []);
@@ -116,6 +118,32 @@ export function MyPageClient() {
   const { data: session, status } = useSession();
   const loggedIn = status === "authenticated";
   const isMember = Boolean((session as any)?.membershipActive);
+
+  // 마이페이지 진입 시 주요 링크 프리페칭
+  useEffect(() => {
+    const prefetchLinks = [
+      "/my/notices",
+      "/my/notifications",
+      "/my/reset",
+      "/my/account",
+      "/my/edit",
+      "/login",
+    ];
+    prefetchLinks.forEach((href) => {
+      router.prefetch(href);
+    });
+  }, [router]);
+  
+  // 세션 데이터를 즉시 활용하여 초기 렌더링 속도 개선
+  useEffect(() => {
+    if (status === "authenticated" && session) {
+      const pn = String((session as any)?.pananaNickname || "").trim();
+      const snick = String((session as any)?.nickname || "").trim();
+      const sname = String((session as any)?.user?.name || "").trim();
+      const quick = pn || snick || sname;
+      if (quick && !nickname) setNickname(quick);
+    }
+  }, [status, session, nickname]);
   const avatarUrl = useMemo(() => {
     const custom = String((session as any)?.profileImageUrl || "").trim();
     const providerImg = String((session as any)?.user?.image || "").trim();
@@ -143,7 +171,10 @@ export function MyPageClient() {
   useEffect(() => {
     let alive = true;
     const load = async () => {
-      const p = await fetchMyUserProfile();
+      // 병렬로 세션과 프로필 데이터 확인
+      const [p] = await Promise.all([
+        fetchMyUserProfile().catch(() => null),
+      ]);
       if (!alive) return;
       const nick = String(p?.nickname || "").trim();
       // Supabase 프로필이 없으면 Auth.js 세션 이름/이메일로 fallback
@@ -216,7 +247,13 @@ export function MyPageClient() {
               </div>
             </div>
 
-            <Link href="/my/edit" aria-label="프로필 편집" className="p-2">
+            <Link 
+              href="/my/edit" 
+              aria-label="프로필 편집" 
+              className="p-2"
+              prefetch={true}
+              onMouseEnter={() => router.prefetch("/my/edit")}
+            >
               <PencilIcon />
             </Link>
           </div>
@@ -225,10 +262,20 @@ export function MyPageClient() {
         {loggedIn ? (
           <>
             <div className="mt-6 flex items-center justify-center gap-8">
-              <Link href="/my/follows?tab=followers" aria-label="내 팔로워 목록">
+              <Link 
+                href="/my/follows?tab=followers" 
+                aria-label="내 팔로워 목록"
+                prefetch={true}
+                onMouseEnter={() => router.prefetch("/my/follows")}
+              >
                 <Stat value={data.followers} label="팔로워" />
               </Link>
-              <Link href="/my/follows?tab=following" aria-label="내 팔로잉 목록">
+              <Link 
+                href="/my/follows?tab=following" 
+                aria-label="내 팔로잉 목록"
+                prefetch={true}
+                onMouseEnter={() => router.prefetch("/my/follows")}
+              >
                 <Stat value={data.following} label="팔로잉" />
               </Link>
             </div>
@@ -246,6 +293,8 @@ export function MyPageClient() {
                   <Link
                     href="/my/charge"
                     className="rounded-lg bg-panana-pink px-4 py-2 text-[12px] font-bold text-white"
+                    prefetch={true}
+                    onMouseEnter={() => router.prefetch("/my/charge")}
                   >
                     충전
                   </Link>
@@ -258,6 +307,8 @@ export function MyPageClient() {
             <Link
               href="/login?return=/my"
               className="mt-5 block w-full rounded-2xl bg-panana-pink px-5 py-4 text-center text-[13px] font-extrabold text-white"
+              prefetch={true}
+              onMouseEnter={() => router.prefetch("/login")}
             >
               로그인하고 더 많은 기능 둘러보기
             </Link>
@@ -268,24 +319,46 @@ export function MyPageClient() {
           <Link
             href="/my/membership"
             className="mt-4 block w-full rounded-xl border border-panana-pink/60 bg-white px-4 py-3 text-center text-[13px] font-bold text-panana-pink"
+            prefetch={true}
+            onMouseEnter={() => router.prefetch("/my/membership")}
           >
             멤버십 가입하고 무제한 이용하기
           </Link>
         ) : null}
 
         <div className="mt-8 space-y-6 text-[14px] font-semibold text-white/60">
-          <Link href="/my/notices" className="block w-full text-left">
+          <Link 
+            href="/my/notices" 
+            className="block w-full text-left"
+            prefetch={true}
+            onMouseEnter={() => router.prefetch("/my/notices")}
+          >
             공지사항
           </Link>
-          <Link href="/my/notifications" className="block w-full text-left">
+          <Link 
+            href="/my/notifications" 
+            className="block w-full text-left"
+            prefetch={true}
+            onMouseEnter={() => router.prefetch("/my/notifications")}
+          >
             알림설정
           </Link>
           {loggedIn ? (
-            <Link href="/my/account" className="block w-full text-left">
+            <Link 
+              href="/my/account" 
+              className="block w-full text-left"
+              prefetch={true}
+              onMouseEnter={() => router.prefetch("/my/account")}
+            >
               계정설정
             </Link>
           ) : null}
-          <Link href="/my/reset" className="block w-full text-left">
+          <Link 
+            href="/my/reset" 
+            className="block w-full text-left"
+            prefetch={true}
+            onMouseEnter={() => router.prefetch("/my/reset")}
+          >
             초기화
           </Link>
         </div>
@@ -299,15 +372,14 @@ export function MyPageClient() {
             로그아웃
           </button>
         ) : (
-          <button
-            type="button"
+          <Link
+            href="/login?return=/my"
             className="mt-16 block w-full text-left text-[13px] font-semibold text-white/45"
-            onClick={() => {
-              window.location.href = "/login?return=/my";
-            }}
+            prefetch={true}
+            onMouseEnter={() => router.prefetch("/login")}
           >
             로그인
-          </button>
+          </Link>
         )}
       </main>
 
