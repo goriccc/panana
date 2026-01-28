@@ -680,6 +680,7 @@ export function CharacterChatClient({
         className="chat-scrollbar mx-auto w-full max-w-[420px] flex-1 min-h-0 overflow-y-auto px-5 pb-4 pt-4"
         style={{
           paddingBottom: `${Math.max(0, keyboardHeight) + Math.max(0, composerHeight) + 12}px`,
+          scrollPaddingBottom: `${Math.max(0, keyboardHeight) + Math.max(0, composerHeight) + 12}px`,
         }}
       >
         {err ? <div className="mb-3 text-[12px] font-semibold text-[#ff9aa1]">{err}</div> : null}
@@ -699,7 +700,12 @@ export function CharacterChatClient({
               onAvatarClick={characterAvatarUrl ? () => setAvatarModalOpen(true) : undefined}
             />
           ) : null}
-          <div ref={endRef} />
+          <div
+            ref={endRef}
+            style={{
+              scrollMarginBottom: `${Math.max(0, keyboardHeight) + Math.max(0, composerHeight) + 12}px`,
+            }}
+          />
         </div>
       </main>
 
