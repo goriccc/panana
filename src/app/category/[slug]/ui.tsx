@@ -1,12 +1,28 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import type { Category, ContentCardItem } from "@/lib/content";
 import { ContentCard } from "@/components/ContentCard";
 
 export function CategoryClient({ category }: { category: Category }) {
-  const items = useMemo(() => category.items, [category.items]);
+  const sp = useSearchParams();
+  const [items, setItems] = useState(category.items);
+  useEffect(() => {
+    const source = sp.get("source");
+    if (source !== "home") return;
+    try {
+      const raw = localStorage.getItem(`panana_home_category_cache:${category.slug}`);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length) {
+        setItems(parsed as ContentCardItem[]);
+      }
+    } catch {
+      // ignore
+    }
+  }, [category.slug, sp]);
 
   return (
     <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.14),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">

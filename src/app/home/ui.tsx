@@ -446,6 +446,16 @@ export function HomeClient({
     });
   }, [source, personalizedItems, popularSlugs, allItems]);
 
+  useEffect(() => {
+    try {
+      topCategories.forEach((cat) => {
+        localStorage.setItem(`panana_home_category_cache:${cat.slug}`, JSON.stringify(cat.items || []));
+      });
+    } catch {
+      // ignore
+    }
+  }, [topCategories]);
+
   const filtered = useMemo(() => {
     const q = String(searchQ || "").trim().toLowerCase();
     if (!q) return [];
@@ -786,7 +796,7 @@ export function HomeClient({
               <div className="flex items-center justify-between">
                 <div className="text-[14px] font-semibold tracking-[-0.01em] text-white/75"># {cat.name}</div>
                 <Link
-                  href={`/category/${cat.slug}`}
+                  href={`/category/${cat.slug}?source=home`}
                   aria-label={`${cat.name} 전체 보기`}
                   className="p-1"
                   prefetch={true}
@@ -798,7 +808,8 @@ export function HomeClient({
                 </Link>
               </div>
 
-              <div className="mt-4 -mx-5 flex snap-x snap-mandatory gap-4 overflow-x-auto px-5 pb-2">
+              <div className="mt-4">
+                <div className="flex snap-x snap-mandatory gap-0 overflow-x-auto pb-2">
                 {chunkItems(cat.items, 4).map((group, idx) => (
                   <div key={`${cat.slug}-${idx}`} className="w-full shrink-0 snap-start">
                     <div className="grid grid-cols-2 gap-3">
@@ -817,6 +828,7 @@ export function HomeClient({
                     </div>
                   </div>
                 ))}
+                </div>
               </div>
             </section>
           ))}
