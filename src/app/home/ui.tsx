@@ -242,6 +242,14 @@ export function HomeClient({
 
   const hero = heroList[heroIdx] || null;
 
+  const chunkItems = (items: ContentCardItem[], size = 4) => {
+    const out: ContentCardItem[][] = [];
+    for (let i = 0; i < items.length; i += size) {
+      out.push(items.slice(i, i + size));
+    }
+    return out.length ? out : [[]];
+  };
+
   const shuffle = <T,>(arr: T[]) => {
     const out = [...arr];
     // cryptographically strong random when available (browser)
@@ -790,18 +798,24 @@ export function HomeClient({
                 </Link>
               </div>
 
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                {cat.items.slice(0, 4).map((it) => (
-                  <ContentCard
-                    key={it.id}
-                    author={it.author}
-                    title={it.title}
-                    description={it.description}
-                    tags={it.tags}
-                    imageUrl={it.imageUrl}
-                    href={`/c/${it.characterSlug}`}
-                    onClick={() => trackBehavior("click", it.tags || [])}
-                  />
+              <div className="mt-4 -mx-5 flex snap-x snap-mandatory gap-4 overflow-x-auto px-5 pb-2">
+                {chunkItems(cat.items, 4).map((group, idx) => (
+                  <div key={`${cat.slug}-${idx}`} className="w-full shrink-0 snap-start">
+                    <div className="grid grid-cols-2 gap-3">
+                      {group.map((it) => (
+                        <ContentCard
+                          key={it.id}
+                          author={it.author}
+                          title={it.title}
+                          description={it.description}
+                          tags={it.tags}
+                          imageUrl={it.imageUrl}
+                          href={`/c/${it.characterSlug}`}
+                          onClick={() => trackBehavior("click", it.tags || [])}
+                        />
+                      ))}
+                    </div>
+                  </div>
                 ))}
               </div>
             </section>

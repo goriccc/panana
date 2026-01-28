@@ -30,6 +30,15 @@ export function AdultVerifyClient() {
     };
   }, []);
 
+  useEffect(() => {
+    if (adultVerified) {
+      try {
+        localStorage.setItem("panana_safety_on", "1");
+      } catch {}
+      router.replace(returnTo);
+    }
+  }, [adultVerified, returnTo, router]);
+
   const age = useMemo(() => calcAgeFromBirth(birth), [birth]);
   const canVerify = age != null && age >= 19;
 
@@ -69,14 +78,14 @@ export function AdultVerifyClient() {
               onClick={async () => {
                 setErr(null);
                 setVerifying(true);
-                const res = await verifyAdult();
-                if (!res.ok) {
-                  setErr(res.error);
-                  setVerifying(false);
-                  return;
-                }
-                setAdultVerified(true);
+              const res = await verifyAdult();
+              if (!res.ok) {
+                setErr(res.error);
                 setVerifying(false);
+                return;
+              }
+              setAdultVerified(true);
+              setVerifying(false);
               }}
               className={`mt-5 w-full rounded-2xl px-5 py-4 text-center text-[14px] font-extrabold ${
                 verifying || !canVerify
@@ -95,15 +104,17 @@ export function AdultVerifyClient() {
         )}
       </div>
 
-      <div className="mt-6">
-        <button
-          type="button"
-          onClick={() => router.push(returnTo)}
-          className="w-full rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-4 text-center text-[13px] font-semibold text-white/70"
-        >
-          돌아가기
-        </button>
-      </div>
+      {!adultVerified ? (
+        <div className="mt-6">
+          <button
+            type="button"
+            onClick={() => router.push(returnTo)}
+            className="w-full rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-4 text-center text-[13px] font-semibold text-white/70"
+          >
+            돌아가기
+          </button>
+        </div>
+      ) : null}
     </ScreenShell>
   );
 }
