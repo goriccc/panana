@@ -226,15 +226,33 @@ export function CharacterChatClient({
   useEffect(() => {
     if (typeof window === "undefined") return;
     
+    let initialHeight = window.innerHeight;
+    
     const updateKeyboardHeight = () => {
       if (window.visualViewport) {
-        const viewportHeight = window.visualViewport.height;
-        const windowHeight = window.innerHeight;
-        const heightDiff = windowHeight - viewportHeight;
-        setKeyboardHeight(Math.max(0, heightDiff));
+        const viewport = window.visualViewport;
+        const currentHeight = window.innerHeight;
+        
+        // 키보드가 올라오면 visualViewport.height가 줄어듦
+        // 키보드 높이 = 전체 화면 높이 - 현재 보이는 뷰포트 높이
+        const keyboardHeight = currentHeight - viewport.height;
+        
+        // 키보드가 올라온 경우에만 조정 (최소 150px 이상 차이날 때)
+        if (keyboardHeight > 150) {
+          setKeyboardHeight(keyboardHeight);
+        } else {
+          setKeyboardHeight(0);
+        }
       } else {
         // visualViewport를 지원하지 않는 브라우저의 경우
-        setKeyboardHeight(0);
+        // window.innerHeight 변화로 감지 (덜 정확하지만 fallback)
+        const currentHeight = window.innerHeight;
+        const heightDiff = initialHeight - currentHeight;
+        if (heightDiff > 150) {
+          setKeyboardHeight(heightDiff);
+        } else {
+          setKeyboardHeight(0);
+        }
       }
     };
 
@@ -242,12 +260,37 @@ export function CharacterChatClient({
       window.visualViewport.addEventListener("resize", updateKeyboardHeight);
       window.visualViewport.addEventListener("scroll", updateKeyboardHeight);
       updateKeyboardHeight();
+    } else {
+      window.addEventListener("resize", updateKeyboardHeight);
+    }
+
+    // input focus/blur 이벤트로도 감지 (fallback)
+    const handleFocus = () => {
+      setTimeout(updateKeyboardHeight, 300);
+    };
+    const handleBlur = () => {
+      setTimeout(() => {
+        setKeyboardHeight(0);
+        initialHeight = window.innerHeight;
+      }, 300);
+    };
+
+    const input = composerRef.current?.querySelector('input');
+    if (input) {
+      input.addEventListener('focus', handleFocus);
+      input.addEventListener('blur', handleBlur);
     }
 
     return () => {
       if (window.visualViewport) {
         window.visualViewport.removeEventListener("resize", updateKeyboardHeight);
         window.visualViewport.removeEventListener("scroll", updateKeyboardHeight);
+      } else {
+        window.removeEventListener("resize", updateKeyboardHeight);
+      }
+      if (input) {
+        input.removeEventListener('focus', handleFocus);
+        input.removeEventListener('blur', handleBlur);
       }
     };
   }, []);
@@ -640,9 +683,9 @@ export function CharacterChatClient({
       {/* composer */}
       <div 
         ref={composerRef}
-        className="fixed left-0 right-0 z-40 border-t border-white/10 bg-[#0B0C10]/90 backdrop-blur transition-[bottom] duration-200"
+        className="fixed left-0 right-0 bottom-0 z-40 border-t border-white/10 bg-[#0B0C10]/90 backdrop-blur transition-transform duration-200"
         style={{ 
-          bottom: keyboardHeight > 0 ? `${keyboardHeight}px` : `max(env(safe-area-inset-bottom, 0px), 0px)`,
+          transform: keyboardHeight > 0 ? `translateY(-${keyboardHeight}px)` : 'translateY(0)',
           paddingBottom: keyboardHeight > 0 ? '8px' : 'max(env(safe-area-inset-bottom), 16px)'
         }}
       >
