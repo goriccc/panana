@@ -368,18 +368,27 @@ export function CharacterChatClient({
   }, []);
   
 
+  const scrollToBottom = (behavior: ScrollBehavior = "auto") => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior });
+  };
+
   useEffect(() => {
     let rafId = 0;
     const run = () => {
       if (!isAtBottomRef.current && !forceScrollRef.current) return;
+      scrollToBottom("auto");
       endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
       forceScrollRef.current = false;
     };
-    rafId = window.requestAnimationFrame(run);
+    rafId = window.requestAnimationFrame(() => {
+      rafId = window.requestAnimationFrame(run);
+    });
     return () => {
       if (rafId) window.cancelAnimationFrame(rafId);
     };
-  }, [messages.length, showTyping]);
+  }, [messages.length, showTyping, keyboardHeight, composerHeight]);
 
   const resetTyping = () => {
     typingReqIdRef.current = 0;
@@ -563,6 +572,7 @@ export function CharacterChatClient({
 
     setErr(null);
     forceScrollRef.current = true;
+    isAtBottomRef.current = true;
     setMessages((prev) => [...prev, { id: `u-${Date.now()}`, from: "user", text }]);
     setValue("");
 
@@ -575,7 +585,9 @@ export function CharacterChatClient({
     const reqId = Date.now();
     typingReqIdRef.current = reqId;
     typingTimerRef.current = window.setTimeout(() => {
-      if (typingReqIdRef.current === reqId) setShowTyping(true);
+      if (typingReqIdRef.current === reqId) {
+        setShowTyping(true);
+      }
     }, 650);
     try {
       const idt = ensurePananaIdentity();
