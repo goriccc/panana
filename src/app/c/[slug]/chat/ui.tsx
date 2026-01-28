@@ -257,28 +257,43 @@ export function CharacterChatClient({
     };
 
     if (window.visualViewport) {
-      window.visualViewport.addEventListener("resize", updateKeyboardHeight);
-      window.visualViewport.addEventListener("scroll", updateKeyboardHeight);
+      // visualViewport 이벤트를 더 빠르게 감지
+      window.visualViewport.addEventListener("resize", updateKeyboardHeight, { passive: true });
+      window.visualViewport.addEventListener("scroll", updateKeyboardHeight, { passive: true });
       updateKeyboardHeight();
     } else {
-      window.addEventListener("resize", updateKeyboardHeight);
+      window.addEventListener("resize", updateKeyboardHeight, { passive: true });
     }
 
-    // input focus/blur 이벤트로도 감지 (fallback)
+    // input focus/blur 이벤트로 즉시 반응
     const handleFocus = () => {
-      setTimeout(updateKeyboardHeight, 300);
-    };
-    const handleBlur = () => {
+      // focus 시 즉시 키보드가 올라온 것으로 가정하고 위치 조정
+      // 모바일 키보드의 일반적인 높이를 예상값으로 설정
+      const estimatedKeyboardHeight = 300;
+      setKeyboardHeight(estimatedKeyboardHeight);
+      
+      // 실제 키보드 높이를 빠르게 감지하기 위해 짧은 간격으로 여러 번 체크
+      const checkInterval = setInterval(() => {
+        updateKeyboardHeight();
+      }, 50);
+      
+      // 1초 후에는 실제 높이로 업데이트하고 체크 중단
       setTimeout(() => {
-        setKeyboardHeight(0);
-        initialHeight = window.innerHeight;
-      }, 300);
+        clearInterval(checkInterval);
+        updateKeyboardHeight();
+      }, 1000);
+    };
+    
+    const handleBlur = () => {
+      // blur 시 즉시 키보드가 내려간 것으로 처리
+      setKeyboardHeight(0);
+      initialHeight = window.innerHeight;
     };
 
     const input = composerRef.current?.querySelector('input');
     if (input) {
-      input.addEventListener('focus', handleFocus);
-      input.addEventListener('blur', handleBlur);
+      input.addEventListener('focus', handleFocus, { passive: true });
+      input.addEventListener('blur', handleBlur, { passive: true });
     }
 
     return () => {
