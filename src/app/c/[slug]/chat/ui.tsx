@@ -785,8 +785,9 @@ export function CharacterChatClient({
                   send();
                 }
               }}
-              className="flex-1 bg-transparent text-[13px] font-semibold text-white/70 outline-none placeholder:text-white/30"
+              className="flex-1 bg-transparent text-base font-semibold text-white/70 outline-none placeholder:text-white/30"
               placeholder="메시지를 입력하세요"
+              style={{ fontSize: "16px" }}
             />
             <button
               type="button"
