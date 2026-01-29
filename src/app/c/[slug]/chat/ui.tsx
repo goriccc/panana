@@ -368,27 +368,20 @@ export function CharacterChatClient({
   }, []);
   
 
-  const scrollToBottom = (behavior: ScrollBehavior = "auto") => {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior });
-  };
-
   useEffect(() => {
     let rafId = 0;
     const run = () => {
-      if (!isAtBottomRef.current && !forceScrollRef.current) return;
-      scrollToBottom("auto");
-      endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+      const el = scrollRef.current;
+      if (!el) return;
+      if (!forceScrollRef.current && !isAtBottomRef.current) return;
+      el.scrollTop = el.scrollHeight;
       forceScrollRef.current = false;
     };
-    rafId = window.requestAnimationFrame(() => {
-      rafId = window.requestAnimationFrame(run);
-    });
+    rafId = window.requestAnimationFrame(run);
     return () => {
       if (rafId) window.cancelAnimationFrame(rafId);
     };
-  }, [messages.length, showTyping, keyboardHeight, composerHeight]);
+  }, [messages.length, showTyping]);
 
   const resetTyping = () => {
     typingReqIdRef.current = 0;
