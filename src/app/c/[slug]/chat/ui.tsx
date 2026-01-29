@@ -208,6 +208,7 @@ export function CharacterChatClient({
   const warnedDbRef = useRef<boolean>(false);
   const typingReqIdRef = useRef<number>(0);
   const typingTimerRef = useRef<number | null>(null);
+  const hasSentRef = useRef(false);
   // localStorage에서 즉시 읽어서 초기 상태 설정 (깜빡임 방지)
   const [provider, setProvider] = useState<Provider>(() => {
     if (typeof window === "undefined") return "anthropic";
@@ -373,6 +374,10 @@ export function CharacterChatClient({
     const run = () => {
       const el = scrollRef.current;
       if (!el) return;
+      if (!hasSentRef.current) {
+        el.scrollTop = 0;
+        return;
+      }
       if (!forceScrollRef.current && !isAtBottomRef.current) return;
       el.scrollTop = el.scrollHeight;
       forceScrollRef.current = false;
@@ -565,6 +570,7 @@ export function CharacterChatClient({
 
     setErr(null);
     forceScrollRef.current = true;
+    hasSentRef.current = true;
     isAtBottomRef.current = true;
     setMessages((prev) => [...prev, { id: `u-${Date.now()}`, from: "user", text }]);
     setValue("");
