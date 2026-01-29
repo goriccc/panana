@@ -40,6 +40,10 @@ export default function AdminCharactersPage() {
   const [rows, setRows] = useState<CharacterRow[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = useMemo(() => rows.find((r) => r.id === selectedId) || null, [rows, selectedId]);
+  const pageSize = 20;
+  const [page, setPage] = useState(1);
+  const pageCount = useMemo(() => Math.max(1, Math.ceil(rows.length / pageSize)), [rows.length]);
+  const pagedRows = useMemo(() => rows.slice((page - 1) * pageSize, page * pageSize), [rows, page]);
 
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [studioCharacters, setStudioCharacters] = useState<StudioCharacterPick[]>([]);
@@ -92,6 +96,7 @@ export default function AdminCharactersPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteImageOpen, setDeleteImageOpen] = useState(false);
@@ -349,6 +354,10 @@ export default function AdminCharactersPage() {
     setStudioAutofilled({});
   }, [selectedId, selected]);
 
+  useEffect(() => {
+    setPage((current) => Math.min(Math.max(current, 1), pageCount));
+  }, [pageCount]);
+
   const tryAutofillFromStudioOnce = async (nextStudioCharacterId: string) => {
     if (!nextStudioCharacterId) return;
 
@@ -510,15 +519,6 @@ export default function AdminCharactersPage() {
               >
                 + 새 캐릭터
               </AdminButton>
-              <AdminButton
-                variant="danger"
-                onClick={async () => {
-                  if (!selectedId) return;
-                  setDeleteOpen(true);
-                }}
-              >
-                삭제
-              </AdminButton>
             </>
           }
         />
@@ -526,54 +526,94 @@ export default function AdminCharactersPage() {
         {err ? <div className="mb-4 text-[12px] font-semibold text-[#ff9aa1]">{err}</div> : null}
         {loading ? <div className="mb-4 text-[12px] font-semibold text-white/45">불러오는 중...</div> : null}
 
-        <div className="grid gap-6 lg:grid-cols-[1fr_420px]">
-          <AdminTable
-            columns={[
-              { key: "name", header: "이름" },
-              { key: "slug", header: "슬러그" },
-              { key: "handle", header: "@핸들" },
-              { key: "categories", header: "카테고리" },
-              { key: "active", header: "노출" },
-              { key: "actions", header: "선택" },
-            ]}
-            rows={rows.map((c) => ({
-              name: c.name,
-              slug: <span className="text-white/55">{c.slug}</span>,
-              handle: <span className="text-white/55">{c.handle ? (c.handle.startsWith("@") ? c.handle : `@${c.handle}`) : "-"}</span>,
-              categories: (
-                <div className="flex flex-wrap gap-2">
-                  {c.categoryIds.length ? (
-                    c.categoryIds.map((id) => {
-                      const cat = categories.find((x) => x.id === id);
-                      return (
-                        <span key={id} className="rounded-full bg-white/10 px-2 py-1 text-[11px] font-extrabold text-white/70">
-                          {cat?.title || id}
-                        </span>
-                      );
-                    })
-                  ) : (
-                    <span className="text-[12px] font-semibold text-white/35">미설정</span>
-                  )}
-                </div>
-              ),
-              active: c.active ? (
-                <span className="rounded-full bg-[#22c55e]/15 px-2 py-1 text-[11px] font-extrabold text-[#6ee7b7]">ON</span>
-              ) : (
-                <span className="rounded-full bg-white/10 px-2 py-1 text-[11px] font-extrabold text-white/45">OFF</span>
-              ),
-              actions: (
-                <AdminButton variant="ghost" onClick={() => setSelectedId(c.id)}>
-                  편집
+        <div>
+          <div>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/10 bg-white/[0.02] px-3 py-2 text-[12px] font-semibold text-white/45">
+              <div>
+                {rows.length === 0
+                  ? "0개"
+                  : `${(page - 1) * pageSize + 1}-${Math.min(page * pageSize, rows.length)} / ${rows.length}개`}
+              </div>
+              <div className="flex items-center gap-2">
+                <AdminButton variant="ghost" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
+                  이전
                 </AdminButton>
-              ),
-            }))}
-          />
+                <span className="text-white/60">{page} / {pageCount}</span>
+                <AdminButton variant="ghost" onClick={() => setPage((p) => Math.min(pageCount, p + 1))} disabled={page >= pageCount}>
+                  다음
+                </AdminButton>
+              </div>
+            </div>
+            <AdminTable
+              columns={[
+                { key: "name", header: "이름" },
+                { key: "slug", header: "슬러그" },
+                { key: "handle", header: "@핸들" },
+                { key: "categories", header: "카테고리" },
+                { key: "active", header: "노출" },
+                { key: "actions", header: "선택" },
+              ]}
+              rows={pagedRows.map((c) => ({
+                name: c.name,
+                slug: <span className="text-white/55">{c.slug}</span>,
+                handle: <span className="text-white/55">{c.handle ? (c.handle.startsWith("@") ? c.handle : `@${c.handle}`) : "-"}</span>,
+                categories: (
+                  <div className="flex flex-wrap gap-2">
+                    {c.categoryIds.length ? (
+                      c.categoryIds.map((id) => {
+                        const cat = categories.find((x) => x.id === id);
+                        return (
+                          <span key={id} className="rounded-full bg-white/10 px-2 py-1 text-[11px] font-extrabold text-white/70">
+                            {cat?.title || id}
+                          </span>
+                        );
+                      })
+                    ) : (
+                      <span className="text-[12px] font-semibold text-white/35">미설정</span>
+                    )}
+                  </div>
+                ),
+                active: c.active ? (
+                  <span className="rounded-full bg-[#22c55e]/15 px-2 py-1 text-[11px] font-extrabold text-[#6ee7b7]">ON</span>
+                ) : (
+                  <span className="rounded-full bg-white/10 px-2 py-1 text-[11px] font-extrabold text-white/45">OFF</span>
+                ),
+                actions: (
+                  <AdminButton
+                    variant="ghost"
+                    onClick={() => {
+                      setSelectedId(c.id);
+                      setEditOpen(true);
+                    }}
+                  >
+                    편집
+                  </AdminButton>
+                ),
+              }))}
+            />
+          </div>
 
-          <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-            <div className="text-[13px] font-extrabold text-white/80">편집</div>
-            {!selected ? <div className="mt-3 text-[12px] font-semibold text-white/35">왼쪽에서 캐릭터를 선택하세요.</div> : null}
+          <div
+            className={`fixed inset-0 z-50 ${editOpen ? "" : "hidden"}`}
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) setEditOpen(false);
+            }}
+          >
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-[2px]"
+              onMouseDown={() => setEditOpen(false)}
+            />
+              <div className="absolute inset-0 grid place-items-center px-6">
+                <div className="relative w-full max-w-[980px] max-h-[85vh] overflow-y-auto rounded-2xl border border-white/10 bg-[#0B0F18] p-4 shadow-[0_24px_70px_rgba(0,0,0,0.65)]">
+                  <div className="flex items-center justify-between">
+                    <div className="text-[13px] font-extrabold text-white/80">편집</div>
+                    <AdminButton variant="ghost" onClick={() => setEditOpen(false)}>
+                      닫기
+                    </AdminButton>
+                  </div>
+                  {!selected ? <div className="mt-3 text-[12px] font-semibold text-white/35">왼쪽에서 캐릭터를 선택하세요.</div> : null}
 
-            <div className="mt-4 space-y-4">
+                  <div className="mt-4 space-y-4">
               {/* 빠른 연결 확인용: 프론트/채팅/Studio 바로가기 */}
               <div className="rounded-2xl border border-white/10 bg-black/15 p-4">
                 <div className="text-[12px] font-extrabold text-white/70">바로가기</div>
@@ -660,7 +700,7 @@ export default function AdminCharactersPage() {
                   <div className="mt-3 overflow-hidden rounded-xl border border-white/10 bg-black/25">
                     {profileImageUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={profileImageUrl} alt="" className="h-[160px] w-full object-cover" />
+                      <img src={profileImageUrl} alt="" className="h-[160px] w-full object-contain bg-black/20" />
                     ) : (
                       <div className="grid h-[160px] place-items-center text-[12px] font-semibold text-white/35">
                         아직 업로드된 이미지가 없어요
@@ -854,7 +894,7 @@ export default function AdminCharactersPage() {
                 ) : null}
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <AdminButton
                   onClick={async () => {
                     if (!selectedId) return;
@@ -948,11 +988,23 @@ export default function AdminCharactersPage() {
                 >
                   노출 토글
                 </AdminButton>
+                <AdminButton
+                  variant="danger"
+                  onClick={() => {
+                    if (!selectedId) return;
+                    setDeleteOpen(true);
+                  }}
+                >
+                  삭제
+                </AdminButton>
               </div>
             </div>
           </div>
         </div>
       </div>
+
+      </div>
+    </div>
 
       {/* 새 캐릭터 생성 (브라우저 prompt 대체) */}
       <StudioFormDialog
@@ -999,7 +1051,10 @@ export default function AdminCharactersPage() {
             if (error) throw error;
             setCreateOpen(false);
             await load();
-            if (data?.id) setSelectedId(String(data.id));
+            if (data?.id) {
+              setSelectedId(String(data.id));
+              setEditOpen(true);
+            }
           } catch (e: any) {
             setErr(e?.message || "생성에 실패했어요.");
           } finally {
@@ -1029,6 +1084,7 @@ export default function AdminCharactersPage() {
             const { error } = await supabase.from("panana_characters").delete().eq("id", selectedId);
             if (error) throw error;
             setDeleteOpen(false);
+            setEditOpen(false);
             await load();
             setSelectedId(null);
           } catch (e: any) {
