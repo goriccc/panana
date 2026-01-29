@@ -824,7 +824,7 @@ export function CharacterChatClient({
         }}
       >
         <div className="mx-auto w-full max-w-[420px] px-5 py-2.5">
-          <div className="flex items-center gap-2.5 rounded-full border border-panana-pink/35 bg-white/[0.04] py-2 pl-3.5 pr-2">
+          <div className="flex w-full items-center gap-2.5 rounded-full border border-panana-pink/35 bg-white/[0.04] py-2 pl-3.5 pr-2">
             <input
               value={value}
               onChange={(e) => setValue(e.target.value)}
