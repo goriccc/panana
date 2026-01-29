@@ -40,7 +40,7 @@ export default function AdminCharactersPage() {
   const [rows, setRows] = useState<CharacterRow[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = useMemo(() => rows.find((r) => r.id === selectedId) || null, [rows, selectedId]);
-  const pageSize = 20;
+  const pageSize = 10;
   const [page, setPage] = useState(1);
   const pageCount = useMemo(() => Math.max(1, Math.ceil(rows.length / pageSize)), [rows.length]);
   const pagedRows = useMemo(() => rows.slice((page - 1) * pageSize, page * pageSize), [rows, page]);
@@ -101,6 +101,32 @@ export default function AdminCharactersPage() {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteImageOpen, setDeleteImageOpen] = useState(false);
   const [deleteImageBusy, setDeleteImageBusy] = useState(false);
+  const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
+
+  const triggerRevalidate = async (paths: string[]) => {
+    try {
+      const unique = Array.from(new Set(paths.filter(Boolean)));
+      if (!unique.length) return;
+      await fetch("/api/revalidate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paths: unique }),
+      });
+    } catch {
+      // ignore
+    }
+  };
+
+  const getCategoryPaths = (ids: string[]) =>
+    ids
+      .map((id) => categories.find((c) => c.id === id)?.slug)
+      .filter(Boolean)
+      .map((slug) => `/category/${slug}`);
+
+  const triggerRevalidateForCurrent = (extra: string[] = []) => {
+    const profilePath = slug.trim() ? `/c/${slug.trim()}` : "";
+    void triggerRevalidate(["/", "/home", profilePath, ...getCategoryPaths(categoryIds), ...extra]);
+  };
 
   const makeNewCharacterSlug = () => {
     const used = new Set(rows.map((r) => String(r.slug || "").toLowerCase()).filter(Boolean));
@@ -714,15 +740,24 @@ export default function AdminCharactersPage() {
                     {profileImageUrl ? profileImageUrl : ""}
                   </div>
                   {profileImageUrl ? (
-                    <button
-                      type="button"
-                      className="shrink-0 rounded-xl bg-white/[0.06] px-3 py-2 text-[12px] font-extrabold text-white/80 ring-1 ring-white/10 hover:bg-white/[0.08]"
-                      onClick={async () => {
-                        setDeleteImageOpen(true);
-                      }}
-                    >
-                      삭제
-                    </button>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <button
+                        type="button"
+                        className="rounded-xl bg-white/[0.06] px-3 py-2 text-[12px] font-extrabold text-white/80 ring-1 ring-white/10 hover:bg-white/[0.08]"
+                        onClick={() => setImagePreviewOpen(true)}
+                      >
+                        크게보기
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-xl bg-white/[0.06] px-3 py-2 text-[12px] font-extrabold text-white/80 ring-1 ring-white/10 hover:bg-white/[0.08]"
+                        onClick={async () => {
+                          setDeleteImageOpen(true);
+                        }}
+                      >
+                        삭제
+                      </button>
+                    </div>
                   ) : null}
                 </div>
               </div>
@@ -963,6 +998,7 @@ export default function AdminCharactersPage() {
 
                       await load();
                       setSelectedId(selectedId);
+                      triggerRevalidateForCurrent();
                     } catch (e: any) {
                       setErr(e?.message || "저장에 실패했어요.");
                     }
@@ -981,6 +1017,7 @@ export default function AdminCharactersPage() {
                       if (error) throw error;
                       await load();
                       setSelectedId(selectedId);
+                      triggerRevalidateForCurrent();
                     } catch (e: any) {
                       setErr(e?.message || "토글에 실패했어요.");
                     }
@@ -996,6 +1033,9 @@ export default function AdminCharactersPage() {
                   }}
                 >
                   삭제
+                </AdminButton>
+                <AdminButton variant="ghost" onClick={() => setEditOpen(false)}>
+                  닫기
                 </AdminButton>
               </div>
             </div>
@@ -1081,12 +1121,21 @@ export default function AdminCharactersPage() {
           setErr(null);
           setDeleteBusy(true);
           try {
+            const current = rows.find((r) => r.id === selectedId);
+            const deletingSlug = current?.slug || slug;
+            const deletingCategories = current?.categoryIds || categoryIds;
             const { error } = await supabase.from("panana_characters").delete().eq("id", selectedId);
             if (error) throw error;
             setDeleteOpen(false);
             setEditOpen(false);
             await load();
             setSelectedId(null);
+            void triggerRevalidate([
+              "/",
+              "/home",
+              deletingSlug ? `/c/${deletingSlug}` : "",
+              ...getCategoryPaths(deletingCategories),
+            ]);
           } catch (e: any) {
             setErr(e?.message || "삭제에 실패했어요.");
           } finally {
@@ -1123,6 +1172,32 @@ export default function AdminCharactersPage() {
           }
         }}
       />
+
+      {/* 프로필 이미지 크게보기 */}
+      {imagePreviewOpen && profileImageUrl ? (
+        <div
+          className="fixed inset-0 z-50"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setImagePreviewOpen(false);
+          }}
+        >
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-[2px]" />
+          <div className="absolute inset-0 grid place-items-center px-6">
+            <div className="relative w-full max-w-[920px] rounded-2xl border border-white/10 bg-[#0B0F18] p-4 shadow-[0_24px_70px_rgba(0,0,0,0.65)]">
+              <div className="mb-3 flex items-center justify-between">
+                <div className="text-[13px] font-extrabold text-white/80">프로필 이미지</div>
+                <AdminButton variant="ghost" onClick={() => setImagePreviewOpen(false)}>
+                  닫기
+                </AdminButton>
+              </div>
+              <div className="overflow-hidden rounded-xl border border-white/10 bg-black/30">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={profileImageUrl} alt="" className="w-full max-h-[70vh] object-contain" />
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </AdminAuthGate>
   );
 }

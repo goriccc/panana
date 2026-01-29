@@ -42,12 +42,12 @@ grant select (id, slug, title, sort_order, active) on table public.panana_catego
 grant select (
   id, slug, name, tagline, profile_image_url, posts_count, active,
   handle, hashtags, mbti, intro_title, intro_lines, mood_title, mood_lines,
-  followers_count, following_count, studio_character_id, safety_supported, updated_at
+  followers_count, following_count, studio_character_id, safety_supported, created_at, updated_at
 ) on table public.panana_characters to anon, authenticated;
 
 -- admin_notes 같은 내부 컬럼은 권한을 주지 않습니다.
 
-grant select (character_id, category_id, sort_order, active) on table public.panana_character_categories to anon, authenticated;
+grant select (character_id, category_id, sort_order, active, created_at) on table public.panana_character_categories to anon, authenticated;
 grant select (id, character_id, image_url, sort_order, active) on table public.panana_character_posts to anon, authenticated;
 
 grant select (id, title, subtitle, image_url, href, sort_order, active) on table public.panana_home_hero_cards to anon, authenticated;
@@ -127,7 +127,14 @@ select
   c.slug as category_slug,
   c.title as category_title,
   c.sort_order as category_sort_order,
-  cc.sort_order as item_sort_order,
+  (row_number() over (
+    partition by c.id
+    order by
+      case when c.slug = 'new' then ch.created_at else null end desc,
+      cc.sort_order asc,
+      ch.created_at desc,
+      cc.created_at desc
+  ))::int as item_sort_order,
   ch.slug as character_slug,
   nullif(ch.handle,'') as author_handle,
   ch.name as title,
@@ -139,7 +146,7 @@ from public.panana_character_categories cc
 join public.panana_categories c on c.id = cc.category_id
 join public.panana_characters ch on ch.id = cc.character_id
 where cc.active = true and c.active = true and ch.active = true
-order by c.sort_order asc, cc.sort_order asc;
+order by c.sort_order asc, item_sort_order asc;
 
 -- 3) 캐릭터-카테고리 매핑(공개)
 create or replace view public.panana_public_character_categories_v
@@ -333,6 +340,9 @@ grant select on public.panana_public_airport_media_v to anon, authenticated;
 grant select on public.panana_public_airport_thumbnail_sets_v to anon, authenticated;
 grant select on public.panana_public_airport_copy_v to anon, authenticated;
 grant select on public.panana_public_site_settings_v to anon, authenticated;
--- panana_site_settings 직접 접근은 최소화(뷰만 공개)
-revoke all on table public.panana_site_settings from anon, authenticated;
+-- ⚠️ 주의:
+-- security_invoker=true 뷰는 "원본 테이블 SELECT 권한"이 필요합니다.
+-- 또한 어드민 UI는 authenticated로 panana_site_settings를 직접 읽고/수정합니다.
+-- 따라서 authenticated는 revoke 하지 말고, anon만 revoke(보수적)합니다.
+revoke all on table public.panana_site_settings from anon;
 

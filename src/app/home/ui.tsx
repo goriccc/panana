@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HomeHeader } from "@/components/HomeHeader";
 import { AlertModal } from "@/components/AlertModal";
 import { ContentCard } from "@/components/ContentCard";
@@ -103,6 +103,11 @@ export function HomeClient({
   const [behaviorSignals, setBehaviorSignals] = useState<Array<{ tag: string; weight: number }>>([]);
   const [cachedPersonalizedSlugs, setCachedPersonalizedSlugs] = useState<string[] | null>(null);
   const [popularSlugs, setPopularSlugs] = useState<string[] | null>(null);
+  const [categoryItemsBySlug, setCategoryItemsBySlug] = useState<Record<string, ContentCardItem[]>>({});
+  const [categoryPagingBySlug, setCategoryPagingBySlug] = useState<
+    Record<string, { offset: number; hasMore: boolean; loading: boolean }>
+  >({});
+  const categorySentinelRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const { status } = useSession();
   const loggedIn = status === "authenticated";
 
@@ -300,8 +305,7 @@ export function HomeClient({
       const list = loadMyChats();
       setMyChats(list);
       if (list.length > 0) setHasAnyMyChats(true);
-      // 대화한 캐릭터가 있으면 첫 진입에 MY를 자동 선택(요청 UX)
-      if (list.length) setActiveTab("my");
+      // /home 진입 시 기본은 HOME 유지
       if (firstLoad) {
         setMyChatsLoading(false);
         firstLoad = false;
@@ -414,17 +418,18 @@ export function HomeClient({
     setBehaviorSignals(getBehaviorSignals(recommendationSettings));
   };
 
+  const isForYou = useCallback((slug: string, name: string) => {
+    const s = String(slug || "").toLowerCase();
+    const n = String(name || "").toLowerCase();
+    return s.includes("for-you") || s.includes("for-me") || n.includes("나에게");
+  }, []);
+  const isPopular = useCallback((slug: string, name: string) => {
+    const s = String(slug || "").toLowerCase();
+    const n = String(name || "").toLowerCase();
+    return s.includes("loved") || n.includes("모두에게");
+  }, []);
+
   const topCategories = useMemo(() => {
-    const isForYou = (slug: string, name: string) => {
-      const s = String(slug || "").toLowerCase();
-      const n = String(name || "").toLowerCase();
-      return s.includes("for-you") || s.includes("for-me") || n.includes("나에게");
-    };
-    const isPopular = (slug: string, name: string) => {
-      const s = String(slug || "").toLowerCase();
-      const n = String(name || "").toLowerCase();
-      return s.includes("loved") || n.includes("모두에게");
-    };
     const bySlug = new Map(allItems.map((it) => [it.characterSlug, it]));
 
     return (source || []).map((c) => {
@@ -447,14 +452,110 @@ export function HomeClient({
   }, [source, personalizedItems, popularSlugs, allItems]);
 
   useEffect(() => {
+    const initialLimit = 12;
+    setCategoryItemsBySlug((prev) => {
+      const next = { ...prev };
+      topCategories.forEach((cat) => {
+        if (isForYou(cat.slug, cat.name) || isPopular(cat.slug, cat.name)) return;
+        if (!next[cat.slug]) next[cat.slug] = cat.items || [];
+      });
+      return next;
+    });
+    setCategoryPagingBySlug((prev) => {
+      const next = { ...prev };
+      topCategories.forEach((cat) => {
+        if (isForYou(cat.slug, cat.name) || isPopular(cat.slug, cat.name)) return;
+        if (!next[cat.slug]) {
+          const count = (cat.items || []).length;
+          next[cat.slug] = { offset: count, hasMore: count >= initialLimit, loading: false };
+        }
+      });
+      return next;
+    });
+  }, [topCategories, isForYou, isPopular]);
+
+  useEffect(() => {
     try {
       topCategories.forEach((cat) => {
-        localStorage.setItem(`panana_home_category_cache:${cat.slug}`, JSON.stringify(cat.items || []));
+        const items = categoryItemsBySlug[cat.slug] || cat.items || [];
+        localStorage.setItem(`panana_home_category_cache:${cat.slug}`, JSON.stringify(items));
       });
     } catch {
       // ignore
     }
-  }, [topCategories]);
+  }, [topCategories, categoryItemsBySlug]);
+
+  const loadMoreCategoryItems = useCallback(async (slug: string) => {
+    const paging = categoryPagingBySlug[slug];
+    if (!paging || paging.loading || !paging.hasMore) return;
+    setCategoryPagingBySlug((prev) => ({
+      ...prev,
+      [slug]: { ...paging, loading: true },
+    }));
+    try {
+      const res = await fetch(`/api/category-items?slug=${encodeURIComponent(slug)}&offset=${paging.offset}&limit=12`);
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok || !Array.isArray(data.items)) {
+        throw new Error("failed");
+      }
+      setCategoryItemsBySlug((prev) => ({
+        ...prev,
+        [slug]: [...(prev[slug] || []), ...data.items],
+      }));
+      setCategoryPagingBySlug((prev) => ({
+        ...prev,
+        [slug]: {
+          offset: Number(data.nextOffset || paging.offset),
+          hasMore: Boolean(data.hasMore),
+          loading: false,
+        },
+      }));
+    } catch {
+      setCategoryPagingBySlug((prev) => ({
+        ...prev,
+        [slug]: { ...paging, loading: false },
+      }));
+    }
+  }, [categoryPagingBySlug]);
+
+  const setCategorySentinel = useCallback(
+    (slug: string) => (el: HTMLDivElement | null) => {
+      categorySentinelRefs.current[slug] = el;
+    },
+    []
+  );
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return;
+          const slug = entry.target.getAttribute("data-slug") || "";
+          if (!slug) return;
+          const paging = categoryPagingBySlug[slug];
+          if (!paging || paging.loading || !paging.hasMore) return;
+          void loadMoreCategoryItems(slug);
+        });
+      },
+      { root: null, rootMargin: "200px 0px", threshold: 0 }
+    );
+
+    Object.values(categorySentinelRefs.current).forEach((el) => {
+      if (el) observer.observe(el);
+    });
+
+    return () => observer.disconnect();
+  }, [categoryPagingBySlug, loadMoreCategoryItems]);
+
+  const getDisplayItems = (cat: { slug: string; name: string; items: ContentCardItem[] }) => {
+    const base =
+      isForYou(cat.slug, cat.name) || isPopular(cat.slug, cat.name)
+        ? cat.items || []
+        : categoryItemsBySlug[cat.slug] || cat.items || [];
+    if (!effectiveSafetyOn) return base;
+    return base.filter((it) => Boolean((it as any)?.safetySupported));
+  };
+
 
   const filtered = useMemo(() => {
     const q = String(searchQ || "").trim().toLowerCase();
@@ -791,7 +892,11 @@ export function HomeClient({
 
         {/* 카테고리 섹션들 */}
         <div className="mt-8 space-y-10">
-          {topCategories.map((cat) => (
+          {topCategories.map((cat) => {
+            const displayItems = getDisplayItems(cat);
+            const paging = categoryPagingBySlug[cat.slug];
+            const canLoadMore = paging?.hasMore && !paging?.loading;
+            return (
             <section key={cat.slug}>
               <div className="flex items-center justify-between">
                 <div className="text-[14px] font-semibold tracking-[-0.01em] text-white/75"># {cat.name}</div>
@@ -803,14 +908,20 @@ export function HomeClient({
                   onMouseEnter={() => router.prefetch(`/category/${cat.slug}`)}
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M9 6l6 6-6 6" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    <path
+                      d="M9 6l6 6-6 6"
+                      stroke="rgba(255,255,255,0.7)"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
                   </svg>
                 </Link>
               </div>
 
               <div className="mt-4">
                 <div className="hide-scrollbar flex snap-x snap-mandatory gap-0 overflow-x-auto pb-2">
-                {chunkItems(cat.items, 4).map((group, idx) => (
+                {chunkItems(displayItems, 4).map((group, idx) => (
                   <div key={`${cat.slug}-${idx}`} className="w-full shrink-0 snap-start">
                     <div className="grid grid-cols-2 gap-3">
                       {group.map((it) => (
@@ -830,8 +941,12 @@ export function HomeClient({
                 ))}
                 </div>
               </div>
+              {null}
+              {!isForYou(cat.slug, cat.name) && !isPopular(cat.slug, cat.name) ? (
+                <div ref={setCategorySentinel(cat.slug)} data-slug={cat.slug} className="h-1 w-full" />
+              ) : null}
             </section>
-          ))}
+          )})}
         </div>
           </>
         )}

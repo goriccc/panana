@@ -1,28 +1,100 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import type { Category, ContentCardItem } from "@/lib/content";
 import { ContentCard } from "@/components/ContentCard";
 
 export function CategoryClient({ category }: { category: Category }) {
   const sp = useSearchParams();
+  const source = sp.get("source");
   const [items, setItems] = useState(category.items);
+  const [paging, setPaging] = useState<{ offset: number; hasMore: boolean; loading: boolean }>({
+    offset: category.items.length,
+    hasMore: category.items.length >= 12,
+    loading: false,
+  });
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const loadingRef = useRef(false);
   useEffect(() => {
-    const source = sp.get("source");
     if (source !== "home") return;
+    if (category.slug === "new") return;
     try {
       const raw = localStorage.getItem(`panana_home_category_cache:${category.slug}`);
       if (!raw) return;
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length) {
-        setItems(parsed as ContentCardItem[]);
+        const nextItems = parsed as ContentCardItem[];
+        setItems(nextItems);
+        setPaging({
+          offset: nextItems.length,
+          hasMore: nextItems.length >= 12,
+          loading: false,
+        });
       }
     } catch {
       // ignore
     }
   }, [category.slug, sp]);
+
+  useEffect(() => {
+    if (source === "home") return;
+    setItems(category.items);
+    setPaging({
+      offset: category.items.length,
+      hasMore: category.items.length >= 12,
+      loading: false,
+    });
+  }, [category.items, category.slug, source]);
+
+  const loadMore = useCallback(async () => {
+    if (paging.loading || !paging.hasMore || loadingRef.current) return;
+    loadingRef.current = true;
+    setPaging((prev) => ({ ...prev, loading: true }));
+    try {
+      const res = await fetch(
+        `/api/category-items?slug=${encodeURIComponent(category.slug)}&offset=${paging.offset}&limit=12`
+      );
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok || !Array.isArray(data.items)) {
+        throw new Error("failed");
+      }
+      const nextItems = data.items as ContentCardItem[];
+      if (nextItems.length) {
+        setItems((prev) => [...prev, ...nextItems]);
+      }
+      // 방어적으로: 아이템이 0개면 더 이상 불러올 게 없다고 간주(무한 로딩/깜빡임 방지)
+      const nextHasMore = nextItems.length > 0 && Boolean(data.hasMore);
+      setPaging({
+        offset: Number(data.nextOffset || paging.offset),
+        hasMore: nextHasMore,
+        loading: false,
+      });
+    } catch {
+      // 에러가 반복되면 화면이 흔들리므로 더 이상 로딩 시도하지 않음
+      setPaging((prev) => ({ ...prev, loading: false, hasMore: false }));
+    } finally {
+      loadingRef.current = false;
+    }
+  }, [category.slug, paging]);
+
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    if (!paging.hasMore) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return;
+          void loadMore();
+        });
+      },
+      { root: null, rootMargin: "200px 0px", threshold: 0 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [loadMore, paging.hasMore]);
 
   return (
     <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.14),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">
@@ -71,12 +143,20 @@ export function CategoryClient({ category }: { category: Category }) {
             />
           ))}
         </div>
+        {paging.loading ? (
+          <div className="mt-6 flex h-6 items-center justify-center">
+            <div className="text-[12px] font-semibold text-white/45">더 불러오는 중...</div>
+          </div>
+        ) : null}
+        <div ref={sentinelRef} className="h-2 w-full" />
 
         <div className="mt-10 text-center">
-          <div className="text-[12px] font-semibold text-white/35">더 많은 콘텐츠를 기대해 주세요!</div>
+          <div className={`text-[12px] font-semibold text-white/35 ${paging.hasMore ? "opacity-0" : "opacity-100"}`}>
+            더 많은 콘텐츠를 기대해 주세요!
+          </div>
           <Link
             href="/home"
-            className="mt-4 inline-block text-[12px] font-semibold text-panana-pink/85"
+            className={`mt-4 inline-block text-[12px] font-semibold text-panana-pink/85 ${paging.hasMore ? "opacity-0 pointer-events-none" : "opacity-100"}`}
           >
             메인 화면으로 이동
           </Link>
