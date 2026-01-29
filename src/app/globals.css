@@ -29,6 +29,16 @@ body {
   height: 0;
 }
 
+/* 스와이프 영역 가로 스크롤바 숨김 */
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
 /* ===== Studio 전용: 다크톤 스크롤바(세로/가로) ===== */
 /* 사용법: 스튜디오 내부에서 스크롤 요소에 `studio-scrollbar` 클래스 부여 */
 .studio-scope .studio-scrollbar {

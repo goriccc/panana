@@ -809,7 +809,7 @@ export function HomeClient({
               </div>
 
               <div className="mt-4">
-                <div className="flex snap-x snap-mandatory gap-0 overflow-x-auto pb-2">
+                <div className="hide-scrollbar flex snap-x snap-mandatory gap-0 overflow-x-auto pb-2">
                 {chunkItems(cat.items, 4).map((group, idx) => (
                   <div key={`${cat.slug}-${idx}`} className="w-full shrink-0 snap-start">
                     <div className="grid grid-cols-2 gap-3">
