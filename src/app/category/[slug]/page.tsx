@@ -15,6 +15,8 @@ export function generateMetadata({ params }: { params: { slug: string } }): Meta
   };
 }
 
+export const revalidate = 60;
+
 export default async function CategoryPage({ params }: { params: { slug: string } }) {
   const fromDb = await fetchCategoryFromDb(params.slug).catch(() => null);
   const c = fromDb || getCategory(params.slug);

@@ -120,6 +120,9 @@ export default function AdminCharactersPage() {
     setErr(null);
     setUploading(true);
     try {
+      if (profileImageUrl) {
+        await deleteCharacterProfileImageByUrl(profileImageUrl);
+      }
       const { publicUrl } = await uploadCharacterProfileImage(selectedId, file);
       setProfileImageUrl(publicUrl);
     } catch (e: any) {

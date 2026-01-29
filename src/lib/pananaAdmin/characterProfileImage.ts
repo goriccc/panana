@@ -16,11 +16,24 @@ export function publicUrlFromPath(path: string) {
   return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
 }
 
+function extFromFile(file: File) {
+  const name = String(file.name || "");
+  const idx = name.lastIndexOf(".");
+  if (idx !== -1) return name.slice(idx + 1).toLowerCase();
+  const type = String(file.type || "").toLowerCase();
+  if (type.includes("png")) return "png";
+  if (type.includes("jpeg") || type.includes("jpg")) return "jpg";
+  if (type.includes("webp")) return "webp";
+  if (type.includes("gif")) return "gif";
+  return "png";
+}
+
 export async function uploadCharacterProfileImage(characterId: string, file: File) {
   const supabase = getBrowserSupabase();
-  const path = `profiles/${characterId}`;
+  const ext = extFromFile(file);
+  const path = `profiles/${characterId}/${Date.now()}.${ext}`;
   const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
-    upsert: true,
+    upsert: false,
     contentType: file.type,
     cacheControl: "86400",
   });

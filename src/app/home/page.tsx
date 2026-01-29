@@ -8,6 +8,8 @@ export const metadata: Metadata = {
   alternates: { canonical: "/home" },
 };
 
+export const revalidate = 60;
+
 export default async function HomePage() {
   const [cats, menuVisibility, recommendationSettings] = await Promise.all([
     fetchHomeCategoriesFromDb().catch(() => null),
