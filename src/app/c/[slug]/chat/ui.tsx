@@ -824,7 +824,7 @@ export function CharacterChatClient({
         }}
       >
         <div className="mx-auto w-full max-w-[420px] px-5 py-2.5">
-          <div className="flex items-center gap-2.5 rounded-full border border-panana-pink/35 bg-white/[0.04] px-3.5 py-2">
+          <div className="flex items-center gap-2.5 rounded-full border border-panana-pink/35 bg-white/[0.04] py-2 pl-3.5 pr-2">
             <input
               value={value}
               onChange={(e) => setValue(e.target.value)}
@@ -846,7 +846,7 @@ export function CharacterChatClient({
               aria-label="전송"
               onClick={send}
               disabled={!value.trim() || sending}
-              className="grid h-8 w-8 place-items-center rounded-full bg-white/10 ring-1 ring-white/10"
+              className="grid h-9 w-9 place-items-center rounded-full bg-white/10 ring-1 ring-white/10"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M4 12h12" stroke="rgba(255,255,255,0.85)" strokeWidth="2" strokeLinecap="round" />
