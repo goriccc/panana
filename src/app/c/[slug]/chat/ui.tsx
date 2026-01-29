@@ -182,6 +182,7 @@ export function CharacterChatClient({
   const [messages, setMessages] = useState<Msg[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(true);
+  const [headerHidden, setHeaderHidden] = useState(false);
   const [adultVerified, setAdultVerified] = useState(false);
   const [adultLoading, setAdultLoading] = useState(true);
   const [userName, setUserName] = useState<string>(() => {
@@ -725,7 +726,13 @@ export function CharacterChatClient({
     <div className="h-dvh overflow-hidden bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.12),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white flex flex-col">
       <style>{`@keyframes pananaDot{0%,100%{transform:translateY(0);opacity:.55}50%{transform:translateY(-4px);opacity:1}}`}</style>
       <>
-      <header className="mx-auto w-full max-w-[420px] shrink-0 px-5 pt-3">
+      <div
+        className={[
+          "mx-auto w-full max-w-[420px] shrink-0 overflow-hidden transition-[max-height,opacity,margin] duration-200 px-5",
+          headerHidden ? "max-h-0 opacity-0 -mt-2 pointer-events-none" : "max-h-[120px] opacity-100 mt-0",
+        ].join(" ")}
+      >
+      <header className="pt-3">
         <div className="relative flex h-11 items-center">
           <Link 
             href={backHref} 
@@ -776,6 +783,7 @@ export function CharacterChatClient({
           알파 테스트: 모델을 바꿔가며 대화 품질을 비교할 수 있어요.
         </div>
       </header>
+      </div>
 
       {/* 메시지 영역만 스크롤(카톡 스타일). 입력창과 겹치지 않음 */}
       <main
@@ -791,6 +799,8 @@ export function CharacterChatClient({
           const threshold = 80;
           const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
           isAtBottomRef.current = atBottom;
+          const shouldHide = el.scrollTop > 12;
+          if (shouldHide !== headerHidden) setHeaderHidden(shouldHide);
         }}
       >
         {err ? <div className="mb-3 text-[12px] font-semibold text-[#ff9aa1]">{err}</div> : null}
