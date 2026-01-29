@@ -377,11 +377,15 @@ export function CharacterChatClient({
       if (!el) return;
       if (!hasSentRef.current) {
         el.scrollTop = 0;
+        if (headerHidden) setHeaderHidden(false);
         return;
       }
       if (!forceScrollRef.current && !isAtBottomRef.current) return;
       el.scrollTop = el.scrollHeight;
       forceScrollRef.current = false;
+      const overflow = el.scrollHeight - el.clientHeight > 8;
+      const shouldHide = overflow && el.scrollTop > 12;
+      if (shouldHide !== headerHidden) setHeaderHidden(shouldHide);
     };
     rafId = window.requestAnimationFrame(run);
     return () => {
@@ -799,7 +803,8 @@ export function CharacterChatClient({
           const threshold = 80;
           const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
           isAtBottomRef.current = atBottom;
-          const shouldHide = el.scrollTop > 12;
+          const overflow = el.scrollHeight - el.clientHeight > 8;
+          const shouldHide = overflow && el.scrollTop > 12;
           if (shouldHide !== headerHidden) setHeaderHidden(shouldHide);
         }}
       >
