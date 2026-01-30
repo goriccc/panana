@@ -46,7 +46,46 @@ function evalCondition(args: {
   const { c, userText, state, now } = args;
   if (c.type === "text_includes") {
     const hay = String(userText || "");
-    return (c.values || []).some((v) => {
+    const values = c.values || [];
+    const evalInline = (raw: string): boolean | null => {
+      const v = String(raw || "").trim();
+      if (!v) return null;
+      const mVar = /^([a-zA-Z_][a-zA-Z0-9_]*)\s*(<=|>=|=|==|<|>)\s*([0-9]{1,12})$/.exec(v);
+      if (mVar) {
+        const name = String(mVar[1] || "").trim();
+        const op = String(mVar[2] || "");
+        const rhs = toNum(mVar[3]);
+        const lhs = toNum((state.variables as any)[name]);
+        if (op === "<") return lhs < rhs;
+        if (op === ">") return lhs > rhs;
+        if (op === "<=") return lhs <= rhs;
+        if (op === ">=") return lhs >= rhs;
+        return lhs === rhs;
+      }
+      const mParticipant = /^(participant_present|participant)\s*[:=]\s*(.+)$/i.exec(v);
+      if (mParticipant) {
+        const name = String(mParticipant[2] || "").trim().toLowerCase();
+        if (!name) return false;
+        return state.participants.some((p) => String(p || "").trim().toLowerCase() === name);
+      }
+      const mStr = /^(location|time)\s*(==|=|!=)\s*(.+)$/i.exec(v);
+      if (mStr) {
+        const key = String(mStr[1] || "").trim().toLowerCase();
+        const op = String(mStr[2] || "");
+        const rhs = String(mStr[3] || "").trim().toLowerCase();
+        const lhs = String((state.variables as any)[key] ?? "").trim().toLowerCase();
+        if (op === "!=") return lhs !== rhs;
+        return lhs === rhs;
+      }
+      return null;
+    };
+
+    for (const v of values) {
+      const inline = evalInline(String(v || ""));
+      if (inline === true) return true;
+    }
+
+    return values.some((v) => {
       const needle = String(v || "").trim();
       if (!needle) return false;
       return hay.includes(needle);
@@ -57,7 +96,21 @@ function evalCondition(args: {
     const rhs = toNum(c.value);
     if (c.op === "<") return lhs < rhs;
     if (c.op === ">") return lhs > rhs;
+    if (c.op === "<=") return lhs <= rhs;
+    if (c.op === ">=") return lhs >= rhs;
     return lhs === rhs;
+  }
+  if (c.type === "string_compare") {
+    const lhs = String((state.variables as any)[c.var] ?? "").trim().toLowerCase();
+    const rhs = String(c.value ?? "").trim().toLowerCase();
+    if (c.op === "!=") return lhs !== rhs;
+    return lhs === rhs;
+  }
+  if (c.type === "participant_present") {
+    const name = String(c.name || "").trim();
+    if (!name) return false;
+    const needle = name.toLowerCase();
+    return state.participants.some((p) => String(p || "").trim().toLowerCase() === needle);
   }
   if (c.type === "inactive_time") {
     const h = hoursBetween(state.lastActiveAt, now);
@@ -76,8 +129,23 @@ function applyAction(args: { a: TriggerAction; state: ChatRuntimeState; events: 
     if (delta !== 0) events.push({ type: "var_delta", var: String(a.var || ""), op: a.op, value: delta });
     return;
   }
+  if (a.type === "variable_set") {
+    const key = String(a.var || "").trim();
+    if (key) (state.variables as any)[key] = a.value as any;
+    return;
+  }
   if (a.type === "system_message") {
-    events.push(...parseDirectiveText(String(a.text || "")));
+    const text = String(a.text || "");
+    const mScene = /\[(?:씬|씬\s*전환)\]\s*EP\s*([0-9]{1,3})/i.exec(text);
+    if (mScene) {
+      const n = Number(mScene[1]) || 0;
+      if (n > 0) (state.variables as any).scene_id = `ep${n}`;
+    }
+    const mSetScene = /set\s*:\s*scene_id\s*=\s*([a-z0-9_-]+)/i.exec(text);
+    if (mSetScene) {
+      (state.variables as any).scene_id = String(mSetScene[1] || "").trim();
+    }
+    events.push(...parseDirectiveText(text));
     return;
   }
   if (a.type === "join") {
@@ -160,7 +228,24 @@ export function parseDirectiveText(raw: string): ChatRuntimeEvent[] {
   }
 
   if (leftover.length) {
-    out.push({ type: "system_message", text: leftover.join(" ") });
+    let text = leftover.join(" ");
+    if (text.includes("[씬]") && !text.includes("[씬 전환]")) {
+      text = text.replace("[씬]", "[씬 전환]");
+    }
+    const legacyEvents: ChatRuntimeEvent[] = [];
+    const extractLegacy = (kind: "join" | "leave") => {
+      const key = kind === "join" ? "[JOIN 이벤트]" : "[LEAVE 이벤트]";
+      if (!text.includes(key)) return;
+      let rest = text.replace(key, "").trim();
+      rest = rest.replace(/^\[[^\]]+\]\s*/, "");
+      let name = rest.split(/[:\n]/)[0] || "";
+      name = name.replace(/(등장|퇴장|난입|합류).*/g, "").trim();
+      if (name) legacyEvents.push({ type: kind, name });
+    };
+    extractLegacy("join");
+    extractLegacy("leave");
+    out.push(...legacyEvents);
+    out.push({ type: "system_message", text });
   }
 
   return out;
@@ -173,6 +258,7 @@ export function applyTriggerPayloads(args: {
   payloads: Array<TriggerRulesPayload | null | undefined>;
 }): { state: ChatRuntimeState; events: ChatRuntimeEvent[] } {
   const { now, userText } = args;
+  const prevSceneId = String((args.state?.variables as any)?.scene_id || "").trim();
   const state: ChatRuntimeState = {
     variables: { ...(args.state?.variables || {}) },
     participants: Array.isArray(args.state?.participants) ? [...args.state.participants] : [],
@@ -211,6 +297,24 @@ export function applyTriggerPayloads(args: {
     } else if (e.type === "leave") {
       const name = String(e.name || "").trim();
       if (name) state.participants = state.participants.filter((x) => x !== name);
+    }
+  }
+
+  // 씬 전환 감지: scene_id가 바뀌었는데 안내 메시지가 없다면 자동 추가
+  const nextSceneId = String((state.variables as any)?.scene_id || "").trim();
+  if (nextSceneId && nextSceneId !== prevSceneId) {
+    const hasSceneMsg = events.some(
+      (e) => e.type === "system_message" && /\[씬\s*전환\]|\[씬\]/.test(String((e as any).text || ""))
+    );
+    if (!hasSceneMsg) {
+      const label =
+        String((state.variables as any)?.scene_label || "").trim() ||
+        (() => {
+          const m = /^ep\s*([0-9]{1,3})/i.exec(nextSceneId);
+          return m?.[1] ? `EP${m[1]}` : nextSceneId;
+        })();
+      const title = String((state.variables as any)?.scene_title || "").trim();
+      events.push({ type: "system_message", text: `[씬 전환] ${label}${title ? ` · ${title}` : ""}` });
     }
   }
 

@@ -380,6 +380,34 @@ async function loadStudioLorebook(characterId: string) {
   return (data || []) as any[];
 }
 
+async function resolveSceneId(args: { supabase: ReturnType<typeof getSupabaseServer>; projectId: string; sceneId?: string }) {
+  const raw = String(args.sceneId || "").trim();
+  if (!raw) return "";
+  if (isUuid(raw)) return raw;
+  const { data, error } = await args.supabase.from("scenes").select("id").eq("project_id", args.projectId).eq("slug", raw).maybeSingle();
+  if (error) return "";
+  return String((data as any)?.id || "");
+}
+
+async function loadStudioSceneLorebook(args: { characterId: string; sceneId?: string }) {
+  const supabase = getSupabaseServer();
+  const { data: cRow, error: cErr } = await supabase.from("characters").select("id, project_id").eq("id", args.characterId).maybeSingle();
+  if (cErr) throw cErr;
+  if (!cRow?.project_id) return [];
+  const sceneId = await resolveSceneId({ supabase, projectId: String(cRow.project_id), sceneId: args.sceneId });
+  if (!sceneId) return [];
+  const { data, error } = await supabase
+    .from("lorebook_entries")
+    .select("key, value, sort_order, unlock_type, unlock_affection_min, unlock_expr, unlock_cost_panana, unlock_ending_key, unlock_ep_min, unlock_sku, active")
+    .eq("project_id", cRow.project_id)
+    .eq("scope", "scene")
+    .eq("scene_id", sceneId)
+    .eq("active", true)
+    .order("sort_order", { ascending: true });
+  if (error) throw error;
+  return (data || []) as any[];
+}
+
 async function loadStudioRules(args: { characterId: string; scope: "project" | "character" | "scene"; sceneId?: string }) {
   const supabase = getSupabaseServer();
   const { data: cRow, error: cErr } = await supabase.from("characters").select("id, project_id").eq("id", args.characterId).maybeSingle();
@@ -394,7 +422,11 @@ async function loadStudioRules(args: { characterId: string; scope: "project" | "
     .order("updated_at", { ascending: false })
     .limit(1);
   if (args.scope === "character") q = q.eq("character_id", args.characterId);
-  if (args.scope === "scene") q = q.eq("scene_id", String(args.sceneId || ""));
+  if (args.scope === "scene") {
+    const sceneId = await resolveSceneId({ supabase, projectId: String(cRow.project_id), sceneId: args.sceneId });
+    if (!sceneId) return null;
+    q = q.eq("scene_id", sceneId);
+  }
 
   const { data, error } = await q.maybeSingle();
   if (error) throw error;
@@ -438,7 +470,7 @@ function composeSystemPrompt(args: {
   const authorNote = a?.authorNote ? String(a.authorNote) : "";
 
   return [
-    `너는 "${name}" 캐릭터로서 "{{call_sign}}"(상대방)과 1:1 채팅을 한다.`,
+    `너는 "${name}" 캐릭터로서 "{{call_sign}}"(상대방)과 기본은 1:1로 대화하되, 참여자가 추가되면 1:N 그룹 대화로 전환한다.`,
     `상대방을 "유저"라고 부르지 말고, 반드시 "{{call_sign}}" 또는 상황에 맞는 호칭으로 부른다.`,
     `지문(괄호 안 서술)에서도 "유저/사용자" 금지. 반드시 "{{call_sign}}"으로 표기한다.`,
     handle || tags || mbti ? `프로필: ${[handle, tags, mbti].filter(Boolean).join("  ")}` : null,
@@ -499,9 +531,10 @@ export async function POST(req: Request) {
         }
         const studioId = panana?.studio_character_id || null;
         if (studioId) {
-          const [studioPrompt, studioLorebook, projectRules, sceneRules, characterRules] = await Promise.all([
+          const [studioPrompt, studioLorebook, sceneLorebook, projectRules, sceneRules, characterRules] = await Promise.all([
             loadStudioPrompt(studioId).catch(() => null),
             loadStudioLorebook(studioId).catch(() => []),
+            body.sceneId ? loadStudioSceneLorebook({ characterId: studioId, sceneId: body.sceneId }).catch(() => []) : Promise.resolve([]),
             loadStudioRules({ characterId: studioId, scope: "project" }).catch(() => null),
             body.sceneId ? loadStudioRules({ characterId: studioId, scope: "scene", sceneId: body.sceneId }).catch(() => null) : Promise.resolve(null),
             loadStudioRules({ characterId: studioId, scope: "character" }).catch(() => null),
@@ -522,7 +555,10 @@ export async function POST(req: Request) {
             }
           }
 
-          const filteredLorebook = filterLorebookRows(studioLorebook as any, body.runtime as any).filter((x: any) => x?.active !== false);
+          const mergedLorebook = [...(studioLorebook as any[]), ...(sceneLorebook as any[])]
+            .filter(Boolean)
+            .sort((a, b) => (Number(a?.sort_order) || 0) - (Number(b?.sort_order) || 0));
+          const filteredLorebook = filterLorebookRows(mergedLorebook as any, body.runtime as any).filter((x: any) => x?.active !== false);
           system = composeSystemPrompt({ panana, studioPrompt, studioLorebook: filteredLorebook });
           // 트리거 실행 순서: 프로젝트(기반) → 씬(상황) → 캐릭터(최종)
           triggerPayloads = [projectRules, sceneRules, characterRules].filter(Boolean);
@@ -607,7 +643,23 @@ export async function POST(req: Request) {
 
     // system prompt에 현재 상태/이벤트를 추가(LLM이 변수/참여자를 인지하도록)
     if (system) {
-      const snapKeys = ["affection", "risk", "trust", "submission", "dependency", "suspicion", "sales", "debt"];
+      const snapKeys = [
+        "affection",
+        "risk",
+        "stress",
+        "alcohol",
+        "jealousy",
+        "performance",
+        "fatigue",
+        "trust",
+        "submission",
+        "dependency",
+        "suspicion",
+        "sales",
+        "debt",
+        "location",
+        "time",
+      ];
       const snap = snapKeys
         .filter((k) => k in (runtimeVariablesMerged as any))
         .map((k) => `${k}=${String((runtimeVariablesMerged as any)[k])}`)
@@ -618,10 +670,16 @@ export async function POST(req: Request) {
         .map((e) => `- ${String((e as any).text || "")}`)
         .filter(Boolean)
         .join("\n");
+      const hasSceneShift = runtimeEvents.some(
+        (e) => e.type === "system_message" && String((e as any).text || "").includes("[씬 전환]")
+      );
       const extra = [
         snap ? `[상태 변수] ${snap}` : null,
         parts.length ? `[참여자] ${parts.join(", ")}` : null,
         eventsText ? `[시스템 이벤트]\n${eventsText}` : null,
+        hasSceneShift
+          ? `[연출] 방금 씬이 전환되었다. 다음 답변의 첫 문장에서 장소/상황 변화를 자연스럽게 드러내고 이어서 캐릭터 대사로 진행한다.`
+          : null,
       ]
         .filter(Boolean)
         .join("\n");

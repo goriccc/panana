@@ -95,12 +95,16 @@ function ConditionEditor({
             const t = e.target.value as TriggerCondition["type"];
             if (t === "text_includes") onChange({ type: "text_includes", values: [] });
             else if (t === "inactive_time") onChange({ type: "inactive_time", hours: 24 });
-            else onChange({ type: "variable_compare", var: "jealousy", op: "<", value: 50 });
+            else if (t === "string_compare") onChange({ type: "string_compare", var: "location", op: "=", value: "" });
+            else if (t === "participant_present") onChange({ type: "participant_present", name: "" });
+            else onChange({ type: "variable_compare", var: "affection", op: ">=", value: 50 });
           }}
           className="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-[12px] font-extrabold text-white/75 outline-none"
         >
           <option value="text_includes">유저입력 텍스트 포함</option>
-          <option value="variable_compare">현재 질투 수치</option>
+          <option value="variable_compare">변수 비교(숫자)</option>
+          <option value="string_compare">변수 비교(문자)</option>
+          <option value="participant_present">참여자 포함 여부</option>
           <option value="inactive_time">미접속 시간</option>
         </select>
 
@@ -112,14 +116,28 @@ function ConditionEditor({
 
         {c.type === "variable_compare" ? (
           <div className="flex flex-wrap items-center gap-2">
-            <select
+            <input
               value={c.var}
               onChange={(e) => onChange({ ...c, var: e.target.value })}
-              className="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-[12px] font-extrabold text-white/75 outline-none"
-            >
-              <option value="jealousy">질투(jealousy)</option>
-              <option value="affection">호감(affection)</option>
-            </select>
+              list="panana-var-compare-list"
+              className="min-w-[160px] rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-[12px] font-extrabold text-white/75 outline-none placeholder:text-white/25"
+              placeholder="변수 키 (예: stress)"
+            />
+            <datalist id="panana-var-compare-list">
+              <option value="affection" />
+              <option value="risk" />
+              <option value="stress" />
+              <option value="alcohol" />
+              <option value="jealousy" />
+              <option value="performance" />
+              <option value="fatigue" />
+              <option value="trust" />
+              <option value="submission" />
+              <option value="dependency" />
+              <option value="suspicion" />
+              <option value="sales" />
+              <option value="debt" />
+            </datalist>
             <select
               value={c.op}
               onChange={(e) => onChange({ ...c, op: e.target.value as any })}
@@ -127,12 +145,55 @@ function ConditionEditor({
             >
               <option value="<">&lt;</option>
               <option value=">">&gt;</option>
+              <option value="<=">&le;</option>
+              <option value=">=">&ge;</option>
               <option value="=">=</option>
             </select>
             <input
               value={c.value}
               onChange={(e) => onChange({ ...c, value: Number(e.target.value) || 0 })}
               className="w-24 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-[12px] font-extrabold text-white/75 outline-none"
+            />
+          </div>
+        ) : null}
+
+        {c.type === "string_compare" ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={c.var}
+              onChange={(e) => onChange({ ...c, var: e.target.value })}
+              list="panana-var-string-list"
+              className="min-w-[160px] rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-[12px] font-extrabold text-white/75 outline-none placeholder:text-white/25"
+              placeholder="변수 키 (예: location)"
+            />
+            <datalist id="panana-var-string-list">
+              <option value="location" />
+              <option value="time" />
+            </datalist>
+            <select
+              value={c.op}
+              onChange={(e) => onChange({ ...c, op: e.target.value as any })}
+              className="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-[12px] font-extrabold text-white/75 outline-none"
+            >
+              <option value="=">=</option>
+              <option value="!=">!=</option>
+            </select>
+            <input
+              value={c.value}
+              onChange={(e) => onChange({ ...c, value: e.target.value })}
+              className="min-w-[160px] rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-[12px] font-extrabold text-white/75 outline-none"
+              placeholder="값 (예: 탕비실)"
+            />
+          </div>
+        ) : null}
+
+        {c.type === "participant_present" ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={c.name}
+              onChange={(e) => onChange({ ...c, name: e.target.value })}
+              className="min-w-[180px] rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-[12px] font-extrabold text-white/75 outline-none placeholder:text-white/25"
+              placeholder="참여자 이름 (예: 최 전무)"
             />
           </div>
         ) : null}
@@ -451,17 +512,31 @@ export function TriggerBuilderClient({ characterId, embedded = false }: { charac
                     <div key={aIdx}>
                       {a.type === "variable_mod" ? (
                         <ActionRow label="결과 유형: 변수 값 변경">
-                          <select
+                          <input
                             value={a.var}
                             onChange={(e) => {
                               const nextActions = r.then.actions.map((x, i) => (i === aIdx ? ({ ...a, var: e.target.value } as any) : x));
                               updateRule(r.id, { then: { actions: nextActions } });
                             }}
-                            className="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-[12px] font-extrabold text-white/75 outline-none"
-                          >
-                            <option value="affection">호감도(affection)</option>
-                            <option value="jealousy">질투(jealousy)</option>
-                          </select>
+                            list={`panana-var-mod-list-${r.id}-${aIdx}`}
+                            className="min-w-[160px] rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-[12px] font-extrabold text-white/75 outline-none placeholder:text-white/25"
+                            placeholder="변수 키 (예: stress)"
+                          />
+                          <datalist id={`panana-var-mod-list-${r.id}-${aIdx}`}>
+                            <option value="affection" />
+                            <option value="risk" />
+                            <option value="stress" />
+                            <option value="alcohol" />
+                            <option value="jealousy" />
+                            <option value="performance" />
+                            <option value="fatigue" />
+                            <option value="trust" />
+                            <option value="submission" />
+                            <option value="dependency" />
+                            <option value="suspicion" />
+                            <option value="sales" />
+                            <option value="debt" />
+                          </datalist>
                           <select
                             value={a.op}
                             onChange={(e) => {
@@ -482,6 +557,34 @@ export function TriggerBuilderClient({ characterId, embedded = false }: { charac
                               updateRule(r.id, { then: { actions: nextActions } });
                             }}
                             className="w-24 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-[12px] font-extrabold text-white/75 outline-none"
+                          />
+                        </ActionRow>
+                      ) : null}
+
+                      {a.type === "variable_set" ? (
+                        <ActionRow label="결과 유형: 변수 값 설정">
+                          <input
+                            value={a.var}
+                            onChange={(e) => {
+                              const nextActions = r.then.actions.map((x, i) => (i === aIdx ? ({ ...a, var: e.target.value } as any) : x));
+                              updateRule(r.id, { then: { actions: nextActions } });
+                            }}
+                            list={`panana-var-set-list-${r.id}-${aIdx}`}
+                            className="min-w-[160px] rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-[12px] font-extrabold text-white/75 outline-none placeholder:text-white/25"
+                            placeholder="변수 키 (예: location)"
+                          />
+                          <datalist id={`panana-var-set-list-${r.id}-${aIdx}`}>
+                            <option value="location" />
+                            <option value="time" />
+                          </datalist>
+                          <input
+                            value={String((a as any).value ?? "")}
+                            onChange={(e) => {
+                              const nextActions = r.then.actions.map((x, i) => (i === aIdx ? ({ ...a, value: e.target.value } as any) : x));
+                              updateRule(r.id, { then: { actions: nextActions } });
+                            }}
+                            className="min-w-[160px] rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-[12px] font-extrabold text-white/75 outline-none placeholder:text-white/25"
+                            placeholder="값 (예: 탕비실)"
                           />
                         </ActionRow>
                       ) : null}
@@ -584,6 +687,15 @@ export function TriggerBuilderClient({ characterId, embedded = false }: { charac
                       }
                     >
                       + 변수 변경
+                    </button>
+                    <button
+                      type="button"
+                      className="w-full rounded-xl border border-dashed border-white/15 bg-white/[0.01] px-4 py-3 text-[12px] font-extrabold text-white/55 hover:bg-white/[0.03]"
+                      onClick={() =>
+                        updateRule(r.id, { then: { actions: [...r.then.actions, { type: "variable_set", var: "location", value: "" }] } })
+                      }
+                    >
+                      + 변수 설정
                     </button>
                     <button
                       type="button"

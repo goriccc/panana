@@ -595,12 +595,14 @@ export function CharacterChatClient({
         ...(idt.handle ? { user_handle: String(idt.handle), panana_handle: String(idt.handle) } : {}),
         ...(idt.id ? { panana_id: String(idt.id) } : {}),
       };
+      const sceneIdFromRuntime = String((runtimeVariables as any).scene_id || (runtimeVariables as any).sceneId || "").trim();
       const res = await fetch("/api/llm/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           provider,
           characterSlug,
+          sceneId: sceneIdFromRuntime || undefined,
           concise: true,
           // 홈 스파이시 토글(ON)일 때만 성인 대화 허용을 서버에 요청한다.
           // 실제 허용 여부는 서버에서 캐릭터 safety_supported를 보고 최종 결정한다.

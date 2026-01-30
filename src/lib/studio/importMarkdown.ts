@@ -728,7 +728,6 @@ function parseTriggersFromMarkdown(section: string, warnings: string[]): Trigger
   };
 
   const parseIf = (s: string) => {
-    const lowerAll = s.toLowerCase();
     const isOr = /\s+OR\s+| 또는 /i.test(s);
     const joinType: "AND" | "OR" = isOr ? "OR" : "AND";
     const parts = s.split(/\s+(?:AND|OR)\s+| 그리고 | 또는 /i).map((x) => x.trim()).filter(Boolean);
@@ -744,24 +743,36 @@ function parseTriggersFromMarkdown(section: string, warnings: string[]): Trigger
         continue;
       }
 
-      // 변수 비교: affection >= 30 등 (<= >=는 현재 타입 제약상 < >로 근사)
-      const mVar =
-        /(affection|jealousy|trust|danger|guilt|exposurerisk|dependency|secretlevel|risk|submission|debt|suspicion|sales)\s*(<=|>=|=|<|>)\s*([0-9]{1,12})/i.exec(
-          lower,
-        );
+      // 참여자 존재 조건
+      const mParticipant = /(participant_present|participant|참여자|참석자)\s*[:=]\s*["'“”]?([^"'“”]+)["'“”]?/i.exec(part);
+      if (mParticipant) {
+        const name = String(mParticipant[2] || "").trim();
+        if (name) {
+          conditions.push({ type: "participant_present", name });
+          continue;
+        }
+      }
+
+      // 변수 비교: AnyVar >= 30 등
+      const mVar = /([a-zA-Z_][a-zA-Z0-9_]*)\s*(<=|>=|=|==|<|>)\s*([0-9]{1,12})/i.exec(part);
       if (mVar) {
-        const opRaw = mVar[2];
-        const op = opRaw === "<=" ? "<" : opRaw === ">=" ? ">" : (opRaw as any);
-        conditions.push({ type: "variable_compare", var: mVar[1], op, value: Number(mVar[3]) || 0 });
+        const opRaw = String(mVar[2] || "");
+        const op = (opRaw === "==" ? "=" : opRaw) as any;
+        const varName = String(mVar[1] || "").trim();
+        conditions.push({ type: "variable_compare", var: varName, op, value: Number(mVar[3]) || 0 });
         continue;
       }
 
-      // Location == "호텔" 같은 문자열 비교는 text_includes로 근사
-      const mLoc = /(location|위치)\s*(==|=)\s*["'“”]?([^"'“”]+)["'“”]?/i.exec(part);
-      if (mLoc) {
-        const v = String(mLoc[3] || "").trim();
+      // Location/Time 문자열 비교
+      const mStr = /(location|위치|time|시간)\s*(==|=|!=)\s*["'“”]?([^"'“”]+)["'“”]?/i.exec(part);
+      if (mStr) {
+        const rawVar = String(mStr[1] || "").trim().toLowerCase();
+        const varName = rawVar === "위치" ? "location" : rawVar === "시간" ? "time" : rawVar;
+        const opRaw = String(mStr[2] || "");
+        const op = (opRaw === "!=" ? "!=" : "=") as any;
+        const v = String(mStr[3] || "").trim();
         if (v) {
-          conditions.push({ type: "text_includes", values: [v].slice(0, 1) });
+          conditions.push({ type: "string_compare", var: varName, op, value: v });
           continue;
         }
       }
@@ -793,17 +804,47 @@ function parseTriggersFromMarkdown(section: string, warnings: string[]): Trigger
       "호감": "affection",
       "질투": "jealousy",
       "신뢰": "trust",
-      "위험": "danger",
+      "위험": "risk",
       "죄책감": "guilt",
       "노출": "exposureRisk",
       "의존": "dependency",
       "비밀": "secretLevel",
+      "스트레스": "stress",
+      "술기운": "alcohol",
+      "취기": "alcohol",
+      "성과": "performance",
+      "피로": "fatigue",
     };
-    const mKor = /(호감도|호감|질투|신뢰|위험|죄책감|노출|의존|비밀)\s*([+-])\s*([0-9]{1,3})/i.exec(s);
+    const mKor = /(호감도|호감|질투|신뢰|위험|죄책감|노출|의존|비밀|스트레스|술기운|취기|성과|피로)\s*([+-])\s*([0-9]{1,3})/i.exec(s);
     if (mKor) actions.push({ type: "variable_mod", var: varMap[mKor[1]] || "affection", op: mKor[2], value: Number(mKor[3]) || 0 });
 
-    const mEng = /(affection|jealousy|trust|danger|guilt|exposurerisk|dependency|secretlevel)\s*([+-])\s*([0-9]{1,3})/i.exec(lower);
+    const mEng =
+      /(affection|jealousy|trust|risk|stress|alcohol|performance|fatigue|guilt|exposurerisk|dependency|secretlevel|submission|debt|suspicion|sales)\s*([+-])\s*([0-9]{1,3})/i.exec(
+        lower,
+      );
     if (mEng) actions.push({ type: "variable_mod", var: mEng[1], op: mEng[2], value: Number(mEng[3]) || 0 });
+
+    // 문자열 변수 설정: location/time
+    const mSetStr = /(location|위치|time|시간)\s*(=|==)\s*["'“”]?([^"'“”]+)["'“”]?/i.exec(s);
+    if (mSetStr) {
+      const rawVar = String(mSetStr[1] || "").trim().toLowerCase();
+      const varName = rawVar === "위치" ? "location" : rawVar === "시간" ? "time" : rawVar;
+      const v = String(mSetStr[3] || "").trim();
+      if (v) actions.push({ type: "variable_set", var: varName, value: v });
+    }
+
+    const mSetAny = /(var_set|variable_set|set)\s*:\s*([a-zA-Z0-9_]+)\s*=\s*([^\n;]+)/i.exec(s);
+    if (mSetAny) {
+      const varName = String(mSetAny[2] || "").trim();
+      const v = String(mSetAny[3] || "").trim().replace(/^["'“”]|["'“”]$/g, "");
+      if (varName && v) actions.push({ type: "variable_set", var: varName, value: v });
+    }
+
+    // 일반 변수 증감: anyVar +5
+    const mAny = /([a-zA-Z_][a-zA-Z0-9_]*)\s*([+-])\s*([0-9]{1,3})/i.exec(s);
+    if (mAny && !mEng && !mKor) {
+      actions.push({ type: "variable_mod", var: String(mAny[1] || ""), op: mAny[2] as any, value: Number(mAny[3]) || 0 });
+    }
 
     // join/leave 등 지시어가 들어있으면 가능한 액션으로 분해(Studio UI에서도 그대로 편집 가능)
     const ev = parseDirectiveText(s);
@@ -1034,10 +1075,17 @@ function parseProjectScenesFromMarkdown(md: string) {
       name: `${scene.episodeLabel} 요약`,
       enabled: true,
       if: { type: "AND", conditions: [{ type: "text_includes", values: Array.from(new Set(keywords)).slice(0, 6) }] },
-      then: { actions: [{ type: "system_message", text: `[씬] ${scene.episodeLabel} · ${scene.title}\n${scene.seedLorebookValue || ""}` }] },
+      then: {
+        actions: [
+          { type: "variable_set", var: "scene_id", value: scene.slug },
+          { type: "variable_set", var: "scene_label", value: scene.episodeLabel },
+          { type: "variable_set", var: "scene_title", value: scene.title },
+          { type: "system_message", text: `[씬 전환] ${scene.episodeLabel} · ${scene.title}` },
+        ],
+      },
     });
 
-    // join/leave 이벤트를 룰 초안으로 추가(동작 엔진이 아직 join/leave를 실행하진 않지만, 작가가 편집할 기반 제공)
+    // join/leave 이벤트를 룰 초안으로 추가(실제 참여자 추가/제거도 함께 생성)
     const addEventRules = (items: string[], prefix: string) => {
       let idx = 0;
       for (const line of items) {
@@ -1048,12 +1096,16 @@ function parseProjectScenesFromMarkdown(md: string) {
         const q = /"([^"]+)"/.exec(line)?.[1]?.trim() || "";
         const values = Array.from(new Set([bracket, who].filter(Boolean))).slice(0, 3);
         if (!values.length) continue;
+        const actions: any[] = [];
+        if (prefix === "join" && who) actions.push({ type: "join", name: who });
+        if (prefix === "leave" && who) actions.push({ type: "leave", name: who });
+        actions.push({ type: "system_message", text: `[${prefix.toUpperCase()} 이벤트] ${line}${q ? `\n"${q}"` : ""}` });
         rules.push({
           id: `seed_${scene.slug}_${prefix}_${idx}`,
           name: `${prefix.toUpperCase()} 이벤트 ${idx}${who ? `: ${who}` : ""}`,
           enabled: true,
           if: { type: "AND", conditions: [{ type: "text_includes", values }] },
-          then: { actions: [{ type: "system_message", text: `[${prefix.toUpperCase()} 이벤트] ${line}${q ? `\n"${q}"` : ""}` }] },
+          then: { actions },
         });
         if (rules.length >= 12) break;
       }

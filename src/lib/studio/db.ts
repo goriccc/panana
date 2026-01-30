@@ -1,5 +1,5 @@
 import { getBrowserSupabase } from "@/lib/supabase/browser";
-import type { StudioPromptState, PromptLorebookItem, TriggerRulesPayload } from "@/lib/studio/types";
+import type { StudioPromptState, PromptLorebookItem, TriggerCondition, TriggerRulesPayload } from "@/lib/studio/types";
 
 export type StudioProjectRow = {
   id: string;
@@ -918,5 +918,167 @@ export async function studioSaveProjectRules(projectId: string, payload: Trigger
     created_by: userId,
   } as any);
   if (error) throw error;
+}
+
+function upgradeInlineConditionToken(token: string): TriggerCondition | null {
+  const raw = String(token || "").trim();
+  if (!raw) return null;
+  const mVar = /^([a-zA-Z_][a-zA-Z0-9_]*)\s*(<=|>=|=|==|<|>)\s*([0-9]{1,12})$/.exec(raw);
+  if (mVar) {
+    const varName = String(mVar[1] || "").trim();
+    const opRaw = String(mVar[2] || "");
+    const op = (opRaw === "==" ? "=" : opRaw) as any;
+    return { type: "variable_compare", var: varName, op, value: Number(mVar[3]) || 0 } as TriggerCondition;
+  }
+  const mParticipant = /^(participant_present|participant|참여자|참석자)\s*[:=]\s*(.+)$/i.exec(raw);
+  if (mParticipant) {
+    const name = String(mParticipant[2] || "").trim();
+    if (!name) return null;
+    return { type: "participant_present", name } as TriggerCondition;
+  }
+  const mStr = /^(location|time|위치|시간)\s*(==|=|!=)\s*(.+)$/i.exec(raw);
+  if (mStr) {
+    const keyRaw = String(mStr[1] || "").trim().toLowerCase();
+    const varName = keyRaw === "위치" ? "location" : keyRaw === "시간" ? "time" : keyRaw;
+    const opRaw = String(mStr[2] || "");
+    const op = (opRaw === "!=" ? "!=" : "=") as any;
+    const value = String(mStr[3] || "").trim();
+    if (!value) return null;
+    return { type: "string_compare", var: varName, op, value } as TriggerCondition;
+  }
+  return null;
+}
+
+function extractLegacyJoinLeave(textRaw: string) {
+  const text = String(textRaw || "");
+  const out: { joins: string[]; leaves: string[] } = { joins: [], leaves: [] };
+  const directive = (kind: "join" | "leave") => {
+    const re = new RegExp(`(?:^|[;\\n])\\s*${kind}\\s*:\\s*([^;\\n]+)`, "i");
+    const m = re.exec(text);
+    if (m?.[1]) out[kind === "join" ? "joins" : "leaves"].push(String(m[1]).trim());
+  };
+  directive("join");
+  directive("leave");
+
+  const legacy = (kind: "join" | "leave") => {
+    const key = kind === "join" ? "[JOIN 이벤트]" : "[LEAVE 이벤트]";
+    if (!text.includes(key)) return;
+    let rest = text.replace(key, "").trim();
+    rest = rest.replace(/^\[[^\]]+\]\s*/, "");
+    let name = rest.split(/[:\n]/)[0] || "";
+    name = name.replace(/(등장|퇴장|난입|합류).*/g, "").trim();
+    if (name) out[kind === "join" ? "joins" : "leaves"].push(name);
+  };
+  legacy("join");
+  legacy("leave");
+
+  out.joins = Array.from(new Set(out.joins.filter(Boolean)));
+  out.leaves = Array.from(new Set(out.leaves.filter(Boolean)));
+  return out;
+}
+
+function upgradeTriggerPayload(payload: TriggerRulesPayload) {
+  if (!payload || !Array.isArray(payload.rules)) return { payload, changed: false };
+  let changed = false;
+  const nextRules = payload.rules.map((r) => {
+    const next = { ...r };
+    if (r?.if?.conditions && Array.isArray(r.if.conditions)) {
+      const nextConds: TriggerCondition[] = [];
+      for (const c of r.if.conditions as TriggerCondition[]) {
+        if (c.type === "variable_compare" && (c as any).var === "danger") {
+          nextConds.push({ ...(c as any), var: "risk" });
+          changed = true;
+          continue;
+        }
+        if (c.type === "text_includes" && Array.isArray(c.values) && c.values.length === 1) {
+          const upgraded = upgradeInlineConditionToken(String(c.values[0] || ""));
+          if (upgraded) {
+            nextConds.push(upgraded);
+            changed = true;
+            continue;
+          }
+        }
+        nextConds.push(c as any);
+      }
+      next.if = { ...r.if, conditions: nextConds };
+    }
+
+    if (r?.then?.actions && Array.isArray(r.then.actions)) {
+      const actions = [...r.then.actions] as any[];
+      const joinNames = new Set(actions.filter((a) => a?.type === "join").map((a) => String(a?.name || "").trim()).filter(Boolean));
+      const leaveNames = new Set(actions.filter((a) => a?.type === "leave").map((a) => String(a?.name || "").trim()).filter(Boolean));
+      const upgradedActions: any[] = [];
+      for (const a of actions) {
+        if (a?.type === "variable_mod" && String(a?.var || "") === "danger") {
+          upgradedActions.push({ ...a, var: "risk" });
+          changed = true;
+          continue;
+        }
+        if (a?.type === "system_message") {
+          const parsed = extractLegacyJoinLeave(String(a?.text || ""));
+          for (const name of parsed.joins) {
+            if (!joinNames.has(name)) {
+              upgradedActions.push({ type: "join", name });
+              joinNames.add(name);
+              changed = true;
+            }
+          }
+          for (const name of parsed.leaves) {
+            if (!leaveNames.has(name)) {
+              upgradedActions.push({ type: "leave", name });
+              leaveNames.add(name);
+              changed = true;
+            }
+          }
+        }
+        upgradedActions.push(a);
+      }
+      next.then = { ...r.then, actions: upgradedActions };
+    }
+    return next;
+  });
+  return { payload: { ...payload, rules: nextRules }, changed };
+}
+
+export async function studioUpgradeTriggerRules(args: { projectId: string }) {
+  const supabase = getBrowserSupabase();
+  await mustUserId();
+  const projectId = String(args.projectId || "").trim();
+  if (!projectId) throw new Error("Project id is required");
+
+  const { data, error } = await supabase.from("trigger_rule_sets").select("id, scope, payload").eq("project_id", projectId);
+  if (error) throw error;
+  const rows = (data || []) as Array<{ id: string; scope: string; payload: any }>;
+  let updated = 0;
+  let changed = 0;
+
+  for (const row of rows) {
+    const payload = row?.payload as TriggerRulesPayload;
+    if (!payload || !Array.isArray((payload as any)?.rules)) continue;
+    const upgraded = upgradeTriggerPayload(payload);
+    if (!upgraded.changed) continue;
+    const { error: upErr } = await supabase.from("trigger_rule_sets").update({ payload: upgraded.payload as any }).eq("id", row.id);
+    if (upErr) throw upErr;
+    updated += 1;
+    changed += 1;
+  }
+
+  return { scanned: rows.length, updated, changed };
+}
+
+export async function studioUpgradeAllTriggerRules() {
+  const supabase = getBrowserSupabase();
+  await mustUserId();
+  const { data, error } = await supabase.from("projects").select("id");
+  if (error) throw error;
+  const ids = (data || []).map((p: any) => String(p?.id || "")).filter(Boolean);
+  let scanned = 0;
+  let updated = 0;
+  for (const id of ids) {
+    const res = await studioUpgradeTriggerRules({ projectId: id });
+    scanned += res.scanned;
+    updated += res.updated;
+  }
+  return { projects: ids.length, scanned, updated };
 }
 

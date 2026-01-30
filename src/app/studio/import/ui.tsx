@@ -13,6 +13,8 @@ import {
   studioSaveLorebook,
   studioSaveProjectLorebook,
   studioSaveProjectRules,
+  studioUpgradeTriggerRules,
+  studioUpgradeAllTriggerRules,
   studioSavePromptPayload,
   studioSaveTriggers,
   studioUpdateCharacterRoleLabel,
@@ -160,6 +162,10 @@ export function StudioImportClient() {
   const [okMsg, setOkMsg] = useState<string | null>(null);
   const [autoOpen, setAutoOpen] = useState(false);
   const [autoBusy, setAutoBusy] = useState(false);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [upgradeBusy, setUpgradeBusy] = useState(false);
+  const [upgradeAllOpen, setUpgradeAllOpen] = useState(false);
+  const [upgradeAllBusy, setUpgradeAllBusy] = useState(false);
 
   const reloadProjects = async () => {
     const list = await studioListProjects();
@@ -524,6 +530,33 @@ export function StudioImportClient() {
             </label>
           </div>
 
+          <div className="mt-4 rounded-2xl border border-white/10 bg-black/15 p-4">
+            <div className="text-[12px] font-extrabold text-white/80">레거시 룰 업그레이드</div>
+            <div className="mt-1 text-[11px] font-semibold text-white/40">
+              재임포트 없이 기존 룰을 새 엔진에 맞게 자동 보정합니다. (join/leave, 변수 비교, location/time, participant)
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="rounded-xl bg-white/[0.06] px-4 py-3 text-[12px] font-extrabold text-white/75 ring-1 ring-white/10 hover:bg-white/[0.08] disabled:opacity-50"
+                disabled={!selectedProjectId}
+                onClick={() => setUpgradeOpen(true)}
+              >
+                현재 프로젝트 룰 업그레이드
+              </button>
+              <button
+                type="button"
+                className="rounded-xl bg-[#4F7CFF]/15 px-4 py-3 text-[12px] font-extrabold text-[#8FB1FF] ring-1 ring-white/10 hover:bg-[#4F7CFF]/20"
+                onClick={() => setUpgradeAllOpen(true)}
+              >
+                전체 프로젝트 룰 업그레이드
+              </button>
+              {!selectedProjectId ? (
+                <div className="text-[11px] font-semibold text-white/35">프로젝트를 선택해야 실행할 수 있어요.</div>
+              ) : null}
+            </div>
+          </div>
+
           <div className="mt-5 rounded-2xl border border-white/10 bg-black/15 p-4">
             <div className="text-[12px] font-extrabold text-white/65">파싱 미리보기</div>
             <div className="mt-3 space-y-2 text-[12px] font-semibold text-white/70">
@@ -655,6 +688,62 @@ export function StudioImportClient() {
           </div>
         </div>
       </div>
+
+      <StudioConfirmDialog
+        open={upgradeOpen}
+        title="레거시 룰을 업그레이드할까요?"
+        description={`- 대상 프로젝트: ${projects.find((p) => p.id === selectedProjectId)?.title || "(선택 필요)"}\n- 적용 범위: 프로젝트/씬/캐릭터 룰 전체\n\n기존 룰을 유지하면서 자동 보정합니다.`}
+        confirmText="업그레이드"
+        cancelText="취소"
+        busy={upgradeBusy}
+        onClose={() => {
+          if (upgradeBusy) return;
+          setUpgradeOpen(false);
+        }}
+        onConfirm={async () => {
+          if (!selectedProjectId) return;
+          setErr(null);
+          setOkMsg(null);
+          setUpgradeBusy(true);
+          try {
+            const result = await studioUpgradeTriggerRules({ projectId: selectedProjectId });
+            setOkMsg(`룰 업그레이드 완료: scanned=${result.scanned}, updated=${result.updated}`);
+          } catch (e: any) {
+            setErr(e?.message || "룰 업그레이드에 실패했어요.");
+          } finally {
+            setUpgradeBusy(false);
+            setUpgradeOpen(false);
+          }
+        }}
+      />
+
+      <StudioConfirmDialog
+        open={upgradeAllOpen}
+        title="전체 프로젝트 룰을 업그레이드할까요?"
+        description={`- 대상: 전체 프로젝트\n- 적용 범위: 프로젝트/씬/캐릭터 룰 전체\n\n기존 룰을 유지하면서 자동 보정합니다.`}
+        confirmText="전체 업그레이드"
+        cancelText="취소"
+        busy={upgradeAllBusy}
+        destructive
+        onClose={() => {
+          if (upgradeAllBusy) return;
+          setUpgradeAllOpen(false);
+        }}
+        onConfirm={async () => {
+          setErr(null);
+          setOkMsg(null);
+          setUpgradeAllBusy(true);
+          try {
+            const result = await studioUpgradeAllTriggerRules();
+            setOkMsg(`전체 업그레이드 완료: projects=${result.projects}, scanned=${result.scanned}, updated=${result.updated}`);
+          } catch (e: any) {
+            setErr(e?.message || "전체 업그레이드에 실패했어요.");
+          } finally {
+            setUpgradeAllBusy(false);
+            setUpgradeAllOpen(false);
+          }
+        }}
+      />
 
       <StudioConfirmDialog
         open={autoOpen}

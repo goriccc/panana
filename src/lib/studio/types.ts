@@ -56,7 +56,9 @@ export type StudioPromptState = {
 
 export type TriggerCondition =
   | { type: "text_includes"; values: string[] }
-  | { type: "variable_compare"; var: string; op: "<" | ">" | "="; value: number }
+  | { type: "variable_compare"; var: string; op: "<" | ">" | "=" | "<=" | ">="; value: number }
+  | { type: "string_compare"; var: string; op: "=" | "!="; value: string }
+  | { type: "participant_present"; name: string }
   | { type: "inactive_time"; hours: number };
 
 export type TriggerIf = {
@@ -66,6 +68,7 @@ export type TriggerIf = {
 
 export type TriggerAction =
   | { type: "variable_mod"; var: string; op: "+" | "-"; value: number }
+  | { type: "variable_set"; var: string; value: string | number | boolean }
   | { type: "system_message"; text: string }
   | { type: "status_effect"; key: string; turns: number }
   | { type: "join"; name: string }
