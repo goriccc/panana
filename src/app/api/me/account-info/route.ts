@@ -22,7 +22,7 @@ function isUuid(v: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(v || ""));
 }
 
-type IdentityRow = { user_id: string; panana_users: { birth_yyyymmdd: string | null; gender: string | null } | null };
+type PuRow = { birth_yyyymmdd: string | null; gender: string | null };
 
 /** 세션 있을 때 identity + panana_users 한 번에 조회 (1 round-trip) */
 async function getAccountInfoBySession(
@@ -39,10 +39,10 @@ async function getAccountInfoBySession(
     .eq("provider_account_id", providerAccountId)
     .maybeSingle();
   if (error || !data) return null;
-  const row = data as IdentityRow;
-  const userId = String(row?.user_id || "");
+  const raw = data as unknown as { user_id?: string; panana_users?: PuRow | PuRow[] | null };
+  const userId = String(raw?.user_id || "");
   if (!userId) return null;
-  const pu = row.panana_users;
+  const pu = Array.isArray(raw.panana_users) ? raw.panana_users[0] : raw.panana_users;
   const birth = pu?.birth_yyyymmdd ? String(pu.birth_yyyymmdd) : null;
   const gender = pu?.gender ? String(pu.gender) : null;
   return { userId, birth, gender };
