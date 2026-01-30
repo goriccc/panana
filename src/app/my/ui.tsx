@@ -8,6 +8,7 @@ import { SurfaceCard } from "@/components/SurfaceCard";
 import { myPageDummy } from "@/lib/myPage";
 import { fetchMyUserProfile } from "@/lib/pananaApp/userProfiles";
 import { ensurePananaIdentity, isValidPananaHandle } from "@/lib/pananaApp/identity";
+import { prefetchMyAccountInfo } from "@/lib/pananaApp/accountInfo";
 import { signOut, useSession } from "next-auth/react";
 
 function BackIcon() {
@@ -344,11 +345,14 @@ export function MyPageClient() {
             알림설정
           </Link>
           {loggedIn ? (
-            <Link 
-              href="/my/account" 
+            <Link
+              href="/my/account"
               className="block w-full text-left"
               prefetch={true}
-              onMouseEnter={() => router.prefetch("/my/account")}
+              onMouseEnter={() => {
+                router.prefetch("/my/account");
+                prefetchMyAccountInfo();
+              }}
             >
               계정설정
             </Link>

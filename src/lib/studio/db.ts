@@ -1081,4 +1081,3 @@ export async function studioUpgradeAllTriggerRules() {
   }
   return { projects: ids.length, scanned, updated };
 }
-

@@ -22,6 +22,32 @@ function isUuid(v: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(v || ""));
 }
 
+type IdentityRow = { user_id: string; panana_users: { birth_yyyymmdd: string | null; gender: string | null } | null };
+
+/** 세션 있을 때 identity + panana_users 한 번에 조회 (1 round-trip) */
+async function getAccountInfoBySession(
+  sb: SupabaseClient<any>,
+  session: any
+): Promise<{ userId: string; birth: string | null; gender: string | null } | null> {
+  const provider = String((session as any)?.provider || "").toLowerCase();
+  const providerAccountId = String((session as any)?.providerAccountId || "");
+  if (!provider || !providerAccountId) return null;
+  const { data, error } = await sb
+    .from("panana_user_identities")
+    .select("user_id, panana_users(birth_yyyymmdd, gender)")
+    .eq("provider", provider)
+    .eq("provider_account_id", providerAccountId)
+    .maybeSingle();
+  if (error || !data) return null;
+  const row = data as IdentityRow;
+  const userId = String(row?.user_id || "");
+  if (!userId) return null;
+  const pu = row.panana_users;
+  const birth = pu?.birth_yyyymmdd ? String(pu.birth_yyyymmdd) : null;
+  const gender = pu?.gender ? String(pu.gender) : null;
+  return { userId, birth, gender };
+}
+
 async function resolveUserId(sb: SupabaseClient<any>, args: { pananaId?: string | null; session: any | null }) {
   const session = args.session;
 
@@ -67,12 +93,25 @@ const UpdateSchema = z.object({
   gender: z.string().optional(),
 });
 
+const CACHE_CONTROL = "private, max-age=30";
+
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
     const pananaId = url.searchParams.get("pananaId") || undefined;
     const session = await getServerSession(authOptions);
     const sb = getSb();
+
+    // 세션 있으면 identity + panana_users 한 번에 조회 (DB 1회)
+    if (session) {
+      const bySession = await getAccountInfoBySession(sb, session);
+      if (bySession) {
+        return NextResponse.json(
+          { ok: true, birth: bySession.birth, gender: bySession.gender },
+          { headers: { "Cache-Control": CACHE_CONTROL } }
+        );
+      }
+    }
 
     const userId = await resolveUserId(sb, { pananaId, session });
     const { data, error } = await sb
@@ -82,11 +121,14 @@ export async function GET(req: Request) {
       .maybeSingle();
     if (error) throw error;
 
-    return NextResponse.json({
-      ok: true,
-      birth: (data as any)?.birth_yyyymmdd ? String((data as any).birth_yyyymmdd) : null,
-      gender: (data as any)?.gender ? String((data as any).gender) : null,
-    });
+    return NextResponse.json(
+      {
+        ok: true,
+        birth: (data as any)?.birth_yyyymmdd ? String((data as any).birth_yyyymmdd) : null,
+        gender: (data as any)?.gender ? String((data as any).gender) : null,
+      },
+      { headers: { "Cache-Control": CACHE_CONTROL } }
+    );
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || "Unknown error" }, { status: 400 });
   }

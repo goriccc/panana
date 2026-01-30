@@ -4,7 +4,7 @@ import Link from "next/link";
 import { TopBar } from "@/components/TopBar";
 import { useSession } from "next-auth/react";
 import { useEffect, useMemo, useState } from "react";
-import { fetchMyAccountInfo, type Gender } from "@/lib/pananaApp/accountInfo";
+import { fetchMyAccountInfo, prefetchMyAccountInfo, type Gender } from "@/lib/pananaApp/accountInfo";
 
 function PencilIcon() {
   return (
@@ -86,11 +86,12 @@ export function AccountClient() {
           <div className="px-5 py-5">
             <div className="flex items-center justify-between">
               <div className="text-[13px] font-extrabold text-white/85">내 정보</div>
-              <Link 
-                href="/my/account/edit" 
-                aria-label="내 정보 편집" 
+              <Link
+                href="/my/account/edit"
+                aria-label="내 정보 편집"
                 className="p-2"
                 prefetch={true}
+                onMouseEnter={() => prefetchMyAccountInfo()}
               >
                 <PencilIcon />
               </Link>
