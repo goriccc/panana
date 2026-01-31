@@ -108,12 +108,18 @@ async function describeReferenceImage(imageUrl: string, cacheTtlMs: number): Pro
     return "";
   }
 
-  const sys = `You are an assistant that describes character appearance for AI image generation.
-Given the reference image (character thumbnail), output ONLY a short English description of:
-1. Hair: color, length, style (e.g. "long straight dark brown hair, parted in the middle")
-2. Outfit: color, type, neckline, sleeves (e.g. "light beige sleeveless cowl neck top with thin straps")
+  const sys = `You are an expert at describing character appearance for AI image generation. Your description will be used to recreate the EXACT same outfit in generated images.
+Given the reference image (character thumbnail), output a DETAILED English description. Be exhaustive - capture every visible detail:
 
-Be specific. Output one line, comma-separated. No preamble.`;
+1. HAIR: exact color (e.g. chestnut brown, platinum blonde), length (chin-length, shoulder-length, waist-length), style (straight, wavy, curly, layered), parting (center, side), bangs, any hair accessories
+2. OUTFIT - describe EVERY visible element:
+   - Top: exact color, fabric (silk, cotton, knit, lace), neckline (v-neck, crew, boat, off-shoulder, cowl, turtleneck), sleeves (sleeveless, short, 3/4, long, puff, fitted), collar, buttons, patterns (stripes, floral, solid)
+   - Bottom if visible: skirt/pants/shorts, color, length, fabric
+   - Accessories: jewelry (necklace, earrings, bracelet), scarf, belt, hat
+   - Layers: cardigan, jacket, vest - colors and styles
+3. Any other distinguishing features: glasses, makeup style, skin tone if notable
+
+Output as one dense paragraph. No preamble. Prioritize outfit accuracy - the generated image must match this exactly.`;
 
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -125,7 +131,7 @@ Be specific. Output one line, comma-separated. No preamble.`;
       },
       body: JSON.stringify({
         model: "claude-3-5-haiku-20241022",
-        max_tokens: 128,
+        max_tokens: 384,
         system: sys,
         messages: [
           {
@@ -137,7 +143,7 @@ Be specific. Output one line, comma-separated. No preamble.`;
               },
               {
                 type: "text" as const,
-                text: "Describe hair and outfit only.",
+                text: "Describe hair and outfit in maximum detail. Include every visible element: colors, fabrics, neckline, sleeves, accessories, patterns. The output will recreate this exact look.",
               },
             ],
           },
@@ -150,7 +156,7 @@ Be specific. Output one line, comma-separated. No preamble.`;
     const raw = Array.isArray(data?.content)
       ? (data.content as any[]).map((c: any) => c?.text).filter(Boolean).join("\n")
       : "";
-    const desc = String(raw || "").trim().slice(0, 200);
+    const desc = String(raw || "").trim().slice(0, 500);
     if (desc) {
       visionAppearanceCache.set(imageUrl, { desc, ts: Date.now() });
       return desc;
