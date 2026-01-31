@@ -13,7 +13,6 @@ export default function AdminSitePage() {
   const [footerLine2, setFooterLine2] = useState("문의: support@panana.app");
   const [socialImageUrl, setSocialImageUrl] = useState("/panana.png");
   const [robotsIndex, setRobotsIndex] = useState(true);
-
   return (
     <div>
       <AdminSectionHeader

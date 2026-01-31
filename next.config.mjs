@@ -18,6 +18,9 @@ const nextConfig = {
             },
           ]
         : []),
+      { protocol: "https", hostname: "fal.media", pathname: "/**" },
+      { protocol: "https", hostname: "v3.fal.media", pathname: "/**" },
+      { protocol: "https", hostname: "v3b.fal.media", pathname: "/**" },
     ],
   },
 };

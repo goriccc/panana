@@ -79,7 +79,7 @@ export async function GET(req: Request) {
     await ensurePananaUser(sb, pananaId);
     const { data, error } = await sb
       .from("panana_chat_messages")
-      .select("client_msg_id, from_role, text, at_ms, created_at")
+      .select("client_msg_id, from_role, text, at_ms, created_at, scene_image_url")
       .eq("user_id", pananaId)
       .eq("character_slug", characterSlug)
       .order("created_at", { ascending: true })
@@ -92,6 +92,7 @@ export async function GET(req: Request) {
       text: String(r.text || ""),
       at: r.at_ms == null ? null : Number(r.at_ms) || null,
       createdAt: String(r.created_at || ""),
+      sceneImageUrl: r.scene_image_url ? String(r.scene_image_url).trim() : null,
     }));
 
     return NextResponse.json({ ok: true, messages });
@@ -118,9 +119,10 @@ export async function POST(req: Request) {
         const from = String(m?.from || "").trim();
         const text = String(m?.text || "").trim();
         const at = m?.at == null ? null : Number(m.at) || null;
+        const sceneImageUrl = m?.sceneImageUrl ? String(m.sceneImageUrl).trim() : null;
         if (!id || !text) return null;
         if (from !== "bot" && from !== "user" && from !== "system") return null;
-        return {
+        const row: Record<string, unknown> = {
           user_id: pananaId,
           character_slug: characterSlug,
           client_msg_id: id,
@@ -128,6 +130,8 @@ export async function POST(req: Request) {
           text,
           at_ms: at,
         };
+        if (sceneImageUrl) row.scene_image_url = sceneImageUrl;
+        return row;
       })
       .filter(Boolean) as any[];
 

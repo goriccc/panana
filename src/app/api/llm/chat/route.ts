@@ -320,23 +320,23 @@ async function callDeepSeek(args: {
 
 async function loadPananaCharacterBySlug(slug: string) {
   const supabase = getSupabaseServer();
-  // 하위호환: safety_supported 컬럼/뷰가 아직 없을 수 있음 → fallback select
-  const trySelect = async (withSafety: boolean) => {
-    const select = withSafety
-      ? "slug, name, handle, hashtags, mbti, intro_title, intro_lines, mood_title, mood_lines, studio_character_id, safety_supported"
-      : "slug, name, handle, hashtags, mbti, intro_title, intro_lines, mood_title, mood_lines, studio_character_id";
+  // 하위호환: safety_supported, profile_image_url 컬럼/뷰가 아직 없을 수 있음 → fallback select
+  const trySelect = async (withSafety: boolean, withProfileImage: boolean) => {
+    let select = "slug, name, handle, hashtags, mbti, intro_title, intro_lines, mood_title, mood_lines, studio_character_id";
+    if (withSafety) select += ", safety_supported";
+    if (withProfileImage) select += ", profile_image_url";
     return await supabase.from("panana_public_characters_v").select(select).eq("slug", slug).maybeSingle();
   };
 
-  const first = await trySelect(true);
+  let first = await trySelect(true, true);
   if (first.error) {
     const msg = String((first.error as any)?.message || "");
-    if (msg.includes("safety_supported")) {
-      const retry = await trySelect(false);
-      if (retry.error) throw retry.error;
-      return retry.data as any;
+    if (msg.includes("safety_supported") || msg.includes("profile_image_url")) {
+      first = await trySelect(false, false);
+      if (first.error) throw first.error;
+    } else {
+      throw first.error;
     }
-    throw first.error;
   }
   return first.data as
     | {
@@ -351,6 +351,7 @@ async function loadPananaCharacterBySlug(slug: string) {
         mood_lines: string[] | null;
         studio_character_id: string | null;
         safety_supported?: boolean | null;
+        profile_image_url?: string | null;
       }
     | null;
 }
@@ -523,9 +524,10 @@ export async function POST(req: Request) {
     let varLabels: Record<string, string> = {};
     let runtimeEvents: ChatRuntimeEvent[] = [];
     let nextChatState: ChatRuntimeState | null = null;
+    let panana: Awaited<ReturnType<typeof loadPananaCharacterBySlug>> = null;
     if (body.characterSlug) {
       try {
-        const panana = await loadPananaCharacterBySlug(body.characterSlug);
+        panana = await loadPananaCharacterBySlug(body.characterSlug);
         if (body.allowUnsafe && panana && Boolean((panana as any)?.safety_supported)) {
           allowUnsafe = true;
         }
@@ -720,7 +722,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const text = sanitizeAssistantText(String(out.text || ""), tvars);
+    let text = sanitizeAssistantText(String(out.text || ""), tvars);
     if (!text) {
       if (body.provider === "gemini") {
         // 1회 자동 재시도: 시스템/대화 축약 + 텍스트 출력 강제 규칙 추가

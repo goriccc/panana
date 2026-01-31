@@ -3,6 +3,7 @@ export type ChatHistoryMsg = {
   from: "bot" | "user" | "system";
   text: string;
   at: number; // epoch ms
+  sceneImageUrl?: string;
 };
 
 const MAX_MSGS = 120;
@@ -34,6 +35,7 @@ export function loadChatHistory(args: { pananaId: string; characterSlug: string 
         from: m?.from === "bot" || m?.from === "user" || m?.from === "system" ? m.from : "system",
         text: String(m?.text || ""),
         at: Number(m?.at) || 0,
+        sceneImageUrl: m?.sceneImageUrl ? String(m.sceneImageUrl).trim() : undefined,
       }))
       .filter((m) => m.id && m.text)
       .slice(-MAX_MSGS);

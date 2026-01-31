@@ -12,7 +12,14 @@ import { ensurePananaIdentity, setPananaId } from "@/lib/pananaApp/identity";
 import { fetchAdultStatus } from "@/lib/pananaApp/adultVerification";
 import type { ChatRuntimeEvent, ChatRuntimeState } from "@/lib/studio/chatRuntimeEngine";
 
-type Msg = { id: string; from: "bot" | "user" | "system"; text: string };
+type Msg = {
+  id: string;
+  from: "bot" | "user" | "system";
+  text: string;
+  sceneImageUrl?: string;
+  sceneImageLoading?: boolean;
+  sceneImageError?: string;
+};
 type Provider = "anthropic" | "gemini" | "deepseek";
 
 const PROVIDERS: Array<{ key: Provider; label: string }> = [
@@ -66,7 +73,35 @@ function renderChatText(text: string) {
   );
 }
 
-function Bubble({ from, text, avatarUrl, onAvatarClick }: { from: Msg["from"]; text: string; avatarUrl?: string; onAvatarClick?: () => void }) {
+function Bubble({
+  from,
+  text,
+  avatarUrl,
+  onAvatarClick,
+  sceneImageUrl,
+  sceneImageLoading,
+  sceneImageError,
+  onGenerateImage,
+  onSceneImageClick,
+  sceneImageQuota,
+  prevUserMsg,
+}: {
+  from: Msg["from"];
+  text: string;
+  avatarUrl?: string;
+  onAvatarClick?: () => void;
+  sceneImageUrl?: string;
+  sceneImageLoading?: boolean;
+  sceneImageError?: string;
+  onGenerateImage?: (userMsg: string, botMsg: string) => void;
+  onSceneImageClick?: (url: string) => void;
+  sceneImageQuota?: { remaining: number; dailyLimit: number } | null;
+  prevUserMsg?: string;
+}) {
+  const [imgLoadError, setImgLoadError] = useState(false);
+  useEffect(() => {
+    if (sceneImageUrl) setImgLoadError(false);
+  }, [sceneImageUrl]);
   if (from === "user") {
     return (
       <div className="flex justify-end">
@@ -88,7 +123,7 @@ function Bubble({ from, text, avatarUrl, onAvatarClick }: { from: Msg["from"]; t
   }
 
   return (
-    <div className="flex w-full justify-start">
+    <div className="flex w-full flex-col gap-2">
       <div className="flex max-w-[320px] items-end gap-2">
         {avatarUrl && onAvatarClick ? (
           <button
@@ -104,10 +139,89 @@ function Bubble({ from, text, avatarUrl, onAvatarClick }: { from: Msg["from"]; t
             {avatarUrl ? <Image src={avatarUrl} alt="" fill sizes="28px" className="rounded-full object-cover" /> : null}
           </div>
         )}
-        <div className="rounded-[22px] rounded-bl-[10px] bg-white/[0.06] px-4 py-3 text-[14px] font-semibold leading-[1.45] text-white/80">
-          {renderChatText(text)}
+        <div className="flex flex-col gap-2">
+          <div className="rounded-[22px] rounded-bl-[10px] bg-white/[0.06] px-4 py-3 text-[14px] font-semibold leading-[1.45] text-white/80">
+            {renderChatText(text)}
+          </div>
+          {sceneImageError ? (
+            <div className="text-[11px] font-semibold text-[#ff9aa1]">{sceneImageError}</div>
+          ) : null}
+          {onGenerateImage && !sceneImageUrl && sceneImageQuota && sceneImageQuota.remaining > 0 ? (
+            <button
+              type="button"
+              onClick={() => onGenerateImage(prevUserMsg || "", text)}
+              className="inline-flex w-fit items-center gap-1.5 rounded-full border border-panana-pink/40 bg-panana-pink/15 px-3 py-1.5 text-[11px] font-extrabold text-panana-pink transition hover:bg-panana-pink/25"
+            >
+              <span className="font-bold">
+                {sceneImageQuota.remaining}/{sceneImageQuota.dailyLimit}
+              </span>
+              이미지생성
+            </button>
+          ) : null}
         </div>
       </div>
+      {sceneImageLoading ? (
+        <div className="inline-flex w-fit max-w-[280px] items-center gap-2 rounded-lg bg-white/[0.04] px-3 py-2">
+          <div className="relative h-1 w-14 shrink-0 overflow-hidden rounded-full bg-white/10">
+            <div className="absolute h-full w-1/3 animate-scene-loading rounded-full bg-panana-pink" />
+          </div>
+          <span className="whitespace-nowrap text-[11px] font-semibold text-white/70">장면 이미지 생성 중...</span>
+        </div>
+      ) : sceneImageUrl ? (
+        <div className="flex max-w-[320px] items-end gap-0.5">
+          {imgLoadError ? (
+            <div className="flex max-w-[280px] flex-col items-center justify-center gap-2 rounded-xl bg-white/[0.04] px-4 py-6">
+              <span className="text-[11px] font-semibold text-white/50">이미지를 불러올 수 없어요</span>
+              {onGenerateImage && prevUserMsg ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImgLoadError(false);
+                    onGenerateImage(prevUserMsg, text);
+                  }}
+                  className="rounded-full border border-panana-pink/40 bg-panana-pink/15 px-3 py-1.5 text-[11px] font-bold text-panana-pink"
+                >
+                  다시 생성
+                </button>
+              ) : null}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => onSceneImageClick?.(sceneImageUrl)}
+              className="relative block max-w-[280px] overflow-hidden rounded-xl bg-white/[0.04] transition-opacity hover:opacity-90 active:opacity-80"
+              aria-label="장면 이미지 크게 보기"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={sceneImageUrl}
+                alt="장면 이미지"
+                className="aspect-[4/3] w-full max-w-[280px] object-cover"
+                referrerPolicy="no-referrer"
+                onError={() => setImgLoadError(true)}
+              />
+            </button>
+          )}
+          {!imgLoadError && onGenerateImage && prevUserMsg ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onGenerateImage(prevUserMsg, text);
+              }}
+              className="flex h-9 w-9 flex-none items-center justify-center text-panana-pink transition hover:text-panana-pink/80"
+              aria-label="이미지 재생성"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 2v6h-6" />
+                <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                <path d="M3 22v-6h6" />
+                <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+              </svg>
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -215,6 +329,8 @@ export function CharacterChatClient({
     return getSavedProvider();
   });
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
+  const [sceneImageModalUrl, setSceneImageModalUrl] = useState<string | null>(null);
+  const [sceneImageQuota, setSceneImageQuota] = useState<{ remaining: number; dailyLimit: number } | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [composerHeight, setComposerHeight] = useState(64);
   const composerRef = useRef<HTMLDivElement | null>(null);
@@ -231,6 +347,31 @@ export function CharacterChatClient({
       img.src = characterAvatarUrl;
     }
   }, [characterAvatarUrl]);
+
+  // 장면 이미지 모달: Escape로 닫기
+  useEffect(() => {
+    if (!sceneImageModalUrl) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSceneImageModalUrl(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [sceneImageModalUrl]);
+
+  // 장면 이미지 쿼터 초기 조회 (characterAvatarUrl 있을 때)
+  useEffect(() => {
+    if (!characterAvatarUrl) return;
+    const pid = pananaIdRef.current || getPananaId();
+    if (!pid) return;
+    fetch(`/api/scene-image?pananaId=${encodeURIComponent(pid)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.ok && typeof d?.remaining === "number" && typeof d?.dailyLimit === "number") {
+          setSceneImageQuota({ remaining: d.remaining, dailyLimit: d.dailyLimit });
+        }
+      })
+      .catch(() => {});
+  }, [characterAvatarUrl, characterSlug]);
 
   useEffect(() => {
     let alive = true;
@@ -401,7 +542,13 @@ export function CharacterChatClient({
 
   const persistToDb = async (pid: string, msgs: Msg[], opts?: { keepalive?: boolean }) => {
     const unsent = msgs.filter((m) => !savedMsgIdsRef.current.has(m.id)).slice(-40);
-    if (!unsent.length) return;
+    const withSceneImage = msgs.filter((m) => m.from === "bot" && m.sceneImageUrl);
+    const toPersist = [
+      ...unsent,
+      ...withSceneImage.filter((m) => savedMsgIdsRef.current.has(m.id)),
+    ];
+    const unique = Array.from(new Map(toPersist.map((m) => [m.id, m])).values());
+    if (!unique.length) return;
     try {
       const res = await fetch("/api/me/chat-messages", {
         method: "POST",
@@ -409,14 +556,20 @@ export function CharacterChatClient({
         body: JSON.stringify({
           pananaId: pid,
           characterSlug,
-          messages: unsent.map((m) => ({ id: m.id, from: m.from, text: m.text, at: Date.now() })),
+          messages: unique.map((m) => ({
+            id: m.id,
+            from: m.from,
+            text: m.text,
+            at: Date.now(),
+            sceneImageUrl: m.sceneImageUrl,
+          })),
         }),
         // pagehide/unload 시에도 가능한 한 전송되게
         keepalive: Boolean(opts?.keepalive),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) return;
-      for (const m of unsent) savedMsgIdsRef.current.add(m.id);
+      for (const m of unique) savedMsgIdsRef.current.add(m.id);
       lastPersistedAtRef.current = Date.now();
     } catch {
       // ignore
@@ -448,7 +601,12 @@ export function CharacterChatClient({
     const pidCandidate = getPananaId();
     const localMessages = loadChatHistory({ pananaId: pidCandidate, characterSlug });
     if (localMessages.length > 0) {
-      const rows = localMessages.map((m) => ({ id: m.id, from: m.from as any, text: m.text }));
+      const rows = localMessages.map((m) => ({
+        id: m.id,
+        from: m.from as any,
+        text: m.text,
+        sceneImageUrl: m.sceneImageUrl,
+      }));
       savedMsgIdsRef.current = new Set(rows.map((m) => m.id));
       setMessages(rows);
       setHistoryLoading(false);
@@ -491,6 +649,7 @@ export function CharacterChatClient({
               id: String(m?.id || ""),
               from: (m?.from === "bot" || m?.from === "user" || m?.from === "system" ? m.from : "system") as Msg["from"],
               text: String(m?.text || ""),
+              sceneImageUrl: m?.sceneImageUrl ? String(m.sceneImageUrl).trim() : undefined,
             }))
             .filter((m: any) => m.id && m.text);
           if (rows.length) {
@@ -515,7 +674,20 @@ export function CharacterChatClient({
         // ignore
       }
 
-      if (alive) setHistoryLoading(false);
+      if (alive) {
+        setHistoryLoading(false);
+        if (characterAvatarUrl && pid) {
+          fetch(`/api/scene-image?pananaId=${encodeURIComponent(pid)}`)
+            .then((r) => r.json())
+            .then((d) => {
+              if (!alive) return;
+              if (d?.ok && typeof d?.remaining === "number" && typeof d?.dailyLimit === "number") {
+                setSceneImageQuota({ remaining: d.remaining, dailyLimit: d.dailyLimit });
+              }
+            })
+            .catch(() => {});
+        }
+      }
     })();
     
     return () => {
@@ -533,7 +705,13 @@ export function CharacterChatClient({
       saveChatHistory({
         pananaId: pid,
         characterSlug,
-        messages: messages.map((m) => ({ id: m.id, from: m.from, text: m.text, at: Date.now() })),
+        messages: messages.map((m) => ({
+          id: m.id,
+          from: m.from,
+          text: m.text,
+          at: Date.now(),
+          sceneImageUrl: m.sceneImageUrl,
+        })),
       });
 
       // eslint-disable-next-line @typescript-eslint/no-floating-promises
@@ -665,7 +843,8 @@ export function CharacterChatClient({
 
       const reply = String(data.text || "").trim() || "…";
       resetTyping();
-      setMessages((prev) => [...prev, { id: `b-${Date.now()}`, from: "bot", text: reply }]);
+      const botId = `b-${Date.now()}`;
+      setMessages((prev) => [...prev, { id: botId, from: "bot", text: reply }]);
 
       const next: ChatRuntimeState | null =
         data?.runtime?.chat
@@ -792,15 +971,107 @@ export function CharacterChatClient({
       >
         {err ? <div className="mb-3 text-[12px] font-semibold text-[#ff9aa1]">{err}</div> : null}
         <div className="space-y-3">
-          {messages.map((m) => (
-            <Bubble 
-              key={m.id} 
-              from={m.from} 
-              text={m.text} 
-              avatarUrl={m.from === "bot" ? characterAvatarUrl : undefined}
-              onAvatarClick={m.from === "bot" && characterAvatarUrl ? () => setAvatarModalOpen(true) : undefined}
-            />
-          ))}
+          {messages.map((m, idx) => {
+            const prevUserMsg =
+              m.from === "bot"
+                ? [...messages].slice(0, idx)
+                    .reverse()
+                    .find((x) => x.from === "user")?.text || ""
+                : undefined;
+            const showGenBtn =
+              m.from === "bot" &&
+              !!characterAvatarUrl &&
+              !m.sceneImageLoading &&
+              !m.sceneImageError;
+            const handleGenerate = showGenBtn
+              ? (userMsg: string, botMsg: string) => {
+                  setMessages((prev) =>
+                    prev.map((x) =>
+                      x.id === m.id ? { ...x, sceneImageLoading: true } : x
+                    )
+                  );
+                  const pid = pananaIdRef.current || getPananaId();
+                  if (!pid) return;
+                  const upToCurrent = messages.slice(0, idx + 1);
+                  const recentContext = upToCurrent
+                    .filter((x) => x.from === "user" || x.from === "bot")
+                    .slice(-8)
+                    .map((x) => ({
+                      role: x.from === "user" ? ("user" as const) : ("assistant" as const),
+                      content: x.text || "",
+                    }));
+                  fetch("/api/scene-image", {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({
+                      pananaId: pid,
+                      characterSlug,
+                      userMessage: userMsg,
+                      assistantMessage: botMsg,
+                      recentContext,
+                    }),
+                  })
+                    .then(async (r) => {
+                      const d = await r.json().catch(() => ({}));
+                      if (!r.ok || !d?.ok) {
+                        throw new Error(String(d?.error || `서버 오류 (${r.status})`));
+                      }
+                      return d;
+                    })
+                    .then((d) => {
+                      setMessages((prev) =>
+                        prev.map((x) =>
+                          x.id === m.id
+                            ? { ...x, sceneImageUrl: d.url, sceneImageLoading: false, sceneImageError: undefined }
+                            : x
+                        )
+                      );
+                      if (typeof d?.quotaRemaining === "number" && typeof d?.dailyLimit === "number") {
+                        setSceneImageQuota({ remaining: d.quotaRemaining, dailyLimit: d.dailyLimit });
+                      }
+                    })
+                    .catch((e) => {
+                      setMessages((prev) =>
+                        prev.map((x) =>
+                          x.id === m.id
+                            ? {
+                                ...x,
+                                sceneImageLoading: false,
+                                sceneImageError: e?.message || "이미지 생성에 실패했어요.",
+                              }
+                            : x
+                        )
+                      );
+                    });
+                }
+              : undefined;
+            return (
+              <Bubble
+                key={m.id}
+                from={m.from}
+                text={m.text}
+                avatarUrl={m.from === "bot" ? characterAvatarUrl : undefined}
+                onAvatarClick={
+                  m.from === "bot" && characterAvatarUrl
+                    ? () => setAvatarModalOpen(true)
+                    : undefined
+                }
+                sceneImageUrl={m.from === "bot" ? m.sceneImageUrl : undefined}
+                sceneImageLoading={
+                  m.from === "bot" ? m.sceneImageLoading : undefined
+                }
+                sceneImageError={m.from === "bot" ? m.sceneImageError : undefined}
+                onGenerateImage={handleGenerate}
+                onSceneImageClick={
+                  m.from === "bot" && m.sceneImageUrl
+                    ? () => setSceneImageModalUrl(m.sceneImageUrl!)
+                    : undefined
+                }
+                sceneImageQuota={m.from === "bot" && characterAvatarUrl ? sceneImageQuota : undefined}
+                prevUserMsg={prevUserMsg}
+              />
+            );
+          })}
           {showTyping ? (
             <TypingDots 
               avatarUrl={characterAvatarUrl} 
@@ -865,6 +1136,69 @@ export function CharacterChatClient({
         </div>
       </div>
       </>
+
+      {/* 장면 이미지 크게 보기 모달 */}
+      {sceneImageModalUrl ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+          onClick={() => setSceneImageModalUrl(null)}
+          aria-label="닫기"
+        >
+          <div
+            className="relative mx-4 w-full max-w-[480px]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="absolute -top-10 right-0 z-10 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const res = await fetch(sceneImageModalUrl);
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `panana-scene-${Date.now()}.webp`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  } catch {
+                    window.open(sceneImageModalUrl, "_blank");
+                  }
+                }}
+                className="text-white/80 hover:text-white"
+                aria-label="다운로드"
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSceneImageModalUrl(null)}
+                className="text-white/80 hover:text-white"
+                aria-label="닫기"
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  <path d="M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+              </button>
+            </div>
+            <div className="relative w-full overflow-hidden rounded-2xl bg-black/40 ring-2 ring-white/20">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={sceneImageModalUrl}
+                alt="장면 이미지 크게 보기"
+                className="h-auto w-full object-contain"
+                loading="eager"
+                decoding="async"
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* 프로필 이미지 크게 보기 모달 */}
       {avatarModalOpen && characterAvatarUrl ? (

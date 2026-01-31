@@ -10,13 +10,13 @@ export const metadata: Metadata = {
     default: "Panana | 캐릭터 채팅",
     template: "%s | Panana",
   },
-  description: "버블챗/제타 스타일의 캐릭터 채팅 경험을 Panana에서 시작해보세요.",
+  description: "지루한 일상을 영화 같은 씬(Scene)으로 바꾸세요. 섬세한 감정선과 극강의 현실감, 파나나에서 당신은 언제나 주인공입니다.",
   alternates: {
     canonical: "/",
   },
   openGraph: {
     title: "Panana | 캐릭터 채팅",
-    description: "버블챗/제타 스타일의 캐릭터 채팅 경험을 Panana에서 시작해보세요.",
+    description: "지루한 일상을 영화 같은 씬(Scene)으로 바꾸세요. 섬세한 감정선과 극강의 현실감, 파나나에서 당신은 언제나 주인공입니다.",
     type: "website",
     url: "/",
     siteName: "Panana",
@@ -24,7 +24,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "Panana | 캐릭터 채팅",
-    description: "버블챗/제타 스타일의 캐릭터 채팅 경험을 Panana에서 시작해보세요.",
+    description: "지루한 일상을 영화 같은 씬(Scene)으로 바꾸세요. 섬세한 감정선과 극강의 현실감, 파나나에서 당신은 언제나 주인공입니다.",
   },
   robots: {
     index: true,
@@ -44,6 +44,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="ko">
       <head>
         <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+        <link
+          rel="alternate"
+          type="application/rss+xml"
+          title="Panana"
+          href="/feed"
+        />
         <link
           rel="stylesheet"
           href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css"
