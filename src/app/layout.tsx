@@ -29,11 +29,13 @@ export const metadata: Metadata = {
     type: "website",
     url: "/",
     siteName: "Panana",
+    images: [{ url: "/Open_Graph.jpg", width: 1200, height: 630, alt: "Panana" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "Panana | 캐릭터 채팅",
     description: "지루한 일상을 영화 같은 씬(Scene)으로 바꾸세요. 섬세한 감정선과 극강의 현실감, 파나나에서 당신은 언제나 주인공입니다.",
+    images: ["/Open_Graph.jpg"],
   },
   robots: {
     index: true,
