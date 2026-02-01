@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 export function ContentCard({
   author,
@@ -11,6 +12,8 @@ export function ContentCard({
   href,
   imageUrl,
   onClick,
+  priority,
+  onImageLoad,
 }: {
   author: string;
   title: string;
@@ -19,9 +22,19 @@ export function ContentCard({
   href?: string;
   imageUrl?: string;
   onClick?: () => void;
+  /** 브라우저 우선 로드(fetchpriority=high) */
+  priority?: boolean;
+  /** 이미지 로드 완료 시 콜백 (배치 리빌용) */
+  onImageLoad?: () => void;
 }) {
   const router = useRouter();
-  
+  const [imgLoaded, setImgLoaded] = useState(false);
+
+  const handleLoad = () => {
+    setImgLoaded(true);
+    onImageLoad?.();
+  };
+
   const body = (
     <div className="flex h-[280px] flex-col rounded-[8px] border border-white/10 bg-white/[0.04] p-3 shadow-[0_14px_34px_rgba(0,0,0,0.35)]">
       <div className="relative h-[141px] w-full shrink-0 overflow-hidden rounded-none bg-[radial-gradient(900px_320px_at_30%_20%,rgba(255,77,167,0.22),transparent_55%),radial-gradient(700px_280px_at_70%_70%,rgba(255,255,255,0.10),transparent_55%),linear-gradient(135deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02))]">
@@ -30,8 +43,11 @@ export function ContentCard({
           <img
             src={imageUrl}
             alt=""
-            className="h-full w-full object-cover"
+            className={`h-full w-full object-cover transition-opacity duration-200 ${imgLoaded ? "opacity-100" : "opacity-0"}`}
             referrerPolicy="no-referrer"
+            fetchPriority={priority ? "high" : undefined}
+            loading={priority ? "eager" : "lazy"}
+            onLoad={handleLoad}
           />
         ) : null}
       </div>

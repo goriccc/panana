@@ -62,12 +62,14 @@ export function HomeClient({
 
   const sourceBase = categories?.length ? categories : fallbackCategories;
   const source = useMemo(() => {
-    if (!effectiveSafetyOn) return sourceBase;
-    // 스파이시 ON: 스파이시 지원 캐릭터만 노출(홈/찾기 공통)
     return (sourceBase || [])
       .map((c) => ({
         ...c,
-        items: (c.items || []).filter((it) => Boolean((it as any)?.safetySupported)),
+        items: (c.items || []).filter((it) =>
+          effectiveSafetyOn
+            ? Boolean((it as any)?.safetySupported)
+            : !(it as any)?.safetySupported
+        ),
       }))
       .filter((c) => (c.items || []).length > 0);
   }, [effectiveSafetyOn, sourceBase]);
@@ -108,6 +110,10 @@ export function HomeClient({
     Record<string, { offset: number; hasMore: boolean; loading: boolean }>
   >({});
   const categorySentinelRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [cardsRevealed, setCardsRevealed] = useState(false);
+  const loadCountRef = useRef(0);
+  const revealedRef = useRef(false);
+  const cardIndexRef = useRef(0);
   const { status } = useSession();
   const loggedIn = status === "authenticated";
 
@@ -451,6 +457,65 @@ export function HomeClient({
     });
   }, [source, personalizedItems, popularSlugs, allItems]);
 
+  // 카테고리 변경 시 리빌 상태 초기화
+  useEffect(() => {
+    setCardsRevealed(false);
+    loadCountRef.current = 0;
+    revealedRef.current = false;
+  }, [topCategories]);
+
+  // 선 로드: 첫 12개 썸네일 미리 fetch
+  const preloadUrls = useMemo(() => {
+    const urls: string[] = [];
+    const seen = new Set<string>();
+    for (const cat of topCategories) {
+      for (const it of cat.items ?? []) {
+        const u = (it as ContentCardItem).imageUrl;
+        if (u && !seen.has(u)) {
+          seen.add(u);
+          urls.push(u);
+          if (urls.length >= 12) return urls;
+        }
+      }
+    }
+    return urls;
+  }, [topCategories]);
+
+  useEffect(() => {
+    if (!preloadUrls.length || typeof document === "undefined") return;
+    const links: HTMLLinkElement[] = [];
+    for (const url of preloadUrls) {
+      const link = document.createElement("link");
+      link.rel = "preload";
+      link.as = "image";
+      link.href = url;
+      document.head.appendChild(link);
+      links.push(link);
+    }
+    return () => links.forEach((l) => l.remove());
+  }, [preloadUrls]);
+
+  // 배치 리빌: 6개 로드 또는 800ms 후 한꺼번에 표시
+  const handleCardImageLoad = useCallback(() => {
+    if (revealedRef.current) return;
+    loadCountRef.current += 1;
+    if (loadCountRef.current >= 6) {
+      revealedRef.current = true;
+      setCardsRevealed(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (cardsRevealed) return;
+    const t = setTimeout(() => {
+      if (!revealedRef.current) {
+        revealedRef.current = true;
+        setCardsRevealed(true);
+      }
+    }, 800);
+    return () => clearTimeout(t);
+  }, [cardsRevealed, topCategories]);
+
   useEffect(() => {
     const initialLimit = 12;
     setCategoryItemsBySlug((prev) => {
@@ -552,8 +617,8 @@ export function HomeClient({
       isForYou(cat.slug, cat.name) || isPopular(cat.slug, cat.name)
         ? cat.items || []
         : categoryItemsBySlug[cat.slug] || cat.items || [];
-    if (!effectiveSafetyOn) return base;
-    return base.filter((it) => Boolean((it as any)?.safetySupported));
+    if (effectiveSafetyOn) return base.filter((it) => Boolean((it as any)?.safetySupported));
+    return base.filter((it) => !(it as any)?.safetySupported);
   };
 
 
@@ -891,63 +956,86 @@ export function HomeClient({
           </div>
         </Link>
 
-        {/* 카테고리 섹션들 */}
+        {/* 카테고리 섹션들 - 스파이시 ON일 때 성인 인증 확인 전까지 스켈레톤 (한꺼번에 나타나도록) */}
         <div className="mt-8 space-y-10">
-          {topCategories.map((cat) => {
-            const displayItems = getDisplayItems(cat);
-            const paging = categoryPagingBySlug[cat.slug];
-            const canLoadMore = paging?.hasMore && !paging?.loading;
+          {safetyOn && adultLoading ? (
+            Array.from({ length: 3 }).map((_, i) => (
+              <section key={`skeleton-${i}`}>
+                <div className="h-5 w-24 animate-pulse rounded bg-white/10" />
+                <div className="mt-4 flex gap-3 overflow-hidden">
+                  {Array.from({ length: 4 }).map((_, j) => (
+                    <div key={j} className="h-[280px] min-w-[calc(50%-6px)] flex-1 animate-pulse rounded-[8px] bg-white/[0.04]" />
+                  ))}
+                </div>
+              </section>
+            ))
+          ) : (() => {
+            cardIndexRef.current = 0;
             return (
-            <section key={cat.slug}>
-              <div className="flex items-center justify-between">
-                <div className="text-[14px] font-semibold tracking-[-0.01em] text-white/75"># {cat.name}</div>
-                <Link
-                  href={`/category/${cat.slug}?source=home`}
-                  aria-label={`${cat.name} 전체 보기`}
-                  className="p-1"
-                  prefetch={true}
-                  onMouseEnter={() => router.prefetch(`/category/${cat.slug}`)}
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path
-                      d="M9 6l6 6-6 6"
-                      stroke="rgba(255,255,255,0.7)"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </Link>
-              </div>
-
-              <div className="mt-4">
-                <div className="hide-scrollbar flex snap-x snap-mandatory gap-0 overflow-x-auto pb-2">
-                {chunkItems(displayItems, 4).map((group, idx) => (
-                  <div key={`${cat.slug}-${idx}`} className="w-full shrink-0 snap-start">
-                    <div className="grid grid-cols-2 gap-3">
-                      {group.map((it) => (
-                        <ContentCard
-                          key={it.id}
-                          author={it.author}
-                          title={it.title}
-                          description={it.description}
-                          tags={it.tags}
-                          imageUrl={it.imageUrl}
-                          href={`/c/${it.characterSlug}`}
-                          onClick={() => trackBehavior("click", it.tags || [])}
+            <div
+              className={`transition-opacity duration-300 ${cardsRevealed ? "opacity-100" : "opacity-0"}`}
+              style={{ minHeight: 1 }}
+            >
+              {topCategories.map((cat) => {
+                const displayItems = getDisplayItems(cat);
+                const paging = categoryPagingBySlug[cat.slug];
+                return (
+                <section key={cat.slug}>
+                  <div className="flex items-center justify-between">
+                    <div className="text-[14px] font-semibold tracking-[-0.01em] text-white/75"># {cat.name}</div>
+                    <Link
+                      href={`/category/${cat.slug}?source=home`}
+                      aria-label={`${cat.name} 전체 보기`}
+                      className="p-1"
+                      prefetch={true}
+                      onMouseEnter={() => router.prefetch(`/category/${cat.slug}`)}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path
+                          d="M9 6l6 6-6 6"
+                          stroke="rgba(255,255,255,0.7)"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
                         />
-                      ))}
+                      </svg>
+                    </Link>
+                  </div>
+
+                  <div className="mt-4">
+                    <div className="hide-scrollbar flex snap-x snap-mandatory gap-0 overflow-x-auto pb-2">
+                    {chunkItems(displayItems, 4).map((group, idx) => (
+                      <div key={`${cat.slug}-${idx}`} className="w-full shrink-0 snap-start">
+                        <div className="grid grid-cols-2 gap-3">
+                          {group.map((it) => {
+                            const isPriority = cardIndexRef.current++ < 8;
+                            return (
+                              <ContentCard
+                                key={it.id}
+                                author={it.author}
+                                title={it.title}
+                                description={it.description}
+                                tags={it.tags}
+                                imageUrl={it.imageUrl}
+                                href={`/c/${it.characterSlug}`}
+                                onClick={() => trackBehavior("click", it.tags || [])}
+                                priority={isPriority}
+                                onImageLoad={handleCardImageLoad}
+                              />
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
                     </div>
                   </div>
-                ))}
-                </div>
-              </div>
-              {null}
-              {!isForYou(cat.slug, cat.name) && !isPopular(cat.slug, cat.name) ? (
-                <div ref={setCategorySentinel(cat.slug)} data-slug={cat.slug} className="h-1 w-full" />
-              ) : null}
-            </section>
-          )})}
+                  {!isForYou(cat.slug, cat.name) && !isPopular(cat.slug, cat.name) ? (
+                    <div ref={setCategorySentinel(cat.slug)} data-slug={cat.slug} className="h-1 w-full" />
+                  ) : null}
+                </section>
+              )})}
+            </div>
+          )})()}
         </div>
           </>
         )}

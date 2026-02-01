@@ -5,11 +5,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import type { Category, ContentCardItem } from "@/lib/content";
 import { ContentCard } from "@/components/ContentCard";
+import { fetchAdultStatus } from "@/lib/pananaApp/adultVerification";
 
 export function CategoryClient({ category }: { category: Category }) {
   const sp = useSearchParams();
   const source = sp.get("source");
   const [items, setItems] = useState(category.items);
+  const [safetyOn, setSafetyOn] = useState(false);
+  const [adultVerified, setAdultVerified] = useState(false);
+  const effectiveSafetyOn = safetyOn && adultVerified;
   const [paging, setPaging] = useState<{ offset: number; hasMore: boolean; loading: boolean }>({
     offset: category.items.length,
     hasMore: category.items.length >= 12,
@@ -17,6 +21,30 @@ export function CategoryClient({ category }: { category: Category }) {
   });
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const loadingRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setSafetyOn(localStorage.getItem("panana_safety_on") === "1");
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    fetchAdultStatus().then((status) => {
+      if (!alive) return;
+      setAdultVerified(Boolean(status?.adultVerified));
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const displayItems = useMemo(() => {
+    if (effectiveSafetyOn) {
+      return items.filter((it) => Boolean((it as ContentCardItem).safetySupported));
+    }
+    return items.filter((it) => !(it as ContentCardItem).safetySupported);
+  }, [items, effectiveSafetyOn]);
+
   useEffect(() => {
     if (source !== "home") return;
     if (category.slug === "new") return;
@@ -129,7 +157,7 @@ export function CategoryClient({ category }: { category: Category }) {
 
       <main className="mx-auto w-full max-w-[420px] px-5 pb-14 pt-5">
         <div className="grid grid-cols-2 gap-3">
-          {items.map((it) => (
+          {displayItems.map((it) => (
             // Category.items는 ContentCardItem 구조
             // (어드민 연동 전이므로 여기서 캐릭터 슬러그로 프로필 이동)
             <ContentCard
