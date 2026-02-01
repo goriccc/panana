@@ -6,6 +6,15 @@ import { PananaIdentityInit } from "@/app/_components/PananaIdentityInit";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://panana.local"),
+  icons: {
+    icon: [
+      { url: "/Favicon16.svg", sizes: "16x16", type: "image/svg+xml" },
+      { url: "/Favicon32.svg", sizes: "32x32", type: "image/svg+xml" },
+      { url: "/Favicon48.svg", sizes: "48x48", type: "image/svg+xml" },
+      { url: "/Favicon128.svg", sizes: "128x128", type: "image/svg+xml" },
+      { url: "/Favicon192.svg", sizes: "192x192", type: "image/svg+xml" },
+    ],
+  },
   title: {
     default: "Panana | 캐릭터 채팅",
     template: "%s | Panana",
