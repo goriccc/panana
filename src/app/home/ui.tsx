@@ -712,7 +712,8 @@ export function HomeClient({
                             }}
                           >
                             {img ? (
-                              <Image src={img} alt="" fill sizes="40px" className="object-cover" />
+                              /* eslint-disable-next-line @next/next/no-img-element */
+                              <img src={img} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
                             ) : (
                               <Image src="/dumyprofile.png" alt="" fill sizes="40px" className="object-cover opacity-90" />
                             )}
@@ -795,7 +796,8 @@ export function HomeClient({
                 <div className="flex min-w-0 items-center gap-3">
                   <div className="relative h-10 w-10 flex-none overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10">
                     {it.avatarUrl ? (
-                      <Image src={it.avatarUrl} alt="" fill sizes="40px" className="object-cover" />
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img src={it.avatarUrl} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
                     ) : (
                       <Image src="/dumyprofile.png" alt="" fill sizes="40px" className="object-cover opacity-90" />
                     )}
@@ -860,13 +862,12 @@ export function HomeClient({
         >
           <div className="relative aspect-[16/9] w-full">
             {hero?.imageUrl ? (
-              <Image
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
                 src={hero.imageUrl}
                 alt=""
-                fill
-                priority
-                sizes="(max-width: 420px) 100vw, 420px"
-                className="object-cover"
+                className="h-full w-full object-cover"
+                referrerPolicy="no-referrer"
               />
             ) : null}
             {/* 이미지가 없을 때만 placeholder 배경 */}

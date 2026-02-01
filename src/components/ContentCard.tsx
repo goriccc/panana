@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 
 export function ContentCard({
@@ -27,12 +26,12 @@ export function ContentCard({
     <div className="flex h-[280px] flex-col rounded-[8px] border border-white/10 bg-white/[0.04] p-3 shadow-[0_14px_34px_rgba(0,0,0,0.35)]">
       <div className="relative h-[141px] w-full shrink-0 overflow-hidden rounded-none bg-[radial-gradient(900px_320px_at_30%_20%,rgba(255,77,167,0.22),transparent_55%),radial-gradient(700px_280px_at_70%_70%,rgba(255,255,255,0.10),transparent_55%),linear-gradient(135deg,rgba(255,255,255,0.08),rgba(255,255,255,0.02))]">
         {imageUrl ? (
-          <Image
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
             src={imageUrl}
             alt=""
-            fill
-            sizes="(max-width: 420px) 45vw, 220px"
-            className="object-cover"
+            className="h-full w-full object-cover"
+            referrerPolicy="no-referrer"
           />
         ) : null}
       </div>
