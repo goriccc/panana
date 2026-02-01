@@ -982,6 +982,29 @@ export default function AdminCharactersPage() {
                       }
                       if (upErr) throw upErr;
 
+                      // 어드민 스파이시 지원 ↔ Studio NSFW 필터 해제 연동
+                      if (studioCharacterId && !missingSafetySupportedColumn) {
+                        try {
+                          const { data: session } = await supabase.auth.getSession();
+                          const token = session?.session?.access_token;
+                          if (token) {
+                            await fetch("/api/admin/sync-studio-nsfw", {
+                              method: "POST",
+                              headers: {
+                                "content-type": "application/json",
+                                authorization: `Bearer ${token}`,
+                              },
+                              body: JSON.stringify({
+                                studioCharacterId: studioCharacterId.trim(),
+                                nsfwFilterOff: Boolean(safetySupported),
+                              }),
+                            });
+                          }
+                        } catch {
+                          // 연동 실패해도 저장은 완료
+                        }
+                      }
+
                       // 카테고리 매핑: 전체 교체(단순/안전)
                       const { error: delErr } = await supabase.from("panana_character_categories").delete().eq("character_id", selectedId);
                       if (delErr) throw delErr;

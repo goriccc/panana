@@ -8,6 +8,7 @@ import { useStudioStore } from "@/lib/studio/store";
 import {
   studioCreateCharacter,
   studioDeleteCharacter,
+  studioGetCharactersNsfwMap,
   studioGetProject,
   studioListCharacters,
   studioPublishCharacter,
@@ -49,6 +50,7 @@ export default function ProjectCastPage({ params }: { params: { projectId: strin
   const [unpublishBusy, setUnpublishBusy] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [nsfwMap, setNsfwMap] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     setSelectedProjectId(params.projectId);
@@ -59,6 +61,12 @@ export default function ProjectCastPage({ params }: { params: { projectId: strin
         const [p, cs] = await Promise.all([studioGetProject(params.projectId), studioListCharacters({ projectId: params.projectId })]);
         setProject(p);
         setRows(cs);
+        if (cs?.length) {
+          const map = await studioGetCharactersNsfwMap(cs.map((c) => c.id));
+          setNsfwMap(map);
+        } else {
+          setNsfwMap({});
+        }
         if (!p) setErr("프로젝트를 찾을 수 없어요.");
       } catch (e: any) {
         setErr(e?.message || "불러오지 못했어요.");
@@ -77,11 +85,12 @@ export default function ProjectCastPage({ params }: { params: { projectId: strin
       roleLabel: c.role_label || "",
       status: c.status === "published" ? ("published" as const) : ("draft" as const),
       updatedAt: (c.updated_at || "").slice(0, 10) || "",
+      nsfw: nsfwMap[c.id],
     }));
     const v = q.trim().toLowerCase();
     if (!v) return all;
     return all.filter((c) => c.name.toLowerCase().includes(v) || c.roleLabel.toLowerCase().includes(v));
-  }, [rows, q]);
+  }, [rows, q, nsfwMap]);
 
   if (err) return <div className="text-[13px] font-semibold text-white/60">{err}</div>;
   if (!project || loading) return <div className="text-[13px] font-semibold text-white/60">불러오는 중...</div>;
@@ -161,6 +170,11 @@ export default function ProjectCastPage({ params }: { params: { projectId: strin
               <div className="flex min-w-0 items-center gap-2">
                 <div className="truncate text-[14px] font-extrabold text-white/85">{c.name}</div>
                 <StatusPill status={c.status} />
+                {c.nsfw ? (
+                  <span className="shrink-0 rounded-full bg-[#ff4da7]/15 px-2 py-0.5 text-[10px] font-extrabold text-[#ff9aa1] ring-1 ring-[#ff4da7]/25">
+                    NSFW
+                  </span>
+                ) : null}
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] font-semibold text-white/40">
                 <span className="truncate">{c.roleLabel || "역할 미지정"}</span>
@@ -290,6 +304,10 @@ export default function ProjectCastPage({ params }: { params: { projectId: strin
             await studioCreateCharacter({ projectId: params.projectId, name, slug, roleLabel });
             const cs = await studioListCharacters({ projectId: params.projectId });
             setRows(cs);
+            if (cs?.length) {
+              const map = await studioGetCharactersNsfwMap(cs.map((c) => c.id));
+              setNsfwMap(map);
+            }
             setCreateOpen(false);
           } catch (e: any) {
             setErr(e?.message || "생성에 실패했어요.");
@@ -324,6 +342,10 @@ export default function ProjectCastPage({ params }: { params: { projectId: strin
             setDeployId(null);
             const cs = await studioListCharacters({ projectId: params.projectId });
             setRows(cs);
+            if (cs?.length) {
+              const map = await studioGetCharactersNsfwMap(cs.map((c) => c.id));
+              setNsfwMap(map);
+            }
           } catch (e: any) {
             setErr(e?.message || "배포에 실패했어요.");
           } finally {
@@ -352,6 +374,10 @@ export default function ProjectCastPage({ params }: { params: { projectId: strin
             setUnpublishId(null);
             const cs = await studioListCharacters({ projectId: params.projectId });
             setRows(cs);
+            if (cs?.length) {
+              const map = await studioGetCharactersNsfwMap(cs.map((c) => c.id));
+              setNsfwMap(map);
+            }
           } catch (e: any) {
             setErr(e?.message || "배포중지에 실패했어요.");
           } finally {
@@ -381,6 +407,10 @@ export default function ProjectCastPage({ params }: { params: { projectId: strin
             setDeleteId(null);
             const cs = await studioListCharacters({ projectId: params.projectId });
             setRows(cs);
+            if (cs?.length) {
+              const map = await studioGetCharactersNsfwMap(cs.map((c) => c.id));
+              setNsfwMap(map);
+            }
           } catch (e: any) {
             setErr(e?.message || "삭제에 실패했어요.");
           } finally {

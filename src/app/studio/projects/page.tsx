@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { studioCreateProject, studioListProjects, type StudioProjectRow } from "@/lib/studio/db";
+import { studioCreateProject, studioGetCharactersNsfwMap, studioListCharacters, studioListProjects, type StudioProjectRow } from "@/lib/studio/db";
 import { studioDeleteProject } from "@/lib/studio/db";
 import Link from "next/link";
 import { StudioConfirmDialog, StudioFormDialog } from "@/app/studio/_components/StudioDialogs";
@@ -35,6 +35,7 @@ export default function StudioProjectsPage() {
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<StudioProjectRow[] | null>(null);
   const [publishedIds, setPublishedIds] = useState<Set<string>>(new Set());
+  const [nsfwProjectIds, setNsfwProjectIds] = useState<Set<string>>(new Set());
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -69,10 +70,28 @@ export default function StudioProjectsPage() {
       } catch {
         setPublishedIds(new Set());
       }
+
+      // NSFW 뱃지: 프로젝트 내 캐릭터 중 오서노트 NSFW 필터 해제가 1명이라도 있으면 표시
+      try {
+        const allChars = await studioListCharacters();
+        if (allChars.length) {
+          const nsfwMap = await studioGetCharactersNsfwMap(allChars.map((c) => c.id));
+          const nsfwProjects = new Set<string>();
+          for (const c of allChars) {
+            if (nsfwMap[c.id]) nsfwProjects.add(c.project_id);
+          }
+          setNsfwProjectIds(nsfwProjects);
+        } else {
+          setNsfwProjectIds(new Set());
+        }
+      } catch {
+        setNsfwProjectIds(new Set());
+      }
     } catch (e: any) {
       setErr(e?.message || "프로젝트를 불러오지 못했어요.");
       setRows(null);
       setPublishedIds(new Set());
+      setNsfwProjectIds(new Set());
     } finally {
       setLoading(false);
     }
@@ -92,10 +111,11 @@ export default function StudioProjectsPage() {
       subtitle: p.subtitle || "",
       updatedAt: (p.updated_at || "").slice(0, 10) || "",
       published: publishedIds.has(p.id),
+      nsfw: nsfwProjectIds.has(p.id),
     }));
     if (!v) return base;
     return base.filter((p) => p.title.toLowerCase().includes(v) || (p.subtitle || "").toLowerCase().includes(v));
-  }, [q, rows, publishedIds]);
+  }, [q, rows, publishedIds, nsfwProjectIds]);
 
   return (
     <div>
@@ -154,11 +174,18 @@ export default function StudioProjectsPage() {
                 <div className="flex-1 whitespace-normal break-words text-[14px] font-extrabold text-white/85 leading-[1.25]">
                   {p.title}
                 </div>
-                {p.published ? (
-                  <span className="shrink-0 whitespace-nowrap rounded-full bg-[#22c55e]/15 px-2 py-0.5 text-[10px] font-extrabold text-[#6ee7b7] ring-1 ring-[#22c55e]/25">
-                    배포됨
-                  </span>
-                ) : null}
+                <div className="flex shrink-0 flex-wrap items-center gap-1">
+                  {p.published ? (
+                    <span className="whitespace-nowrap rounded-full bg-[#22c55e]/15 px-2 py-0.5 text-[10px] font-extrabold text-[#6ee7b7] ring-1 ring-[#22c55e]/25">
+                      배포됨
+                    </span>
+                  ) : null}
+                  {p.nsfw ? (
+                    <span className="whitespace-nowrap rounded-full bg-[#ff4da7]/15 px-2 py-0.5 text-[10px] font-extrabold text-[#ff9aa1] ring-1 ring-[#ff4da7]/25">
+                      NSFW
+                    </span>
+                  ) : null}
+                </div>
               </div>
               <div className="mt-1 text-[12px] font-semibold text-white/40">{p.subtitle}</div>
               <div className="mt-4 text-[11px] font-semibold text-white/35">

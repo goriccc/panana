@@ -103,6 +103,23 @@ export async function studioListCharacters(args?: { projectId?: string }): Promi
   return (data || []) as any;
 }
 
+/** character_id → nsfwFilterOff (오서노트 NSFW 필터 해제 여부) */
+export async function studioGetCharactersNsfwMap(characterIds: string[]): Promise<Record<string, boolean>> {
+  if (!characterIds.length) return {};
+  const supabase = getBrowserSupabase();
+  const { data, error } = await supabase
+    .from("character_prompts")
+    .select("character_id, payload")
+    .in("character_id", characterIds);
+  if (error) return {};
+  const map: Record<string, boolean> = {};
+  for (const row of data || []) {
+    const author = (row as any)?.payload?.author;
+    map[String((row as any).character_id)] = Boolean(author?.nsfwFilterOff);
+  }
+  return map;
+}
+
 export async function studioListScenes(args: { projectId: string }): Promise<StudioSceneRow[]> {
   const supabase = getBrowserSupabase();
   const { data, error } = await supabase

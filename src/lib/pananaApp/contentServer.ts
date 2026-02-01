@@ -10,6 +10,13 @@ function getSupabaseServer() {
   return createClient(url, anonKey, { auth: { persistSession: false } });
 }
 
+function getSupabaseAdmin() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  return createClient(url, key, { auth: { persistSession: false } });
+}
+
 type PublicCategoryRow = { slug: string; title: string; sort_order: number };
 type PublicCategoryCardRow = {
   category_slug: string;
@@ -108,11 +115,47 @@ export async function fetchHomeCategoriesFromDb(): Promise<Category[] | null> {
     bySlug.set(r.category_slug, arr);
   });
 
-  return (cats as any as PublicCategoryRow[]).map((c) => ({
-    slug: c.slug,
-    name: c.title,
-    items: (bySlug.get(c.slug) || []).slice(0, 12),
-  }));
+  // #새로 올라온: 스파이시 ON(성인) / OFF 각각 최신 12명 (safety_supported 구분)
+  let newestItems: ContentCardItem[] = [];
+  const hasNew = (cats as any as PublicCategoryRow[]).some((c: PublicCategoryRow) => c.slug === "new");
+  if (hasNew) {
+    const admin = getSupabaseAdmin();
+    const client = admin || supabase;
+    const [safeRes, normalRes] = await Promise.all([
+      client
+        .from("panana_characters")
+        .select("slug, name, tagline, profile_image_url, handle, hashtags, safety_supported")
+        .eq("active", true)
+        .eq("safety_supported", true)
+        .order("created_at", { ascending: false })
+        .limit(12),
+      client
+        .from("panana_characters")
+        .select("slug, name, tagline, profile_image_url, handle, hashtags, safety_supported")
+        .eq("active", true)
+        .eq("safety_supported", false)
+        .order("created_at", { ascending: false })
+        .limit(12),
+    ]);
+    const toItems = (rows: any[], offset: number) =>
+      (rows || []).map((r: any, i: number) => ({
+        id: `new:${r.slug}:${offset + i}`,
+        characterSlug: r.slug,
+        author: r.handle ? (r.handle.startsWith("@") ? r.handle : `@${r.handle}`) : "@panana",
+        title: r.name || "",
+        description: r.tagline || "",
+        tags: (r.hashtags || []).map((t: string) => (t.startsWith("#") ? t : `#${t}`)),
+        imageUrl: r.profile_image_url || undefined,
+        safetySupported: Boolean(r.safety_supported),
+      }));
+    newestItems = [...toItems(safeRes.data || [], 0), ...toItems(normalRes.data || [], 12)];
+  }
+
+  return (cats as any as PublicCategoryRow[]).map((c) => {
+    const slug = c.slug;
+    const baseItems = slug === "new" ? newestItems : (bySlug.get(slug) || []).slice(0, 12);
+    return { slug, name: c.title, items: baseItems };
+  });
 }
 
 export async function fetchCategoryFromDb(slug: string): Promise<Category | null> {
@@ -125,6 +168,43 @@ export async function fetchCategoryFromDb(slug: string): Promise<Category | null
   if (catErr || !cat) {
     if (catErr) console.error("[contentServer] panana_public_categories_v (single) error:", catErr);
     return null;
+  }
+
+  if (slug === "new") {
+    const admin = getSupabaseAdmin();
+    const client = admin || supabase;
+    const [safeRes, normalRes] = await Promise.all([
+      client
+        .from("panana_characters")
+        .select("slug, name, tagline, profile_image_url, handle, hashtags, safety_supported")
+        .eq("active", true)
+        .eq("safety_supported", true)
+        .order("created_at", { ascending: false })
+        .limit(12),
+      client
+        .from("panana_characters")
+        .select("slug, name, tagline, profile_image_url, handle, hashtags, safety_supported")
+        .eq("active", true)
+        .eq("safety_supported", false)
+        .order("created_at", { ascending: false })
+        .limit(12),
+    ]);
+    const toItems = (rows: any[], offset: number) =>
+      (rows || []).map((r: any, i: number) => ({
+        id: `new:${r.slug}:${offset + i}`,
+        characterSlug: r.slug,
+        author: r.handle ? (r.handle.startsWith("@") ? r.handle : `@${r.handle}`) : "@panana",
+        title: r.name || "",
+        description: r.tagline || "",
+        tags: (r.hashtags || []).map((t: string) => (t.startsWith("#") ? t : `#${t}`)),
+        imageUrl: r.profile_image_url || undefined,
+        safetySupported: Boolean(r.safety_supported),
+      }));
+    const items: ContentCardItem[] = [
+      ...toItems(safeRes.data || [], 0),
+      ...toItems(normalRes.data || [], 12),
+    ];
+    return { slug: String(cat.slug), name: String((cat as any).title), items };
   }
 
   let cards: any[] | null = null;

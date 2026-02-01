@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
 
 export function ContentCard({
   author,
@@ -13,7 +12,6 @@ export function ContentCard({
   imageUrl,
   onClick,
   priority,
-  onImageLoad,
 }: {
   author: string;
   title: string;
@@ -24,16 +22,8 @@ export function ContentCard({
   onClick?: () => void;
   /** 브라우저 우선 로드(fetchpriority=high) */
   priority?: boolean;
-  /** 이미지 로드 완료 시 콜백 (배치 리빌용) */
-  onImageLoad?: () => void;
 }) {
   const router = useRouter();
-  const [imgLoaded, setImgLoaded] = useState(false);
-
-  const handleLoad = () => {
-    setImgLoaded(true);
-    onImageLoad?.();
-  };
 
   const body = (
     <div className="flex h-[280px] flex-col rounded-[8px] border border-white/10 bg-white/[0.04] p-3 shadow-[0_14px_34px_rgba(0,0,0,0.35)]">
@@ -43,11 +33,10 @@ export function ContentCard({
           <img
             src={imageUrl}
             alt=""
-            className={`h-full w-full object-cover transition-opacity duration-200 ${imgLoaded ? "opacity-100" : "opacity-0"}`}
+            className="h-full w-full object-cover"
             referrerPolicy="no-referrer"
             fetchPriority={priority ? "high" : undefined}
             loading={priority ? "eager" : "lazy"}
-            onLoad={handleLoad}
           />
         ) : null}
       </div>

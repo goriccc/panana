@@ -110,9 +110,6 @@ export function HomeClient({
     Record<string, { offset: number; hasMore: boolean; loading: boolean }>
   >({});
   const categorySentinelRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const [cardsRevealed, setCardsRevealed] = useState(false);
-  const loadCountRef = useRef(0);
-  const revealedRef = useRef(false);
   const cardIndexRef = useRef(0);
   const { status } = useSession();
   const loggedIn = status === "authenticated";
@@ -434,6 +431,11 @@ export function HomeClient({
     const n = String(name || "").toLowerCase();
     return s.includes("loved") || n.includes("모두에게");
   }, []);
+  const isNew = useCallback((slug: string, name: string) => {
+    const s = String(slug || "").toLowerCase();
+    const n = String(name || "").toLowerCase();
+    return s === "new" || n.includes("새로 올라온");
+  }, []);
 
   const topCategories = useMemo(() => {
     const bySlug = new Map(allItems.map((it) => [it.characterSlug, it]));
@@ -456,13 +458,6 @@ export function HomeClient({
       };
     });
   }, [source, personalizedItems, popularSlugs, allItems]);
-
-  // 카테고리 변경 시 리빌 상태 초기화
-  useEffect(() => {
-    setCardsRevealed(false);
-    loadCountRef.current = 0;
-    revealedRef.current = false;
-  }, [topCategories]);
 
   // 선 로드: 첫 12개 썸네일 미리 fetch
   const preloadUrls = useMemo(() => {
@@ -494,27 +489,6 @@ export function HomeClient({
     }
     return () => links.forEach((l) => l.remove());
   }, [preloadUrls]);
-
-  // 배치 리빌: 6개 로드 또는 800ms 후 한꺼번에 표시
-  const handleCardImageLoad = useCallback(() => {
-    if (revealedRef.current) return;
-    loadCountRef.current += 1;
-    if (loadCountRef.current >= 6) {
-      revealedRef.current = true;
-      setCardsRevealed(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (cardsRevealed) return;
-    const t = setTimeout(() => {
-      if (!revealedRef.current) {
-        revealedRef.current = true;
-        setCardsRevealed(true);
-      }
-    }, 800);
-    return () => clearTimeout(t);
-  }, [cardsRevealed, topCategories]);
 
   useEffect(() => {
     const initialLimit = 12;
@@ -614,7 +588,7 @@ export function HomeClient({
 
   const getDisplayItems = (cat: { slug: string; name: string; items: ContentCardItem[] }) => {
     const base =
-      isForYou(cat.slug, cat.name) || isPopular(cat.slug, cat.name)
+      isForYou(cat.slug, cat.name) || isPopular(cat.slug, cat.name) || isNew(cat.slug, cat.name)
         ? cat.items || []
         : categoryItemsBySlug[cat.slug] || cat.items || [];
     if (effectiveSafetyOn) return base.filter((it) => Boolean((it as any)?.safetySupported));
@@ -957,10 +931,10 @@ export function HomeClient({
         </Link>
 
         {/* 카테고리 섹션들 - 스파이시 ON일 때 성인 인증 확인 전까지 스켈레톤 (한꺼번에 나타나도록) */}
-        <div className="mt-8 space-y-10">
+        <div className="mt-14 space-y-16">
           {safetyOn && adultLoading ? (
             Array.from({ length: 3 }).map((_, i) => (
-              <section key={`skeleton-${i}`}>
+              <section key={`skeleton-${i}`} className={i === 0 ? "" : "pt-5"}>
                 <div className="h-5 w-24 animate-pulse rounded bg-white/10" />
                 <div className="mt-4 flex gap-3 overflow-hidden">
                   {Array.from({ length: 4 }).map((_, j) => (
@@ -972,15 +946,12 @@ export function HomeClient({
           ) : (() => {
             cardIndexRef.current = 0;
             return (
-            <div
-              className={`transition-opacity duration-300 ${cardsRevealed ? "opacity-100" : "opacity-0"}`}
-              style={{ minHeight: 1 }}
-            >
+            <div style={{ minHeight: 1 }}>
               {topCategories.map((cat) => {
                 const displayItems = getDisplayItems(cat);
                 const paging = categoryPagingBySlug[cat.slug];
                 return (
-                <section key={cat.slug}>
+                <section key={cat.slug} className="pt-5 first:pt-0">
                   <div className="flex items-center justify-between">
                     <div className="text-[14px] font-semibold tracking-[-0.01em] text-white/75"># {cat.name}</div>
                     <Link
@@ -1003,12 +974,32 @@ export function HomeClient({
                   </div>
 
                   <div className="mt-4">
+                    {isNew(cat.slug, cat.name) ? (
+                      <div className="grid grid-cols-2 gap-3">
+                        {(displayItems.slice(0, 4)).map((it) => {
+                          const isPriority = cardIndexRef.current++ < 12;
+                          return (
+                            <ContentCard
+                              key={it.id}
+                              author={it.author}
+                              title={it.title}
+                              description={it.description}
+                              tags={it.tags}
+                              imageUrl={it.imageUrl}
+                              href={`/c/${it.characterSlug}`}
+                              onClick={() => trackBehavior("click", it.tags || [])}
+                              priority={isPriority}
+                            />
+                          );
+                        })}
+                      </div>
+                    ) : (
                     <div className="hide-scrollbar flex snap-x snap-mandatory gap-0 overflow-x-auto pb-2">
                     {chunkItems(displayItems, 4).map((group, idx) => (
                       <div key={`${cat.slug}-${idx}`} className="w-full shrink-0 snap-start">
                         <div className="grid grid-cols-2 gap-3">
                           {group.map((it) => {
-                            const isPriority = cardIndexRef.current++ < 8;
+                            const isPriority = cardIndexRef.current++ < 12;
                             return (
                               <ContentCard
                                 key={it.id}
@@ -1019,8 +1010,7 @@ export function HomeClient({
                                 imageUrl={it.imageUrl}
                                 href={`/c/${it.characterSlug}`}
                                 onClick={() => trackBehavior("click", it.tags || [])}
-                                priority={isPriority}
-                                onImageLoad={handleCardImageLoad}
+                              priority={isPriority}
                               />
                             );
                           })}
@@ -1028,8 +1018,9 @@ export function HomeClient({
                       </div>
                     ))}
                     </div>
+                    )}
                   </div>
-                  {!isForYou(cat.slug, cat.name) && !isPopular(cat.slug, cat.name) ? (
+                  {!isForYou(cat.slug, cat.name) && !isPopular(cat.slug, cat.name) && !isNew(cat.slug, cat.name) ? (
                     <div ref={setCategorySentinel(cat.slug)} data-slug={cat.slug} className="h-1 w-full" />
                   ) : null}
                 </section>

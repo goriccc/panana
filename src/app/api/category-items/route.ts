@@ -40,34 +40,60 @@ export async function GET(req: Request) {
     let rows: any[] | null = null;
     let err: any = null;
 
-    {
-      const res = await supabase
-        .from("panana_public_category_cards_v")
-        .select(
-          "category_slug, category_title, category_sort_order, item_sort_order, character_slug, author_handle, title, description, tags, character_profile_image_url, safety_supported"
-        )
-        .eq("category_slug", slug)
-        .order("item_sort_order", { ascending: true })
-        .range(start, end);
-      rows = res.data as any;
+    if (slug === "new") {
+      const client = getSupabaseAdmin() || supabase;
+      const safetyParam = searchParams.get("safetySupported");
+      const safetyFilter = safetyParam === "true" ? true : safetyParam === "false" ? false : undefined;
+      const q = client
+        .from("panana_characters")
+        .select("slug, name, tagline, profile_image_url, handle, hashtags, safety_supported")
+        .eq("active", true)
+        .order("created_at", { ascending: false });
+      if (safetyFilter !== undefined) q.eq("safety_supported", safetyFilter);
+      const res = await q.range(start, end);
       err = res.error;
-    }
-
-    if (err) {
-      const msg = String(err?.message || "");
-      if (msg.includes("safety_supported")) {
-        const retry = await supabase
+      const raw = (res.data || []) as any[];
+      rows = raw.map((r: any, i: number) => ({
+        category_slug: "new",
+        item_sort_order: start + i,
+        character_slug: r.slug,
+        author_handle: r.handle,
+        title: r.name,
+        description: r.tagline,
+        tags: r.hashtags,
+        character_profile_image_url: r.profile_image_url,
+        safety_supported: r.safety_supported,
+      }));
+    } else {
+      {
+        const res = await supabase
           .from("panana_public_category_cards_v")
           .select(
-            "category_slug, category_title, category_sort_order, item_sort_order, character_slug, author_handle, title, description, tags, character_profile_image_url"
+            "category_slug, category_title, category_sort_order, item_sort_order, character_slug, author_handle, title, description, tags, character_profile_image_url, safety_supported"
           )
           .eq("category_slug", slug)
           .order("item_sort_order", { ascending: true })
           .range(start, end);
-        if (retry.error) throw retry.error;
-        rows = retry.data as any;
-      } else {
-        throw err;
+        rows = res.data as any;
+        err = res.error;
+      }
+
+      if (err) {
+        const msg = String(err?.message || "");
+        if (msg.includes("safety_supported")) {
+          const retry = await supabase
+            .from("panana_public_category_cards_v")
+            .select(
+              "category_slug, category_title, category_sort_order, item_sort_order, character_slug, author_handle, title, description, tags, character_profile_image_url"
+            )
+            .eq("category_slug", slug)
+            .order("item_sort_order", { ascending: true })
+            .range(start, end);
+          if (retry.error) throw retry.error;
+          rows = retry.data as any;
+        } else {
+          throw err;
+        }
       }
     }
 

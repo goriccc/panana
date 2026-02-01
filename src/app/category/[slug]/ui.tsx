@@ -13,6 +13,7 @@ export function CategoryClient({ category }: { category: Category }) {
   const [items, setItems] = useState(category.items);
   const [safetyOn, setSafetyOn] = useState(false);
   const [adultVerified, setAdultVerified] = useState(false);
+  const [safetyReady, setSafetyReady] = useState(false);
   const effectiveSafetyOn = safetyOn && adultVerified;
   const [paging, setPaging] = useState<{ offset: number; hasMore: boolean; loading: boolean }>({
     offset: category.items.length,
@@ -32,6 +33,7 @@ export function CategoryClient({ category }: { category: Category }) {
     fetchAdultStatus().then((status) => {
       if (!alive) return;
       setAdultVerified(Boolean(status?.adultVerified));
+      setSafetyReady(true);
     });
     return () => {
       alive = false;
@@ -81,9 +83,21 @@ export function CategoryClient({ category }: { category: Category }) {
     loadingRef.current = true;
     setPaging((prev) => ({ ...prev, loading: true }));
     try {
-      const res = await fetch(
-        `/api/category-items?slug=${encodeURIComponent(category.slug)}&offset=${paging.offset}&limit=12`
-      );
+      const offset =
+        category.slug === "new"
+          ? items.filter((it) =>
+              effectiveSafetyOn
+                ? Boolean((it as ContentCardItem).safetySupported)
+                : !(it as ContentCardItem).safetySupported
+            ).length
+          : paging.offset;
+      const params = new URLSearchParams({
+        slug: category.slug,
+        offset: String(offset),
+        limit: "12",
+      });
+      if (category.slug === "new") params.set("safetySupported", String(effectiveSafetyOn));
+      const res = await fetch(`/api/category-items?${params.toString()}`);
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok || !Array.isArray(data.items)) {
         throw new Error("failed");
@@ -105,7 +119,7 @@ export function CategoryClient({ category }: { category: Category }) {
     } finally {
       loadingRef.current = false;
     }
-  }, [category.slug, paging]);
+  }, [category.slug, category.items, paging, effectiveSafetyOn, items]);
 
   useEffect(() => {
     const el = sentinelRef.current;
@@ -156,8 +170,16 @@ export function CategoryClient({ category }: { category: Category }) {
       </header>
 
       <main className="mx-auto w-full max-w-[420px] px-5 pb-14 pt-5">
+        {!safetyReady ? (
+          <div className="grid grid-cols-2 gap-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="h-[280px] animate-pulse rounded-[8px] bg-white/[0.04]" />
+            ))}
+          </div>
+        ) : (
+          <>
         <div className="grid grid-cols-2 gap-3">
-          {displayItems.map((it) => (
+          {displayItems.map((it, idx) => (
             // Category.items는 ContentCardItem 구조
             // (어드민 연동 전이므로 여기서 캐릭터 슬러그로 프로필 이동)
             <ContentCard
@@ -168,6 +190,7 @@ export function CategoryClient({ category }: { category: Category }) {
               tags={(it as ContentCardItem).tags}
               imageUrl={(it as ContentCardItem).imageUrl}
               href={`/c/${(it as ContentCardItem).characterSlug}`}
+              priority={idx < 12}
             />
           ))}
         </div>
@@ -189,6 +212,8 @@ export function CategoryClient({ category }: { category: Category }) {
             메인 화면으로 이동
           </Link>
         </div>
+          </>
+        )}
       </main>
     </div>
   );
