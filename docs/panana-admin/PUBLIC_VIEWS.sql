@@ -42,7 +42,7 @@ grant select (id, slug, title, sort_order, active) on table public.panana_catego
 grant select (
   id, slug, name, tagline, profile_image_url, posts_count, active,
   handle, hashtags, mbti, intro_title, intro_lines, mood_title, mood_lines,
-  followers_count, following_count, studio_character_id, safety_supported, created_at, updated_at
+  followers_count, following_count, studio_character_id, safety_supported, gender, created_at, updated_at
 ) on table public.panana_characters to anon, authenticated;
 
 -- admin_notes 같은 내부 컬럼은 권한을 주지 않습니다.
@@ -65,7 +65,11 @@ on table public.panana_membership_banners to anon, authenticated;
 grant select (id, section, kind, title, media_url, sort_order, active) on table public.panana_airport_media to anon, authenticated;
 grant select (id, key, text, sort_order, active) on table public.panana_airport_copy to anon, authenticated;
 
-grant select (id, site_name, site_description, metadata_base, social_image_url, robots_index, footer_line_1, footer_line_2, updated_at)
+grant select (
+  id, site_name, site_description, metadata_base, social_image_url, robots_index,
+  footer_line_1, footer_line_2, updated_at,
+  scene_image_enabled, scene_image_daily_limit, scene_image_model, scene_image_steps, scene_image_vision_cache_minutes
+)
 on table public.panana_site_settings to anon, authenticated;
 
 -- 썸네일 세트 테이블이 존재할 때만(마이그레이션 이후) 권한 부여
@@ -114,7 +118,8 @@ select
   followers_count,
   following_count,
   studio_character_id,
-  safety_supported
+  safety_supported,
+  gender
 from public.panana_characters
 where active = true
 order by updated_at desc;
@@ -141,7 +146,8 @@ select
   ch.tagline as description,
   ch.hashtags as tags,
   nullif(ch.profile_image_url,'') as character_profile_image_url,
-  ch.safety_supported as safety_supported
+  ch.safety_supported as safety_supported,
+  ch.gender as gender
 from public.panana_character_categories cc
 join public.panana_categories c on c.id = cc.category_id
 join public.panana_characters ch on ch.id = cc.character_id
@@ -318,6 +324,11 @@ select
   robots_index,
   footer_line_1,
   footer_line_2,
+  scene_image_enabled,
+  scene_image_daily_limit,
+  scene_image_model,
+  scene_image_steps,
+  scene_image_vision_cache_minutes,
   menu_visibility,
   updated_at,
   recommendation_settings

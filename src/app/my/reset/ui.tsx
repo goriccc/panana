@@ -78,6 +78,15 @@ function clearLocalChatData(pananaId?: string) {
   clearLocalByPrefix("panana_chat_runtime:");
 }
 
+function clearLocalHomeGenderCache() {
+  try {
+    localStorage.removeItem("panana_user_gender");
+    localStorage.removeItem("panana_gender_shuffle_seed");
+    localStorage.removeItem("panana_airport_draft");
+  } catch {}
+  clearLocalByPrefix("panana_home_category_cache");
+}
+
 export function ResetClient() {
   const [open, setOpen] = useState<null | "chat" | "service">(null);
   const [busy, setBusy] = useState(false);
@@ -194,9 +203,7 @@ export function ResetClient() {
 
             // 로컬 정리
             clearLocalChatData(pananaId);
-            try {
-              localStorage.removeItem("panana_airport_draft");
-            } catch {}
+            clearLocalHomeGenderCache();
 
             if (open === "service") {
               // 서비스 이용 초기화: 입국심사부터 다시

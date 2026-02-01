@@ -288,12 +288,16 @@ export function CharacterChatClient({
   characterSlug,
   backHref,
   characterAvatarUrl,
+  characterIntroTitle,
+  characterIntroLines,
   safetySupported,
 }: {
   characterName: string;
   characterSlug: string;
   backHref: string;
   characterAvatarUrl?: string;
+  characterIntroTitle?: string;
+  characterIntroLines?: string[];
   safetySupported: boolean | null;
 }) {
   const router = useRouter();
@@ -330,6 +334,7 @@ export function CharacterChatClient({
   const typingReqIdRef = useRef<number>(0);
   const typingTimerRef = useRef<number | null>(null);
   const hasSentRef = useRef(false);
+  const openingReqRef = useRef(false);
   // localStorage에서 즉시 읽어서 초기 상태 설정 (깜빡임 방지)
   const [provider, setProvider] = useState<Provider>(() => {
     if (typeof window === "undefined") return "anthropic";
@@ -346,6 +351,15 @@ export function CharacterChatClient({
   const lastKeyboardHeightRef = useRef(0);
   const forceScrollRef = useRef(false);
   const isInputFocusedRef = useRef(false);
+
+  const openingPrompt = useMemo(() => {
+    return [
+      "대화 시작.",
+      "캐릭터 시스템 프롬프트와 로어북을 기반으로 현재 상황을 2~4문장으로 묘사한다.",
+      "마지막 문장은 캐릭터가 유저에게 자연스럽게 인사하고 질문한다.",
+      "설명 없이 답변만 출력한다.",
+    ].join(" ");
+  }, []);
   
   // 프로필 이미지 미리 로드 (캐시에 저장)
   useEffect(() => {
@@ -540,6 +554,76 @@ export function CharacterChatClient({
     setShowTyping(false);
   };
 
+  const requestOpening = async () => {
+    if (openingReqRef.current || hasSentRef.current) return;
+    openingReqRef.current = true;
+    setErr(null);
+    setSending(true);
+    resetTyping();
+    const reqId = Date.now();
+    typingReqIdRef.current = reqId;
+    typingTimerRef.current = window.setTimeout(() => {
+      if (typingReqIdRef.current === reqId) {
+        setShowTyping(true);
+      }
+    }, 450);
+    try {
+      const idt = ensurePananaIdentity();
+      const identityNick = String(idt.nickname || "").trim();
+      const resolvedUserName = String(userName || identityNick || idt.handle || "너").trim();
+      const runtimeVariables = {
+        ...(rt.variables || {}),
+        ...(resolvedUserName ? { user_name: resolvedUserName, call_sign: resolvedUserName } : {}),
+        ...(idt.handle ? { user_handle: String(idt.handle), panana_handle: String(idt.handle) } : {}),
+        ...(idt.id ? { panana_id: String(idt.id) } : {}),
+      };
+      const sceneIdFromRuntime = String((runtimeVariables as any).scene_id || (runtimeVariables as any).sceneId || "").trim();
+      const res = await fetch("/api/llm/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          provider,
+          characterSlug,
+          sceneId: sceneIdFromRuntime || undefined,
+          concise: false,
+          allowUnsafe: (() => {
+            try {
+              return localStorage.getItem("panana_safety_on") === "1" && adultVerified;
+            } catch {
+              return false;
+            }
+          })(),
+          runtime: {
+            variables: runtimeVariables,
+            chat: {
+              participants: rt.participants,
+              lastActiveAt: rt.lastActiveAt || undefined,
+              firedAt: rt.firedAt,
+            },
+          },
+          messages: [
+            { role: "system", content: `${characterName} 캐릭터로 자연스럽게 대화해.` },
+            { role: "user", content: openingPrompt },
+          ],
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `LLM error (${res.status})`);
+      if (hasSentRef.current) return;
+      const reply = String(data.text || "").trim();
+      if (reply) {
+        resetTyping();
+        setMessages((prev) => [...prev, { id: `b-${Date.now()}-opening`, from: "bot", text: reply }]);
+        setHistoryLoading(false);
+      }
+    } catch (e: any) {
+      setErr(e?.message || "오프닝 생성에 실패했어요.");
+    } finally {
+      resetTyping();
+      setSending(false);
+    }
+  };
+
   const getPananaId = () => {
     const idt = ensurePananaIdentity();
     const pid = String(idt.id || "").trim();
@@ -619,6 +703,7 @@ export function CharacterChatClient({
       setHistoryLoading(false);
     } else {
       setHistoryLoading(true);
+      void requestOpening();
     }
 
     // 2) 서버에서 pananaId 확정 및 DB 메시지 로드 (백그라운드)

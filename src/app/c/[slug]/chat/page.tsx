@@ -25,6 +25,8 @@ export default async function CharacterChatPage({ params }: { params: { slug: st
       characterSlug={c.slug}
       backHref={`/c/${c.slug}`}
       characterAvatarUrl={(c as any).profileImageUrl || (c as any).profile_image_url || undefined}
+      characterIntroTitle={(c as any).introTitle || (c as any).intro_title || ""}
+      characterIntroLines={(c as any).introLines || (c as any).intro_lines || []}
       safetySupported={safetySupported}
     />
   );

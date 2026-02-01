@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { HomeClient } from "./ui";
 import { fetchHomeCategoriesFromDb, fetchMenuVisibilityFromDb, fetchRecommendationSettingsFromDb } from "@/lib/pananaApp/contentServer";
 
@@ -11,6 +12,10 @@ export const metadata: Metadata = {
 export const revalidate = 60;
 
 export default async function HomePage() {
+  const cookieStore = await cookies();
+  const safetyCookie = cookieStore.get("panana_safety_on");
+  const initialSafetyOn = safetyCookie ? safetyCookie.value === "1" : undefined;
+
   const [cats, menuVisibility, recommendationSettings] = await Promise.all([
     fetchHomeCategoriesFromDb().catch(() => null),
     fetchMenuVisibilityFromDb().catch(() => null),
@@ -19,6 +24,7 @@ export default async function HomePage() {
   return (
     <HomeClient
       categories={cats || undefined}
+      initialSafetyOn={initialSafetyOn}
       initialMenuVisibility={menuVisibility || undefined}
       initialRecommendationSettings={recommendationSettings || undefined}
     />

@@ -7,6 +7,12 @@ alter table public.panana_site_settings
   add column if not exists scene_image_enabled boolean not null default true;
 alter table public.panana_site_settings
   add column if not exists scene_image_daily_limit int not null default 5;
+alter table public.panana_site_settings
+  add column if not exists scene_image_model text;
+alter table public.panana_site_settings
+  add column if not exists scene_image_steps int;
+alter table public.panana_site_settings
+  add column if not exists scene_image_vision_cache_minutes int;
 
 -- 2) 일일 쿼터 로그 테이블 (유저당 당일 사용 횟수 카운트용)
 create table if not exists public.panana_scene_image_log (
@@ -46,6 +52,9 @@ select
   coalesce(menu_visibility, '{}'::jsonb) as menu_visibility,
   coalesce(scene_image_enabled, true) as scene_image_enabled,
   coalesce(scene_image_daily_limit, 5) as scene_image_daily_limit,
+  scene_image_model,
+  scene_image_steps,
+  scene_image_vision_cache_minutes,
   updated_at,
   coalesce(recommendation_settings, '{}'::jsonb) as recommendation_settings
 from public.panana_site_settings

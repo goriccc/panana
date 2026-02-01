@@ -3,11 +3,12 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { CharacterProfile } from "@/lib/characters";
 import type { ContentCardItem } from "@/lib/content";
 import { ContentCard } from "@/components/ContentCard";
 import { defaultRecommendationSettings, trackBehaviorEvent } from "@/lib/pananaApp/recommendation";
+import { fetchMyAccountInfo, type Gender } from "@/lib/pananaApp/accountInfo";
 
 function Stat({ value, label }: { value: number; label: string }) {
   return (
@@ -28,6 +29,27 @@ function PhotoTile({ seed }: { seed: string }) {
   );
 }
 
+type CharacterGender = "male" | "female" | "unknown";
+
+function getCharacterGender(item: ContentCardItem): CharacterGender {
+  const g = (item as any)?.gender;
+  if (g === "female" || g === "male") return g;
+  return "unknown";
+}
+
+function preferredCharacterGender(userGender: Gender | null): CharacterGender | null {
+  if (userGender === "male") return "female";
+  if (userGender === "female") return "male";
+  return null;
+}
+
+function hasGenderData(items: ContentCardItem[]): boolean {
+  return (items || []).some((it) => {
+    const g = (it as any)?.gender;
+    return g === "male" || g === "female";
+  });
+}
+
 export function CharacterClient({
   character,
   recommendedTalkCards,
@@ -38,12 +60,53 @@ export function CharacterClient({
   const router = useRouter();
   const photos = useMemo(() => character.photos, [character.photos]);
   const isEmptyPosts = Number(character.photoCount || 0) <= 0;
+  const [userGender, setUserGender] = useState<Gender | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = localStorage.getItem("panana_user_gender");
+      if (raw === "female" || raw === "male" || raw === "both" || raw === "private") return raw;
+      const draftRaw = localStorage.getItem("panana_airport_draft");
+      if (draftRaw) {
+        const draft = JSON.parse(draftRaw);
+        const g = String(draft?.gender || "");
+        if (g === "female" || g === "male" || g === "both" || g === "private") return g as Gender;
+      }
+    } catch {}
+    return null;
+  });
+  const preferredGender = useMemo(() => preferredCharacterGender(userGender), [userGender]);
   
   // 주요 링크 프리페칭
   useEffect(() => {
     router.prefetch(`/c/${character.slug}/chat`);
     router.prefetch(`/c/${character.slug}/profile-image`);
   }, [router, character.slug]);
+
+  useEffect(() => {
+    let alive = true;
+    fetchMyAccountInfo()
+      .then((info) => {
+        if (!alive) return;
+        setUserGender(info?.gender ?? null);
+        try {
+          if (info?.gender) {
+            localStorage.setItem("panana_user_gender", info.gender);
+          } else {
+            localStorage.removeItem("panana_user_gender");
+          }
+        } catch {}
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const filteredRecommendedCards = useMemo(() => {
+    if (!preferredGender) return recommendedTalkCards;
+    if (!hasGenderData(recommendedTalkCards)) return [];
+    return recommendedTalkCards.filter((it) => getCharacterGender(it) === preferredGender);
+  }, [preferredGender, recommendedTalkCards]);
 
 
   return (
@@ -228,11 +291,11 @@ export function CharacterClient({
         </div>
 
         {/* 추천 섹션: 게시물 0개일 때 태그 유사 카드 */}
-        {isEmptyPosts && recommendedTalkCards.length ? (
+        {isEmptyPosts && filteredRecommendedCards.length ? (
           <div className="mt-10">
             <div className="text-[14px] font-semibold tracking-[-0.01em] text-white/75"># 이런 대화는 어때?</div>
             <div className="mt-4 grid grid-cols-2 gap-3">
-              {recommendedTalkCards.map((it) => (
+              {filteredRecommendedCards.map((it) => (
                 <ContentCard
                   key={it.id}
                   href={`/c/${it.characterSlug}`}

@@ -27,6 +27,7 @@ type PublicCategoryCardRow = {
   tags: string[] | null;
   character_profile_image_url: string | null;
   safety_supported?: boolean | null;
+  gender?: "male" | "female" | null;
 };
 
 export async function GET(req: Request) {
@@ -51,12 +52,15 @@ export async function GET(req: Request) {
       const client = getSupabaseAdmin() || supabase;
       const safetyParam = searchParams.get("safetySupported");
       const safetyFilter = safetyParam === "true" ? true : safetyParam === "false" ? false : undefined;
+      const genderParam = searchParams.get("gender");
+      const genderFilter = genderParam === "male" || genderParam === "female" ? genderParam : undefined;
       const q = client
         .from("panana_characters")
-        .select("slug, name, tagline, profile_image_url, handle, hashtags, safety_supported")
+        .select("slug, name, tagline, profile_image_url, handle, hashtags, safety_supported, gender")
         .eq("active", true)
         .order("created_at", { ascending: false });
       if (safetyFilter !== undefined) q.eq("safety_supported", safetyFilter);
+      if (genderFilter) q.eq("gender", genderFilter);
       const res = await q.range(start, end);
       err = res.error;
       const raw = (res.data || []) as any[];
@@ -70,13 +74,14 @@ export async function GET(req: Request) {
         tags: r.hashtags,
         character_profile_image_url: r.profile_image_url,
         safety_supported: r.safety_supported,
+        gender: r.gender ?? null,
       }));
     } else {
       {
         const res = await supabase
           .from("panana_public_category_cards_v")
           .select(
-            "category_slug, category_title, category_sort_order, item_sort_order, character_slug, author_handle, title, description, tags, character_profile_image_url, safety_supported"
+            "category_slug, category_title, category_sort_order, item_sort_order, character_slug, author_handle, title, description, tags, character_profile_image_url, safety_supported, gender"
           )
           .eq("category_slug", slug)
           .order("item_sort_order", { ascending: true })
@@ -87,7 +92,7 @@ export async function GET(req: Request) {
 
       if (err) {
         const msg = String(err?.message || "");
-        if (msg.includes("safety_supported")) {
+        if (msg.includes("safety_supported") || msg.includes("gender")) {
           const retry = await supabase
             .from("panana_public_category_cards_v")
             .select(
@@ -117,6 +122,7 @@ export async function GET(req: Request) {
       tags: (r.tags || []).map((t) => (t.startsWith("#") ? t : `#${t}`)),
       imageUrl: r.character_profile_image_url || undefined,
       safetySupported: Boolean((r as any)?.safety_supported),
+      gender: (r as any)?.gender ?? null,
     }));
     return NextResponse.json({ ok: true, items, nextOffset: offset + items.length, hasMore });
   } catch (e: any) {

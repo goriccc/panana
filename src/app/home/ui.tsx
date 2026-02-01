@@ -11,6 +11,7 @@ import { categories as fallbackCategories, type Category, type ContentCardItem }
 import { loadMyChats, type MyChatItem } from "@/lib/pananaApp/myChats";
 import { ensurePananaIdentity } from "@/lib/pananaApp/identity";
 import { fetchAdultStatus } from "@/lib/pananaApp/adultVerification";
+import { fetchMyAccountInfo, type Gender } from "@/lib/pananaApp/accountInfo";
 import { useSession } from "next-auth/react";
 import type { MenuVisibility } from "@/lib/pananaApp/contentServer";
 import {
@@ -36,44 +37,194 @@ const defaultMenuVisibility: MenuVisibility = {
   search: true,
 };
 
+function setSafetyCookie(on: boolean) {
+  try {
+    document.cookie = `panana_safety_on=${on ? "1" : "0"}; path=/; max-age=31536000; SameSite=Lax`;
+  } catch {}
+}
+
+type CharacterGender = "male" | "female" | "unknown";
+
+function getCharacterGender(item: ContentCardItem): CharacterGender {
+  const g = (item as any)?.gender;
+  if (g === "female" || g === "male") return g;
+  return "unknown";
+}
+
+function preferredCharacterGender(userGender: Gender | null): CharacterGender | null {
+  if (userGender === "male") return "female";
+  if (userGender === "female") return "male";
+  return null;
+}
+
+function shuffleWithSeed<T>(items: T[], seed: number): T[] {
+  const out = [...items];
+  let s = seed || 1;
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    s = (s * 9301 + 49297) % 233280;
+    const r = s / 233280;
+    const j = Math.floor(r * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+function newGenderCacheKey(preferredGender: CharacterGender | null, safetyOn: boolean) {
+  if (!preferredGender) return "";
+  return `panana_home_category_cache:new:${preferredGender}:${safetyOn ? "1" : "0"}`;
+}
+
+function newGenderCacheMetaKey(preferredGender: CharacterGender | null, safetyOn: boolean) {
+  if (!preferredGender) return "";
+  return `panana_home_category_cache:new:${preferredGender}:${safetyOn ? "1" : "0"}:source`;
+}
+
+function seedFromSignals(signals: Array<{ tag: string; weight: number }>) {
+  if (!signals.length) return 1;
+  let seed = 0;
+  for (const sig of signals) {
+    const t = String(sig.tag || "");
+    for (let i = 0; i < t.length; i += 1) {
+      seed = (seed * 31 + t.charCodeAt(i)) % 100000;
+    }
+  }
+  return Math.max(1, seed);
+}
+
+function mixByGender(items: ContentCardItem[], seed: number): ContentCardItem[] {
+  const male: ContentCardItem[] = [];
+  const female: ContentCardItem[] = [];
+  const unknown: ContentCardItem[] = [];
+  for (const it of items) {
+    const g = getCharacterGender(it);
+    if (g === "male") male.push(it);
+    else if (g === "female") female.push(it);
+    else unknown.push(it);
+  }
+  const sm = shuffleWithSeed(male, seed + 1);
+  const sf = shuffleWithSeed(female, seed + 2);
+  const su = shuffleWithSeed(unknown, seed + 3);
+  const startFemale = (seed % 2) === 0;
+  const out: ContentCardItem[] = [];
+  let i = 0;
+  while (i < sm.length || i < sf.length) {
+    if (startFemale) {
+      if (i < sf.length) out.push(sf[i]);
+      if (i < sm.length) out.push(sm[i]);
+    } else {
+      if (i < sm.length) out.push(sm[i]);
+      if (i < sf.length) out.push(sf[i]);
+    }
+    i += 1;
+    if (su.length && out.length % 2 === 0) {
+      out.push(su.shift() as ContentCardItem);
+    }
+  }
+  return out.concat(su);
+}
+
+function hasGenderData(items: ContentCardItem[]): boolean {
+  return (items || []).some((it) => {
+    const g = (it as any)?.gender;
+    return g === "male" || g === "female";
+  });
+}
+
+function filterByPreferredGender(items: ContentCardItem[], preferred: CharacterGender | null): ContentCardItem[] {
+  if (!preferred) return items;
+  if (!hasGenderData(items)) return items;
+  return items.filter((it) => getCharacterGender(it) === preferred);
+}
+
 export function HomeClient({
   categories,
+  initialSafetyOn,
   initialMenuVisibility,
   initialRecommendationSettings,
 }: {
   categories?: Category[];
+  initialSafetyOn?: boolean;
   initialMenuVisibility?: MenuVisibility;
   initialRecommendationSettings?: RecommendationSettings;
 }) {
   const router = useRouter();
-  const [safetyOn, setSafetyOn] = useState(false);
+  // 클라이언트에서는 localStorage를 우선해 즉시 렌더링 (뒤로가기 시 깜빡임 방지)
+  const [safetyOn, setSafetyOn] = useState(() => {
+    if (typeof window !== "undefined") {
+      try {
+        return localStorage.getItem("panana_safety_on") === "1";
+      } catch {}
+    }
+    return initialSafetyOn ?? false;
+  });
   const [adultVerified, setAdultVerified] = useState(false);
-
-  // localStorage에서 읽어 페인트 전에 동기화 (뒤로가기 시 OFF→ON 깜빡임 방지)
-  useLayoutEffect(() => {
+  const [adultLoading, setAdultLoading] = useState(true);
+  const [userGender, setUserGender] = useState<Gender | null>(() => {
+    if (typeof window === "undefined") return null;
     try {
-      if (typeof window !== "undefined" && localStorage.getItem("panana_safety_on") === "1") {
-        setSafetyOn(true);
+      const raw = localStorage.getItem("panana_user_gender");
+      if (raw === "female" || raw === "male" || raw === "both" || raw === "private") return raw;
+      const draftRaw = localStorage.getItem("panana_airport_draft");
+      if (draftRaw) {
+        const draft = JSON.parse(draftRaw);
+        const g = String(draft?.gender || "");
+        if (g === "female" || g === "male" || g === "both" || g === "private") return g as Gender;
       }
     } catch {}
-  }, []);
-  const [adultLoading, setAdultLoading] = useState(true);
+    return null;
+  });
+  const [userGenderLoading, setUserGenderLoading] = useState(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      const raw = localStorage.getItem("panana_user_gender");
+      if (raw === "female" || raw === "male" || raw === "both" || raw === "private") return false;
+      const draftRaw = localStorage.getItem("panana_airport_draft");
+      if (draftRaw) {
+        const draft = JSON.parse(draftRaw);
+        const g = String(draft?.gender || "");
+        if (g === "female" || g === "male" || g === "both" || g === "private") return false;
+      }
+    } catch {}
+    return true;
+  });
+  const [newGenderLoading, setNewGenderLoading] = useState(false);
+  const [genderSeed, setGenderSeed] = useState(1);
+
+  // 쿠키 미설정 시 localStorage 기준으로 쿠키 세팅 (다음 요청 시 서버가 읽도록)
+  useLayoutEffect(() => {
+    try {
+      if (typeof window !== "undefined" && initialSafetyOn === undefined) {
+        const v = localStorage.getItem("panana_safety_on") === "1";
+        setSafetyCookie(v);
+      }
+    } catch {}
+  }, [initialSafetyOn]);
+
+  // 스파이시 ON일 때 adultVerified 확정 전까지 콘텐츠 숨김 (OFF→ON 깜빡임 완전 방지)
+  const safetyReady = !safetyOn || !adultLoading;
+  const genderReady = !userGenderLoading;
   const [adultModalOpen, setAdultModalOpen] = useState(false);
   const effectiveSafetyOn = safetyOn && adultVerified;
+  const preferredGender = useMemo(() => preferredCharacterGender(userGender), [userGender]);
 
   const sourceBase = categories?.length ? categories : fallbackCategories;
   const source = useMemo(() => {
     return (sourceBase || [])
       .map((c) => ({
         ...c,
-        items: (c.items || []).filter((it) =>
-          effectiveSafetyOn
-            ? Boolean((it as any)?.safetySupported)
-            : !(it as any)?.safetySupported
-        ),
+        items: (() => {
+          const filtered = (c.items || []).filter((it) =>
+            effectiveSafetyOn
+              ? Boolean((it as any)?.safetySupported)
+              : !(it as any)?.safetySupported
+          );
+          if (!preferredGender) return filtered;
+          if (!hasGenderData(filtered)) return filtered;
+          return filtered.filter((it) => getCharacterGender(it) === preferredGender);
+        })(),
       }))
       .filter((c) => (c.items || []).length > 0);
-  }, [effectiveSafetyOn, sourceBase]);
+  }, [effectiveSafetyOn, sourceBase, preferredGender]);
   const allItems = useMemo(() => {
     const all = (source || []).flatMap((c) => c.items || []);
     const bySlug = new Map<string, ContentCardItem>();
@@ -106,6 +257,7 @@ export function HomeClient({
   const [behaviorSignals, setBehaviorSignals] = useState<Array<{ tag: string; weight: number }>>([]);
   const [cachedPersonalizedSlugs, setCachedPersonalizedSlugs] = useState<string[] | null>(null);
   const [popularSlugs, setPopularSlugs] = useState<string[] | null>(null);
+  const [popularReady, setPopularReady] = useState(false);
   const [categoryItemsBySlug, setCategoryItemsBySlug] = useState<Record<string, ContentCardItem[]>>({});
   const [categoryPagingBySlug, setCategoryPagingBySlug] = useState<
     Record<string, { offset: number; hasMore: boolean; loading: boolean }>
@@ -114,6 +266,48 @@ export function HomeClient({
   const cardIndexRef = useRef(0);
   const { status } = useSession();
   const loggedIn = status === "authenticated";
+
+  useEffect(() => {
+    let alive = true;
+    fetchMyAccountInfo()
+      .then((info) => {
+        if (!alive) return;
+        setUserGender(info?.gender ?? null);
+        try {
+          if (info?.gender) {
+            localStorage.setItem("panana_user_gender", info.gender);
+          } else {
+            localStorage.removeItem("panana_user_gender");
+          }
+        } catch {}
+      })
+      .finally(() => {
+        if (!alive) return;
+        setUserGenderLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const stored = localStorage.getItem("panana_gender_shuffle_seed");
+      if (stored) {
+        const num = Number(stored);
+        if (!Number.isNaN(num) && num > 0) {
+          setGenderSeed(num);
+          return;
+        }
+      }
+      const next = Math.floor(Math.random() * 100000) + 1;
+      localStorage.setItem("panana_gender_shuffle_seed", String(next));
+      setGenderSeed(next);
+    } catch {
+      // ignore
+    }
+  }, []);
 
   // 메뉴 설정 업데이트 (서버에서 받은 값이 있으면 사용, 없으면 클라이언트에서 다시 로드)
   useEffect(() => {
@@ -146,6 +340,8 @@ export function HomeClient({
         setSafetyOn(false);
         try {
           localStorage.setItem("panana_safety_on", "0");
+          setSafetyCookie(false);
+          router.refresh();
         } catch {}
       }
     })();
@@ -163,15 +359,37 @@ export function HomeClient({
     let alive = true;
     const loadPopular = async () => {
       try {
+        if (typeof window !== "undefined") {
+          const cached = localStorage.getItem("panana_popular_slugs");
+          if (cached) {
+            try {
+              const parsed = JSON.parse(cached);
+              if (Array.isArray(parsed) && parsed.length) {
+                setPopularSlugs(parsed);
+                setPopularReady(true);
+              }
+            } catch {}
+          }
+        }
         const res = await fetch("/api/popular-characters?limit=24&days=30&recentDays=7");
         const data = await res.json().catch(() => null);
         if (!alive) return;
         if (res.ok && data?.ok && Array.isArray(data.items)) {
           const slugs = data.items.map((it: any) => String(it?.slug || "").trim()).filter(Boolean);
           setPopularSlugs(slugs.length ? slugs : null);
+          try {
+            if (slugs.length) {
+              localStorage.setItem("panana_popular_slugs", JSON.stringify(slugs));
+            } else {
+              localStorage.removeItem("panana_popular_slugs");
+            }
+          } catch {}
         }
       } catch {
         // ignore
+      } finally {
+        if (!alive) return;
+        setPopularReady(true);
       }
     };
     loadPopular();
@@ -407,8 +625,33 @@ export function HomeClient({
       .map((s) => s.it);
 
     if (ranked.length > 0) return ranked.slice(0, 12);
+
+    if (answerSignals.length) {
+      const answerTagSet = new Set(answerSignals.map((s) => normalizeTag(s.tag)).filter(Boolean));
+      const weak = allItems
+        .map((it, idx) => {
+          const tags = (it.tags || []).map(normalizeTag).filter(Boolean);
+          let hits = 0;
+          for (const t of tags) {
+            for (const sig of answerTagSet) {
+              if (!sig) continue;
+              if (t === sig || t.includes(sig) || sig.includes(t)) {
+                hits += 1;
+                break;
+              }
+            }
+          }
+          return { it, hits, idx };
+        })
+        .filter((x) => x.hits > 0)
+        .sort((a, b) => b.hits - a.hits || a.idx - b.idx)
+        .map((x) => x.it);
+      if (weak.length) return weak.slice(0, 12);
+      return shuffleWithSeed(allItems, seedFromSignals(answerSignals)).slice(0, 12);
+    }
+
     return cachedPersonalizedItems;
-  }, [combinedSignals, allItems, cachedPersonalizedItems]);
+  }, [combinedSignals, allItems, cachedPersonalizedItems, answerSignals]);
 
   useEffect(() => {
     if (!personalizedItems?.length) return;
@@ -438,19 +681,43 @@ export function HomeClient({
     return s === "new" || n.includes("새로 올라온");
   }, []);
 
+  const recentChatItems = useMemo(() => {
+    if (!myChats.length) return [];
+    const bySlug = new Map(allItems.map((it) => [it.characterSlug, it]));
+    return myChats.map((it) => bySlug.get(it.characterSlug)).filter(Boolean) as ContentCardItem[];
+  }, [myChats, allItems]);
+
   const topCategories = useMemo(() => {
     const bySlug = new Map(allItems.map((it) => [it.characterSlug, it]));
+    const shouldMixGender = userGender === "both" || userGender === "private" || !userGender;
 
     return (source || []).map((c) => {
       let items = c.items || [];
       if (isForYou(c.slug, c.name) && personalizedItems?.length) {
         items = personalizedItems;
+      } else if (isPopular(c.slug, c.name) && !popularReady) {
+        items = [];
       } else if (isPopular(c.slug, c.name) && popularSlugs?.length) {
         const popularItems = popularSlugs.map((slug) => bySlug.get(slug)).filter(Boolean) as ContentCardItem[];
         if (popularItems.length) {
           const fallback = items.filter((it) => !popularItems.find((p) => p.characterSlug === it.characterSlug));
           items = [...popularItems, ...fallback];
         }
+      } else if (isPopular(c.slug, c.name) && !popularSlugs?.length) {
+        if (recentChatItems.length) {
+          const fallback = items.filter((it) => !recentChatItems.find((p) => p.characterSlug === it.characterSlug));
+          items = [...recentChatItems, ...fallback];
+        } else {
+          items = shuffleWithSeed(items, genderSeed + 7);
+        }
+      }
+
+      if (
+        shouldMixGender &&
+        hasGenderData(items) &&
+        (isForYou(c.slug, c.name) || isPopular(c.slug, c.name))
+      ) {
+        items = mixByGender(items, genderSeed);
       }
 
       return {
@@ -458,7 +725,7 @@ export function HomeClient({
         items: items || [],
       };
     });
-  }, [source, personalizedItems, popularSlugs, allItems]);
+  }, [source, personalizedItems, popularSlugs, allItems, isForYou, isPopular, userGender, genderSeed, recentChatItems, popularReady]);
 
   // 선 로드: 첫 12개 썸네일 미리 fetch
   const preloadUrls = useMemo(() => {
@@ -518,12 +785,82 @@ export function HomeClient({
     try {
       topCategories.forEach((cat) => {
         const items = categoryItemsBySlug[cat.slug] || cat.items || [];
-        localStorage.setItem(`panana_home_category_cache:${cat.slug}`, JSON.stringify(items));
+        if (cat.slug !== "new") {
+          const cacheKey = `panana_home_category_cache:${cat.slug}`;
+          if (!preferredGender || hasGenderData(items)) {
+            localStorage.setItem(cacheKey, JSON.stringify(items));
+          } else {
+            localStorage.removeItem(cacheKey);
+          }
+        }
       });
     } catch {
       // ignore
     }
-  }, [topCategories, categoryItemsBySlug]);
+  }, [topCategories, categoryItemsBySlug, preferredGender, effectiveSafetyOn]);
+
+  useEffect(() => {
+    if (!preferredGender) return;
+    let alive = true;
+    (async () => {
+      try {
+        const key = newGenderCacheKey(preferredGender, effectiveSafetyOn);
+        let cached: ContentCardItem[] | null = null;
+        if (key && typeof window !== "undefined") {
+          try {
+            const metaKey = newGenderCacheMetaKey(preferredGender, effectiveSafetyOn);
+            const source = metaKey ? localStorage.getItem(metaKey) : null;
+            if (source === "api") {
+              const raw = localStorage.getItem(key);
+              const parsed = raw ? JSON.parse(raw) : null;
+              if (Array.isArray(parsed) && parsed.length) cached = parsed as ContentCardItem[];
+            }
+          } catch {}
+        }
+        if (cached?.length) {
+          setCategoryItemsBySlug((prev) => ({ ...prev, new: cached as ContentCardItem[] }));
+          setNewGenderLoading(false);
+        } else {
+          setNewGenderLoading(true);
+          setCategoryItemsBySlug((prev) => ({ ...prev, new: [] }));
+        }
+        const params = new URLSearchParams({
+          slug: "new",
+          offset: "0",
+          limit: "12",
+          safetySupported: String(effectiveSafetyOn),
+          gender: preferredGender,
+        });
+        const res = await fetch(`/api/category-items?${params.toString()}`);
+        const data = await res.json().catch(() => null);
+        if (!alive) return;
+        if (!res.ok || !data?.ok || !Array.isArray(data.items)) return;
+        const items = data.items as ContentCardItem[];
+        setCategoryItemsBySlug((prev) => ({ ...prev, new: items }));
+        setCategoryPagingBySlug((prev) => ({
+          ...prev,
+          new: {
+            offset: Number(data.nextOffset || items.length),
+            hasMore: Boolean(data.hasMore),
+            loading: false,
+          },
+        }));
+        try {
+          const metaKey = newGenderCacheMetaKey(preferredGender, effectiveSafetyOn);
+          if (key) localStorage.setItem(key, JSON.stringify(items));
+          if (metaKey) localStorage.setItem(metaKey, "api");
+        } catch {}
+      } catch {
+        // ignore
+      } finally {
+        if (!alive) return;
+        setNewGenderLoading(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [preferredGender, effectiveSafetyOn]);
 
   const loadMoreCategoryItems = useCallback(async (slug: string) => {
     const paging = categoryPagingBySlug[slug];
@@ -533,7 +870,16 @@ export function HomeClient({
       [slug]: { ...paging, loading: true },
     }));
     try {
-      const res = await fetch(`/api/category-items?slug=${encodeURIComponent(slug)}&offset=${paging.offset}&limit=12`);
+      const params = new URLSearchParams({
+        slug,
+        offset: String(paging.offset),
+        limit: "12",
+      });
+      if (slug === "new") {
+        params.set("safetySupported", String(effectiveSafetyOn));
+        if (preferredGender) params.set("gender", preferredGender);
+      }
+      const res = await fetch(`/api/category-items?${params.toString()}`);
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok || !Array.isArray(data.items)) {
         throw new Error("failed");
@@ -556,7 +902,7 @@ export function HomeClient({
         [slug]: { ...paging, loading: false },
       }));
     }
-  }, [categoryPagingBySlug]);
+  }, [categoryPagingBySlug, effectiveSafetyOn, preferredGender]);
 
   const setCategorySentinel = useCallback(
     (slug: string) => (el: HTMLDivElement | null) => {
@@ -590,10 +936,12 @@ export function HomeClient({
   const getDisplayItems = (cat: { slug: string; name: string; items: ContentCardItem[] }) => {
     const base =
       isForYou(cat.slug, cat.name) || isPopular(cat.slug, cat.name) || isNew(cat.slug, cat.name)
-        ? cat.items || []
+        ? categoryItemsBySlug[cat.slug] || cat.items || []
         : categoryItemsBySlug[cat.slug] || cat.items || [];
-    if (effectiveSafetyOn) return base.filter((it) => Boolean((it as any)?.safetySupported));
-    return base.filter((it) => !(it as any)?.safetySupported);
+    if (preferredGender && !hasGenderData(base)) return [];
+    const genderFiltered = filterByPreferredGender(base, preferredGender);
+    if (effectiveSafetyOn) return genderFiltered.filter((it) => Boolean((it as any)?.safetySupported));
+    return genderFiltered.filter((it) => !(it as any)?.safetySupported);
   };
 
 
@@ -650,7 +998,7 @@ export function HomeClient({
       <HomeHeader
         active={activeTab}
         onChange={setActiveTab}
-        safetyOn={effectiveSafetyOn}
+        safetyOn={safetyOn}
         onSafetyChange={(next) => {
           if (next && !adultVerified) {
             setAdultModalOpen(true);
@@ -659,6 +1007,7 @@ export function HomeClient({
           setSafetyOn(next);
           try {
             localStorage.setItem("panana_safety_on", next ? "1" : "0");
+            setSafetyCookie(next);
           } catch {}
         }}
         menuVisibility={menuVisibility}
@@ -880,7 +1229,23 @@ export function HomeClient({
           </div>
         ) : null}
 
-        {activeTab === "my" || activeTab === "search" ? null : (
+        {activeTab === "my" || activeTab === "search" ? null : !safetyReady || !genderReady ? (
+          <div className="space-y-6">
+            <div className="aspect-[16/9] w-full animate-pulse rounded-[8px] bg-white/[0.04]" />
+            <div className="mt-14 space-y-16">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <section key={`ready-skel-${i}`} className={i === 0 ? "" : "pt-5"}>
+                  <div className="h-5 w-24 animate-pulse rounded bg-white/10" />
+                  <div className="mt-4 flex gap-3 overflow-hidden">
+                    {Array.from({ length: 4 }).map((_, j) => (
+                      <div key={j} className="h-[280px] min-w-[calc(50%-6px)] flex-1 animate-pulse rounded-[8px] bg-white/[0.04]" />
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          </div>
+        ) : (
           <>
         {/* 상단 큰 카드(향후: 공지/추천/바로가기) */}
         <Link
@@ -951,6 +1316,11 @@ export function HomeClient({
               {topCategories.map((cat) => {
                 const displayItems = getDisplayItems(cat);
                 const paging = categoryPagingBySlug[cat.slug];
+                const baseItems = categoryItemsBySlug[cat.slug] || cat.items || [];
+                const showNewGenderSkeleton = cat.slug === "new" && preferredGender && (newGenderLoading || !hasGenderData(baseItems));
+                const showPopularGenderSkeleton =
+                  isPopular(cat.slug, cat.name) &&
+                  ((!popularReady) || (preferredGender && !hasGenderData(baseItems)));
                 return (
                 <section key={cat.slug} className="pt-5 first:pt-0">
                   <div className="flex items-center justify-between">
@@ -975,30 +1345,38 @@ export function HomeClient({
                   </div>
 
                   <div className="mt-4">
-                    <div className="hide-scrollbar flex snap-x snap-mandatory gap-0 overflow-x-auto pb-2">
-                    {chunkItems(displayItems, 4).map((group, idx) => (
-                      <div key={`${cat.slug}-${idx}`} className="w-full shrink-0 snap-start">
-                        <div className="grid grid-cols-2 gap-3">
-                          {group.map((it) => {
-                            const isPriority = cardIndexRef.current++ < 12;
-                            return (
-                              <ContentCard
-                                key={it.id}
-                                author={it.author}
-                                title={it.title}
-                                description={it.description}
-                                tags={it.tags}
-                                imageUrl={it.imageUrl}
-                                href={`/c/${it.characterSlug}`}
-                                onClick={() => trackBehavior("click", it.tags || [])}
-                              priority={isPriority}
-                              />
-                            );
-                          })}
-                        </div>
+                    {showNewGenderSkeleton || showPopularGenderSkeleton ? (
+                      <div className="grid grid-cols-2 gap-3">
+                        {Array.from({ length: 4 }).map((_, j) => (
+                          <div key={j} className="h-[280px] animate-pulse rounded-[8px] bg-white/[0.04]" />
+                        ))}
                       </div>
-                    ))}
-                    </div>
+                    ) : (
+                      <div className="hide-scrollbar flex snap-x snap-mandatory gap-0 overflow-x-auto pb-2">
+                      {chunkItems(displayItems, 4).map((group, idx) => (
+                        <div key={`${cat.slug}-${idx}`} className="w-full shrink-0 snap-start">
+                          <div className="grid grid-cols-2 gap-3">
+                            {group.map((it) => {
+                              const isPriority = cardIndexRef.current++ < 12;
+                              return (
+                                <ContentCard
+                                  key={it.id}
+                                  author={it.author}
+                                  title={it.title}
+                                  description={it.description}
+                                  tags={it.tags}
+                                  imageUrl={it.imageUrl}
+                                  href={`/c/${it.characterSlug}`}
+                                  onClick={() => trackBehavior("click", it.tags || [])}
+                                priority={isPriority}
+                                />
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                      </div>
+                    )}
                   </div>
                   {!isForYou(cat.slug, cat.name) && !isPopular(cat.slug, cat.name) && !isNew(cat.slug, cat.name) ? (
                     <div ref={setCategorySentinel(cat.slug)} data-slug={cat.slug} className="h-1 w-full" />

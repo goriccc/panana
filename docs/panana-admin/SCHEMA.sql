@@ -42,6 +42,7 @@ create table if not exists public.panana_characters (
   profile_image_url text not null default '',
   posts_count int not null default 0,
   safety_supported boolean not null default false,
+  gender text,
   active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()

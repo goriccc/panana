@@ -142,7 +142,7 @@ export function AirportChatClient() {
   const [mood, setMood] = useState("");
   const [characterType, setCharacterType] = useState("");
   const [birth, setBirth] = useState("");
-  const [gender, setGender] = useState<Gender>("private");
+  const [gender, setGender] = useState<Gender | null>(null);
   const [saving, setSaving] = useState(false);
 
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
@@ -359,12 +359,22 @@ export function AirportChatClient() {
               </button>
               <button
                 type="button"
-                disabled={saving || (step === 1 ? !purpose : step === 2 ? !mood : step === 3 ? !characterType : birth.length !== 8)}
+                disabled={
+                  saving ||
+                  (step === 1
+                    ? !purpose
+                    : step === 2
+                      ? !mood
+                      : step === 3
+                        ? !characterType
+                        : birth.length !== 8 || !gender)
+                }
                 onClick={async () => {
                   if (step < 4) {
                     setStep((s) => ((s + 1) as any));
                     return;
                   }
+                  if (!gender) return;
 
                   setSaving(true);
                   try {

@@ -30,6 +30,7 @@ type PublicCategoryCardRow = {
   tags: string[] | null;
   character_profile_image_url: string | null;
   safety_supported?: boolean | null;
+  gender?: "male" | "female" | null;
 };
 
 type PublicCharacterRow = {
@@ -67,19 +68,19 @@ export async function fetchHomeCategoriesFromDb(): Promise<Category[] | null> {
     const res = await supabase
       .from("panana_public_category_cards_v")
       .select(
-        "category_slug, category_title, category_sort_order, item_sort_order, character_slug, author_handle, title, description, tags, character_profile_image_url, safety_supported"
+        "category_slug, category_title, category_sort_order, item_sort_order, character_slug, author_handle, title, description, tags, character_profile_image_url, safety_supported, gender"
       )
       .order("category_sort_order", { ascending: true })
       .order("item_sort_order", { ascending: true });
     cards = res.data as any;
     cardsErr = res.error;
   }
-  // 하위호환: safety_supported 컬럼/뷰가 아직 없을 수 있음 → fallback select
+  // 하위호환: safety_supported/gender 컬럼/뷰가 아직 없을 수 있음 → fallback select
   if (cardsErr) {
     const msg = String(cardsErr?.message || "");
-    if (msg.includes("safety_supported")) {
+    if (msg.includes("safety_supported") || msg.includes("gender")) {
       console.warn(
-        "[contentServer] safety_supported unavailable on panana_public_category_cards_v. Run docs/panana-admin/PUBLIC_VIEWS.sql (and migration) to expose/grant the column."
+        "[contentServer] safety_supported/gender unavailable on panana_public_category_cards_v. Run docs/panana-admin/PUBLIC_VIEWS.sql (and migration) to expose/grant the column."
       );
       const retry = await supabase
         .from("panana_public_category_cards_v")
@@ -111,6 +112,7 @@ export async function fetchHomeCategoriesFromDb(): Promise<Category[] | null> {
       tags: (r.tags || []).map((t) => (t.startsWith("#") ? t : `#${t}`)),
       imageUrl: r.character_profile_image_url || undefined,
       safetySupported: Boolean((r as any)?.safety_supported),
+      gender: (r as any)?.gender ?? null,
     });
     bySlug.set(r.category_slug, arr);
   });
@@ -124,14 +126,14 @@ export async function fetchHomeCategoriesFromDb(): Promise<Category[] | null> {
     const [safeRes, normalRes] = await Promise.all([
       client
         .from("panana_characters")
-        .select("slug, name, tagline, profile_image_url, handle, hashtags, safety_supported")
+        .select("slug, name, tagline, profile_image_url, handle, hashtags, safety_supported, gender")
         .eq("active", true)
         .eq("safety_supported", true)
         .order("created_at", { ascending: false })
         .limit(12),
       client
         .from("panana_characters")
-        .select("slug, name, tagline, profile_image_url, handle, hashtags, safety_supported")
+        .select("slug, name, tagline, profile_image_url, handle, hashtags, safety_supported, gender")
         .eq("active", true)
         .eq("safety_supported", false)
         .order("created_at", { ascending: false })
@@ -147,6 +149,7 @@ export async function fetchHomeCategoriesFromDb(): Promise<Category[] | null> {
         tags: (r.hashtags || []).map((t: string) => (t.startsWith("#") ? t : `#${t}`)),
         imageUrl: r.profile_image_url || undefined,
         safetySupported: Boolean(r.safety_supported),
+        gender: (r as any)?.gender ?? null,
       }));
     newestItems = [...toItems(safeRes.data || [], 0), ...toItems(normalRes.data || [], 12)];
   }
@@ -176,14 +179,14 @@ export async function fetchCategoryFromDb(slug: string): Promise<Category | null
     const [safeRes, normalRes] = await Promise.all([
       client
         .from("panana_characters")
-        .select("slug, name, tagline, profile_image_url, handle, hashtags, safety_supported")
+        .select("slug, name, tagline, profile_image_url, handle, hashtags, safety_supported, gender")
         .eq("active", true)
         .eq("safety_supported", true)
         .order("created_at", { ascending: false })
         .limit(12),
       client
         .from("panana_characters")
-        .select("slug, name, tagline, profile_image_url, handle, hashtags, safety_supported")
+        .select("slug, name, tagline, profile_image_url, handle, hashtags, safety_supported, gender")
         .eq("active", true)
         .eq("safety_supported", false)
         .order("created_at", { ascending: false })
@@ -199,6 +202,7 @@ export async function fetchCategoryFromDb(slug: string): Promise<Category | null
         tags: (r.hashtags || []).map((t: string) => (t.startsWith("#") ? t : `#${t}`)),
         imageUrl: r.profile_image_url || undefined,
         safetySupported: Boolean(r.safety_supported),
+        gender: (r as any)?.gender ?? null,
       }));
     const items: ContentCardItem[] = [
       ...toItems(safeRes.data || [], 0),
@@ -212,7 +216,7 @@ export async function fetchCategoryFromDb(slug: string): Promise<Category | null
   {
     const res = await supabase
       .from("panana_public_category_cards_v")
-      .select("category_slug, item_sort_order, character_slug, author_handle, title, description, tags, character_profile_image_url, safety_supported")
+      .select("category_slug, item_sort_order, character_slug, author_handle, title, description, tags, character_profile_image_url, safety_supported, gender")
       .eq("category_slug", slug)
       .order("item_sort_order", { ascending: true });
     cards = res.data as any;
@@ -220,9 +224,9 @@ export async function fetchCategoryFromDb(slug: string): Promise<Category | null
   }
   if (cardsErr) {
     const msg = String(cardsErr?.message || "");
-    if (msg.includes("safety_supported")) {
+    if (msg.includes("safety_supported") || msg.includes("gender")) {
       console.warn(
-        "[contentServer] safety_supported unavailable on panana_public_category_cards_v. Run docs/panana-admin/PUBLIC_VIEWS.sql (and migration) to expose/grant the column."
+        "[contentServer] safety_supported/gender unavailable on panana_public_category_cards_v. Run docs/panana-admin/PUBLIC_VIEWS.sql (and migration) to expose/grant the column."
       );
       const retry = await supabase
         .from("panana_public_category_cards_v")
@@ -249,6 +253,7 @@ export async function fetchCategoryFromDb(slug: string): Promise<Category | null
     tags: (r.tags || []).map((t) => (t.startsWith("#") ? t : `#${t}`)),
     imageUrl: r.character_profile_image_url || undefined,
     safetySupported: Boolean((r as any)?.safety_supported),
+    gender: (r as any)?.gender ?? null,
   }));
 
   return { slug: String(cat.slug), name: String((cat as any).title), items };

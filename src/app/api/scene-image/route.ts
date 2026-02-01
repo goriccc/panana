@@ -35,11 +35,26 @@ function getSupabaseAnon() {
 
 async function getSceneImageSettings(sb: SupabaseClient) {
   try {
-    const { data, error } = await sb
-      .from("panana_public_site_settings_v")
+    const tableRes = await sb
+      .from("panana_site_settings")
       .select("scene_image_enabled, scene_image_daily_limit, scene_image_model, scene_image_steps, scene_image_vision_cache_minutes")
+      .order("updated_at", { ascending: false })
       .limit(1)
       .maybeSingle();
+    let data = tableRes.data as any;
+    let error = tableRes.error as any;
+    if (error) {
+      const msg = String((error as any)?.message || "");
+      if (msg.includes("permission denied") || msg.includes("does not exist") || msg.includes("column")) {
+        const { data: viewData, error: viewError } = await sb
+          .from("panana_public_site_settings_v")
+          .select("scene_image_enabled, scene_image_daily_limit, scene_image_model, scene_image_steps, scene_image_vision_cache_minutes")
+          .limit(1)
+          .maybeSingle();
+        data = viewData as any;
+        error = viewError as any;
+      }
+    }
     if (error) {
       const msg = String((error as any)?.message || "");
       if (msg.includes("scene_image") || msg.includes("permission denied") || msg.includes("column")) {

@@ -26,6 +26,7 @@ type CharacterRow = {
   postsCount: number;
   studioCharacterId: string | null;
   safetySupported: boolean; // 세이프티 지원(성인 대화 가능)
+  gender: "female" | "male" | null;
   active: boolean;
   categoryIds: string[]; // 홈 카테고리 노출 연결 (FK)
   adminNotes: string; // 어드민 내부 운영 메모(비공개)
@@ -67,6 +68,7 @@ export default function AdminCharactersPage() {
   const [categoryIds, setCategoryIds] = useState<string[]>([]);
   const [notes, setNotes] = useState("");
   const [safetySupported, setSafetySupported] = useState(false);
+  const [gender, setGender] = useState<"female" | "male" | "">("");
 
   const [studioPreview, setStudioPreview] = useState<{
     character?: {
@@ -93,6 +95,7 @@ export default function AdminCharactersPage() {
   const [uploading, setUploading] = useState(false);
   const [missingAdminNotesColumn, setMissingAdminNotesColumn] = useState(false);
   const [missingSafetySupportedColumn, setMissingSafetySupportedColumn] = useState(false);
+  const [missingGenderColumn, setMissingGenderColumn] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
@@ -201,6 +204,7 @@ export default function AdminCharactersPage() {
         "studio_character_id",
         "active",
         ...(missingSafetySupportedColumn ? [] : ["safety_supported"]),
+        ...(missingGenderColumn ? [] : ["gender"]),
       ].join(", ");
       const charSelect = missingAdminNotesColumn ? baseCharSelect : `${baseCharSelect}, admin_notes`;
 
@@ -234,8 +238,39 @@ export default function AdminCharactersPage() {
           code === "42703" ||
           msg.includes("safety_supported") ||
           (msg.includes("column") && msg.includes("safety_supported") && msg.includes("does not exist"));
+        const missingGender =
+          code === "42703" ||
+          msg.includes("gender") ||
+          (msg.includes("column") && msg.includes("gender") && msg.includes("does not exist"));
 
-        if (missingSafety && !missingSafetySupportedColumn) {
+        if (missingGender && !missingGenderColumn) {
+          setMissingGenderColumn(true);
+          const baseRetry = [
+            "id",
+            "slug",
+            "name",
+            "tagline",
+            "handle",
+            "hashtags",
+            "mbti",
+            "intro_title",
+            "intro_lines",
+            "mood_title",
+            "mood_lines",
+            "followers_count",
+            "following_count",
+            "profile_image_url",
+            "posts_count",
+            "studio_character_id",
+            "active",
+            ...(missingSafetySupportedColumn ? [] : ["safety_supported"]),
+          ].join(", ");
+          const retrySelect = missingAdminNotesColumn ? baseRetry : `${baseRetry}, admin_notes`;
+          const retry = await supabase.from("panana_characters").select(retrySelect).order("updated_at", { ascending: false });
+          if (retry.error) throw retry.error;
+          charRes = retry as any;
+          setErr("DB에 gender 컬럼이 없어요. `docs/panana-admin/MIGRATE_CHARACTER_GENDER.sql` 실행 후 성별 설정이 활성화됩니다.");
+        } else if (missingSafety && !missingSafetySupportedColumn) {
           setMissingSafetySupportedColumn(true);
           // retry with safety_supported omitted
           const baseRetry = [
@@ -256,6 +291,7 @@ export default function AdminCharactersPage() {
             "posts_count",
             "studio_character_id",
             "active",
+            ...(missingGenderColumn ? [] : ["gender"]),
           ].join(", ");
           const retrySelect = missingAdminNotesColumn ? baseRetry : `${baseRetry}, admin_notes`;
           const retry = await supabase.from("panana_characters").select(retrySelect).order("updated_at", { ascending: false });
@@ -305,6 +341,7 @@ export default function AdminCharactersPage() {
         postsCount: Number(r.posts_count || 0),
         studioCharacterId: r.studio_character_id || null,
         safetySupported: Boolean(r.safety_supported),
+        gender: r.gender === "female" || r.gender === "male" ? r.gender : null,
         active: Boolean(r.active),
         categoryIds: map.get(r.id) || [],
         adminNotes: r.admin_notes || "",
@@ -353,6 +390,7 @@ export default function AdminCharactersPage() {
       setCategoryIds([]);
       setNotes("");
       setSafetySupported(false);
+      setGender("");
       setStudioPreview(null);
       setStudioAutofilled({});
       return;
@@ -376,6 +414,7 @@ export default function AdminCharactersPage() {
     setCategoryIds(selected.categoryIds || []);
     setNotes(selected.adminNotes || "");
     setSafetySupported(Boolean(selected.safetySupported));
+    setGender(selected.gender || "");
     setStudioPreview(null);
     setStudioAutofilled({});
   }, [selectedId, selected]);
@@ -906,6 +945,31 @@ export default function AdminCharactersPage() {
               />
 
               <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                <div className="text-[12px] font-extrabold text-white/70">성별</div>
+                <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/15 px-4 py-3">
+                  <div className="min-w-0">
+                    <div className="text-[12px] font-semibold text-white/70">캐릭터 성별을 선택하세요</div>
+                    <div className="mt-1 text-[11px] font-semibold text-white/35">입국심사 성별 기반 노출에 사용됩니다.</div>
+                  </div>
+                  <select
+                    value={gender}
+                    onChange={(e) => setGender(e.target.value as any)}
+                    disabled={missingGenderColumn}
+                    className="rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-[12px] font-semibold text-white/80 outline-none"
+                  >
+                    <option value="">선택 안 함</option>
+                    <option value="female">여성</option>
+                    <option value="male">남성</option>
+                  </select>
+                </div>
+                {missingGenderColumn ? (
+                  <div className="mt-2 text-[11px] font-semibold text-[#ff9aa1]">
+                    DB 컬럼이 없어서 비활성화돼요. `docs/panana-admin/MIGRATE_CHARACTER_GENDER.sql` 실행 후 다시 시도해주세요.
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
                 <div className="text-[12px] font-extrabold text-white/70">스파이시(성인 전용) 지원</div>
                 <div className="mt-3 flex items-center justify-between rounded-xl border border-white/10 bg-black/15 px-4 py-3">
                   <div className="min-w-0">
@@ -952,6 +1016,7 @@ export default function AdminCharactersPage() {
                         posts_count: Number(postsCount) || 0,
                         studio_character_id: studioCharacterId || null,
                         ...(missingSafetySupportedColumn ? {} : { safety_supported: Boolean(safetySupported) }),
+                        ...(missingGenderColumn ? {} : { gender: gender || null }),
                       };
                       const patchWithNotes = { ...patch, admin_notes: notes.trim() || null } as any;
 
@@ -1108,6 +1173,7 @@ export default function AdminCharactersPage() {
                 profile_image_url: "",
                 posts_count: 0,
                 active: false,
+                ...(missingGenderColumn ? {} : { gender: null }),
               })
               .select("id")
               .single();
