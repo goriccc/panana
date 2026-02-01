@@ -974,26 +974,6 @@ export function HomeClient({
                   </div>
 
                   <div className="mt-4">
-                    {isNew(cat.slug, cat.name) ? (
-                      <div className="grid grid-cols-2 gap-3">
-                        {(displayItems.slice(0, 4)).map((it) => {
-                          const isPriority = cardIndexRef.current++ < 12;
-                          return (
-                            <ContentCard
-                              key={it.id}
-                              author={it.author}
-                              title={it.title}
-                              description={it.description}
-                              tags={it.tags}
-                              imageUrl={it.imageUrl}
-                              href={`/c/${it.characterSlug}`}
-                              onClick={() => trackBehavior("click", it.tags || [])}
-                              priority={isPriority}
-                            />
-                          );
-                        })}
-                      </div>
-                    ) : (
                     <div className="hide-scrollbar flex snap-x snap-mandatory gap-0 overflow-x-auto pb-2">
                     {chunkItems(displayItems, 4).map((group, idx) => (
                       <div key={`${cat.slug}-${idx}`} className="w-full shrink-0 snap-start">
@@ -1018,7 +998,6 @@ export function HomeClient({
                       </div>
                     ))}
                     </div>
-                    )}
                   </div>
                   {!isForYou(cat.slug, cat.name) && !isPopular(cat.slug, cat.name) && !isNew(cat.slug, cat.name) ? (
                     <div ref={setCategorySentinel(cat.slug)} data-slug={cat.slug} className="h-1 w-full" />
