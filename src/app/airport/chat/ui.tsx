@@ -383,6 +383,9 @@ export function AirportChatClient() {
 
                     // Step4: 마이페이지 계정설정과 동일 데이터로 저장
                     await updateMyAccountInfo({ birth, gender });
+                    try {
+                      localStorage.setItem("panana_user_gender", gender);
+                    } catch {}
 
                     // Step1~3: 공항 응답 저장
                     await fetch("/api/me/airport-response", {
