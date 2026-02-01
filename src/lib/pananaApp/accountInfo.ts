@@ -45,19 +45,23 @@ export async function fetchMyAccountInfo(): Promise<AccountInfo | null> {
     const pananaId = String(idt.id || "").trim();
     const key = cacheKey(pananaId);
     let resetAt: string | null = null;
+    let refreshAt: string | null = null;
     if (typeof window !== "undefined") {
       try {
         resetAt = localStorage.getItem("panana_account_info_reset_at");
+        refreshAt = localStorage.getItem("panana_account_info_refresh_at");
       } catch {}
     }
     const resetAtNum = resetAt ? Number(resetAt) : NaN;
+    const refreshAtNum = refreshAt ? Number(refreshAt) : NaN;
     const shouldBypassCache =
-      Number.isFinite(resetAtNum) && resetAtNum > 0 && Date.now() - resetAtNum < 2 * 60 * 1000;
+      (Number.isFinite(resetAtNum) && resetAtNum > 0 && Date.now() - resetAtNum < 2 * 60 * 1000) ||
+      (Number.isFinite(refreshAtNum) && refreshAtNum > 0 && Date.now() - refreshAtNum < 10 * 1000);
     const cached = shouldBypassCache ? null : getCached(key);
     if (cached) return cached;
 
     const qs = pananaId ? `?pananaId=${encodeURIComponent(pananaId)}` : "";
-    const bust = shouldBypassCache ? `${qs ? "&" : "?"}ts=${resetAt}` : "";
+    const bust = shouldBypassCache ? `${qs ? "&" : "?"}ts=${refreshAt || resetAt}` : "";
     const res = await fetch(`/api/me/account-info${qs}${bust}`, {
       method: "GET",
       cache: shouldBypassCache ? "no-store" : "default",
@@ -71,6 +75,7 @@ export async function fetchMyAccountInfo(): Promise<AccountInfo | null> {
     if (shouldBypassCache && typeof window !== "undefined") {
       try {
         localStorage.removeItem("panana_account_info_reset_at");
+        localStorage.removeItem("panana_account_info_refresh_at");
       } catch {}
     }
     return info;
@@ -95,6 +100,11 @@ export async function updateMyAccountInfo(patch: Partial<AccountInfo>): Promise<
     const data = await res.json().catch(() => null);
     if (!res.ok || !data?.ok) return { ok: false, error: String(data?.error || "저장에 실패했어요.") };
     invalidateAccountInfoCache();
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem("panana_account_info_refresh_at", String(Date.now()));
+      } catch {}
+    }
     return { ok: true };
   } catch (e: any) {
     return { ok: false, error: e?.message || "저장에 실패했어요." };
