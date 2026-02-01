@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchMyUserProfile } from "@/lib/pananaApp/userProfiles";
@@ -132,11 +131,15 @@ function Bubble({
             className="relative h-7 w-7 flex-none overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10 transition-opacity hover:opacity-80 active:opacity-70"
             aria-label="프로필 이미지 크게 보기"
           >
-            <Image src={avatarUrl} alt="" fill sizes="28px" className="rounded-full object-cover" />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={avatarUrl} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
           </button>
         ) : (
           <div className="relative h-7 w-7 flex-none overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10">
-            {avatarUrl ? <Image src={avatarUrl} alt="" fill sizes="28px" className="rounded-full object-cover" /> : null}
+            {avatarUrl ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img src={avatarUrl} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+            ) : null}
           </div>
         )}
         <div className="flex flex-col gap-2">
@@ -237,11 +240,15 @@ function TypingDots({ avatarUrl, onAvatarClick }: { avatarUrl?: string; onAvatar
             className="relative h-7 w-7 flex-none overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10 transition-opacity hover:opacity-80 active:opacity-70"
             aria-label="프로필 이미지 크게 보기"
           >
-            <Image src={avatarUrl} alt="" fill sizes="28px" className="rounded-full object-cover" />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={avatarUrl} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
           </button>
         ) : (
           <div className="relative h-7 w-7 flex-none overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10">
-            {avatarUrl ? <Image src={avatarUrl} alt="" fill sizes="28px" className="rounded-full object-cover" /> : null}
+            {avatarUrl ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img src={avatarUrl} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+            ) : null}
           </div>
         )}
         <div className="rounded-[22px] rounded-bl-[10px] bg-white/[0.06] px-4 py-3 text-[14px] font-semibold leading-[1.45] text-white/80">

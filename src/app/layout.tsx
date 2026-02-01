@@ -4,8 +4,12 @@ import { ConditionalFooter } from "@/app/_components/ConditionalFooter";
 import { AuthSessionProvider } from "@/app/_components/AuthSessionProvider";
 import { PananaIdentityInit } from "@/app/_components/PananaIdentityInit";
 
+const siteUrl =
+  process.env.NEXT_PUBLIC_SITE_URL ||
+  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://panana-one.vercel.app");
+
 export const metadata: Metadata = {
-  metadataBase: new URL("https://panana.local"),
+  metadataBase: new URL(siteUrl),
   icons: {
     icon: [
       { url: "/Favicon16.svg", sizes: "16x16", type: "image/svg+xml" },

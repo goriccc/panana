@@ -100,12 +100,12 @@ export function CharacterClient({
               onMouseEnter={() => router.prefetch(`/c/${character.slug}/profile-image`)}
             >
               {character.profileImageUrl ? (
-                <Image
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
                   src={character.profileImageUrl}
                   alt={`${character.name} 프로필`}
-                  fill
-                  sizes="56px"
-                  className="object-cover"
+                  className="h-full w-full object-cover"
+                  referrerPolicy="no-referrer"
                 />
               ) : null}
             </Link>
