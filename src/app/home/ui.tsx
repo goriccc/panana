@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { HomeHeader } from "@/components/HomeHeader";
 import { AlertModal } from "@/components/AlertModal";
 import { ContentCard } from "@/components/ContentCard";
@@ -46,16 +46,17 @@ export function HomeClient({
   initialRecommendationSettings?: RecommendationSettings;
 }) {
   const router = useRouter();
-  // localStorage에서 즉시 읽어와서 초기 상태 설정 (깜빡임 방지)
-  const [safetyOn, setSafetyOn] = useState(() => {
-    if (typeof window === "undefined") return false;
-    try {
-      return localStorage.getItem("panana_safety_on") === "1";
-    } catch {
-      return false;
-    }
-  });
+  const [safetyOn, setSafetyOn] = useState(false);
   const [adultVerified, setAdultVerified] = useState(false);
+
+  // localStorage에서 읽어 페인트 전에 동기화 (뒤로가기 시 OFF→ON 깜빡임 방지)
+  useLayoutEffect(() => {
+    try {
+      if (typeof window !== "undefined" && localStorage.getItem("panana_safety_on") === "1") {
+        setSafetyOn(true);
+      }
+    } catch {}
+  }, []);
   const [adultLoading, setAdultLoading] = useState(true);
   const [adultModalOpen, setAdultModalOpen] = useState(false);
   const effectiveSafetyOn = safetyOn && adultVerified;
