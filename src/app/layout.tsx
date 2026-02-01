@@ -5,8 +5,7 @@ import { AuthSessionProvider } from "@/app/_components/AuthSessionProvider";
 import { PananaIdentityInit } from "@/app/_components/PananaIdentityInit";
 
 const siteUrl =
-  process.env.NEXT_PUBLIC_SITE_URL ||
-  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://panana-one.vercel.app");
+  process.env.NEXT_PUBLIC_SITE_URL || "https://panana-one.vercel.app";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
