@@ -134,6 +134,29 @@ function getEnvKey(provider: "anthropic" | "gemini" | "deepseek") {
   return process.env.DEEPSEEK_API_KEY || "";
 }
 
+/** 대화 깊이/맥락 복잡도에 따라 Gemini Flash(가벼운 대화) vs Pro(복잡·정교한 서사) 자동 선택 */
+function selectGeminiModel(
+  messages: Array<{ role: string; content: string }>,
+  system: string
+): string {
+  const totalChars =
+    (system?.length || 0) + (messages || []).reduce((sum, m) => sum + (m?.content?.length || 0), 0);
+  const msgCount = (messages || []).length;
+  const lastAssistant = [...(messages || [])]
+    .reverse()
+    .find((m) => m.role === "assistant")
+    ?.content?.length || 0;
+  if (totalChars > 8000 || msgCount > 12 || lastAssistant > 500) return "gemini-2.5-pro";
+  return "gemini-2.5-flash";
+}
+
+function toGeminiApiModel(displayOrApi: string): string {
+  const v = String(displayOrApi || "").trim().toLowerCase();
+  if (v.includes("2.5-pro") || v.includes("pro")) return "gemini-2.5-pro";
+  if (v.includes("2.5-flash") || v.includes("flash")) return "gemini-2.5-flash";
+  return v.startsWith("gemini-") ? v : "gemini-2.5-flash";
+}
+
 async function callAnthropic(args: {
   apiKey: string;
   model: string;
@@ -501,7 +524,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const model =
+    let model =
       body.model ||
       settings?.model ||
       (body.provider === "anthropic"
@@ -689,6 +712,16 @@ export async function POST(req: Request) {
     }
 
     let out: { text: string; raw?: any; meta?: any };
+
+    // Gemini: 대화 복잡도에 따라 Flash(가벼운 대화) vs Pro(복잡·정교한 서사) 자동 선택. body.model 있으면 그대로 사용.
+    if (body.provider === "gemini") {
+      model = body.model
+        ? toGeminiApiModel(body.model)
+        : selectGeminiModel(
+            nonSystemInterpolated.map((m) => ({ role: m.role, content: m.content })),
+            system || ""
+          );
+    }
 
     if (body.provider === "anthropic") {
       out = await callAnthropic({
