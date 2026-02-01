@@ -319,7 +319,7 @@ export type MenuVisibility = {
 };
 
 export async function fetchMenuVisibilityFromDb(): Promise<MenuVisibility> {
-  const supabase = getSupabaseServer();
+  const supabase = getSupabaseAdmin() || getSupabaseServer();
   const defaultVisibility: MenuVisibility = {
     my: true,
     home: true,
@@ -347,7 +347,7 @@ export async function fetchMenuVisibilityFromDb(): Promise<MenuVisibility> {
 }
 
 export async function fetchRecommendationSettingsFromDb(): Promise<RecommendationSettings> {
-  const supabase = getSupabaseServer();
+  const supabase = getSupabaseAdmin() || getSupabaseServer();
   const { data, error } = await supabase
     .from("panana_public_site_settings_v")
     .select("recommendation_settings")
