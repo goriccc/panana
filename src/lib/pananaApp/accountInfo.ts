@@ -30,7 +30,7 @@ function setCached(key: string, data: AccountInfo): void {
   memoryCache = { key, entry: { data, at: Date.now() } };
 }
 
-function invalidateAccountInfoCache(): void {
+export function invalidateAccountInfoCache(): void {
   memoryCache = null;
 }
 

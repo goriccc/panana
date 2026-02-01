@@ -44,6 +44,16 @@ function newGenderCacheMetaKey(preferredGender: CharacterGender | null, safetyOn
   return `panana_home_category_cache:new:${preferredGender}:${safetyOn ? "1" : "0"}:source`;
 }
 
+function categoryCacheKey(
+  slug: string,
+  preferredGender: CharacterGender | null,
+  userGender: Gender | null,
+  safetyOn: boolean
+) {
+  const genderKey = preferredGender ? `pref:${preferredGender}` : "mix";
+  return `panana_home_category_cache:${slug}:${genderKey}:${safetyOn ? "1" : "0"}`;
+}
+
 function mixByGender(items: ContentCardItem[], seed: number): ContentCardItem[] {
   const male: ContentCardItem[] = [];
   const female: ContentCardItem[] = [];
@@ -319,7 +329,8 @@ export function CategoryClient({ category }: { category: Category }) {
       return;
     }
     try {
-      const raw = localStorage.getItem(`panana_home_category_cache:${category.slug}`);
+      const cacheKey = categoryCacheKey(category.slug, preferredGender, userGender, effectiveSafetyOn);
+      const raw = localStorage.getItem(cacheKey);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length) {

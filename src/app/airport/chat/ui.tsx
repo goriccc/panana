@@ -52,24 +52,24 @@ function RadioOptionRow({ active, label, onClick }: { active: boolean; label: st
       type="button"
       onClick={onClick}
       className={[
-        "flex w-full items-center gap-4 rounded-2xl bg-white/[0.04] px-5 py-3 text-left transition",
+        "flex w-full items-center gap-3 rounded-2xl bg-white/[0.04] px-4 py-2 text-left transition",
         active ? "bg-white/[0.055]" : "hover:bg-white/[0.06]",
       ].join(" ")}
     >
       <span
         className={[
-          "grid h-7 w-7 place-items-center rounded-full ring-2 transition",
+          "grid h-5 w-5 place-items-center rounded-full ring-2 transition",
           active ? "ring-panana-pink bg-panana-pink/10" : "ring-white/25",
         ].join(" ")}
         aria-hidden="true"
       >
         {active ? (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
             <path d="M20 6L9 17l-5-5" stroke="rgba(255,77,167,0.98)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         ) : null}
       </span>
-      <span className="text-[15px] font-semibold tracking-[-0.01em] text-white/85">{label}</span>
+      <span className="text-[14px] font-semibold tracking-[-0.01em] text-white/85">{label}</span>
     </button>
   );
 }
@@ -278,7 +278,7 @@ export function AirportChatClient() {
             {introText}
           </div>
 
-          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
             <div className="flex items-start gap-3">
               {/* avatar (outside bubble) */}
               <div className="mt-[2px] h-9 w-9 overflow-hidden rounded-full ring-1 ring-white/15 bg-black/30 shrink-0">
@@ -308,7 +308,7 @@ export function AirportChatClient() {
               </div>
             </div>
 
-            <div className="mt-4 space-y-3">
+            <div className="mt-3 space-y-2">
               {step === 1
                 ? purposeOptions.map((o) => (
                     <RadioOptionRow key={o.value} active={purpose === o.value} label={o.label} onClick={() => setPurpose(o.value)} />
@@ -328,19 +328,19 @@ export function AirportChatClient() {
                       ))
                     : (
                         <>
-                        <div className="space-y-3">
+                        <div className="space-y-2">
                           <RadioOptionRow active={gender === "female"} label="여성" onClick={() => setGender("female")} />
                           <RadioOptionRow active={gender === "male"} label="남성" onClick={() => setGender("male")} />
                           <RadioOptionRow active={gender === "both"} label="둘 다" onClick={() => setGender("both")} />
                           <RadioOptionRow active={gender === "private"} label="공개 안 함" onClick={() => setGender("private")} />
                         </div>
                         <div className="mt-8">
-                          <div className="text-center text-[11px] font-semibold text-white/40">생년월일은 8자리 숫자로 입력해 주세요 (YYYYMMDD)</div>
+                          <div className="text-center text-[10px] font-semibold text-white/40">생년월일은 8자리 숫자로 입력해 주세요 (YYYYMMDD)</div>
                           <input
                             value={birth}
                             onChange={(e) => setBirth(e.target.value.replace(/[^\d]/g, "").slice(0, 8))}
                             inputMode="numeric"
-                            className="mt-3 w-full rounded-2xl bg-white/[0.04] px-5 py-4 text-center text-[16px] font-semibold text-white/90 outline-none placeholder:text-white/25"
+                            className="mt-2 w-full rounded-2xl bg-white/[0.04] px-4 py-3 text-center text-[15px] font-semibold text-white/90 outline-none placeholder:text-white/25"
                             placeholder="YYYYMMDD"
                           />
                         </div>
@@ -348,11 +348,11 @@ export function AirportChatClient() {
                       )}
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-3">
+            <div className="mt-3 grid grid-cols-2 gap-3">
               <button
                 type="button"
                 onClick={() => setStep((s) => (s > 1 ? ((s - 1) as any) : s))}
-                className="w-full rounded-2xl bg-white px-5 py-4 text-center text-[15px] font-semibold text-black disabled:opacity-60"
+                className="w-full rounded-2xl bg-white px-4 py-3 text-center text-[14px] font-semibold text-black disabled:opacity-60"
                 disabled={step === 1 || saving}
               >
                 이전
@@ -397,7 +397,7 @@ export function AirportChatClient() {
                     setSaving(false);
                   }
                 }}
-                className="w-full rounded-2xl bg-panana-pink px-5 py-4 text-center text-[15px] font-semibold text-white disabled:opacity-40"
+                className="w-full rounded-2xl bg-panana-pink px-4 py-3 text-center text-[14px] font-semibold text-white disabled:opacity-40"
               >
                 {saving ? "저장 중..." : "다음"}
               </button>

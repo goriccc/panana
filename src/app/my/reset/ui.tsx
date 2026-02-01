@@ -5,6 +5,7 @@ import { PillToast, type PillToastType } from "@/components/PillToast";
 import { SurfaceCard } from "@/components/SurfaceCard";
 import { TopBar } from "@/components/TopBar";
 import { ensurePananaIdentity } from "@/lib/pananaApp/identity";
+import { invalidateAccountInfoCache } from "@/lib/pananaApp/accountInfo";
 
 function ResetConfirmModal({
   open,
@@ -204,6 +205,7 @@ export function ResetClient() {
             // 로컬 정리
             clearLocalChatData(pananaId);
             clearLocalHomeGenderCache();
+            invalidateAccountInfoCache();
 
             if (open === "service") {
               // 서비스 이용 초기화: 입국심사부터 다시

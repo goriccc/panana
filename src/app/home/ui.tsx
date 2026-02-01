@@ -136,6 +136,16 @@ function filterByPreferredGender(items: ContentCardItem[], preferred: CharacterG
   return items.filter((it) => getCharacterGender(it) === preferred);
 }
 
+function categoryCacheKey(
+  slug: string,
+  preferredGender: CharacterGender | null,
+  userGender: Gender | null,
+  safetyOn: boolean
+) {
+  const genderKey = preferredGender ? `pref:${preferredGender}` : "mix";
+  return `panana_home_category_cache:${slug}:${genderKey}:${safetyOn ? "1" : "0"}`;
+}
+
 export function HomeClient({
   categories,
   initialSafetyOn,
@@ -786,7 +796,7 @@ export function HomeClient({
       topCategories.forEach((cat) => {
         const items = categoryItemsBySlug[cat.slug] || cat.items || [];
         if (cat.slug !== "new") {
-          const cacheKey = `panana_home_category_cache:${cat.slug}`;
+          const cacheKey = categoryCacheKey(cat.slug, preferredGender, userGender, effectiveSafetyOn);
           if (!preferredGender || hasGenderData(items)) {
             localStorage.setItem(cacheKey, JSON.stringify(items));
           } else {
