@@ -84,8 +84,17 @@ function clearLocalHomeGenderCache() {
     localStorage.removeItem("panana_user_gender");
     localStorage.removeItem("panana_gender_shuffle_seed");
     localStorage.removeItem("panana_airport_draft");
+    localStorage.setItem("panana_account_info_reset_at", String(Date.now()));
   } catch {}
   clearLocalByPrefix("panana_home_category_cache");
+}
+
+function clearLocalRecommendationCache() {
+  try {
+    localStorage.removeItem("panana_reco_cache_v1");
+    localStorage.removeItem("panana_behavior_scores_v1");
+    localStorage.removeItem("panana_reco_ab_v1");
+  } catch {}
 }
 
 export function ResetClient() {
@@ -205,6 +214,7 @@ export function ResetClient() {
             // 로컬 정리
             clearLocalChatData(pananaId);
             clearLocalHomeGenderCache();
+            clearLocalRecommendationCache();
             invalidateAccountInfoCache();
 
             if (open === "service") {

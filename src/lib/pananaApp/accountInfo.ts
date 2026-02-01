@@ -44,13 +44,23 @@ export async function fetchMyAccountInfo(): Promise<AccountInfo | null> {
     const idt = ensurePananaIdentity();
     const pananaId = String(idt.id || "").trim();
     const key = cacheKey(pananaId);
-    const cached = getCached(key);
+    let resetAt: string | null = null;
+    if (typeof window !== "undefined") {
+      try {
+        resetAt = localStorage.getItem("panana_account_info_reset_at");
+      } catch {}
+    }
+    const resetAtNum = resetAt ? Number(resetAt) : NaN;
+    const shouldBypassCache =
+      Number.isFinite(resetAtNum) && resetAtNum > 0 && Date.now() - resetAtNum < 2 * 60 * 1000;
+    const cached = shouldBypassCache ? null : getCached(key);
     if (cached) return cached;
 
     const qs = pananaId ? `?pananaId=${encodeURIComponent(pananaId)}` : "";
-    const res = await fetch(`/api/me/account-info${qs}`, {
+    const bust = shouldBypassCache ? `${qs ? "&" : "?"}ts=${resetAt}` : "";
+    const res = await fetch(`/api/me/account-info${qs}${bust}`, {
       method: "GET",
-      cache: "default",
+      cache: shouldBypassCache ? "no-store" : "default",
     });
     const data = await res.json().catch(() => null);
     if (!res.ok || !data?.ok) return null;
@@ -58,6 +68,11 @@ export async function fetchMyAccountInfo(): Promise<AccountInfo | null> {
     const gender = data.gender ? (String(data.gender) as Gender) : null;
     const info: AccountInfo = { birth, gender };
     setCached(key, info);
+    if (shouldBypassCache && typeof window !== "undefined") {
+      try {
+        localStorage.removeItem("panana_account_info_reset_at");
+      } catch {}
+    }
     return info;
   } catch {
     return null;

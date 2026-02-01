@@ -54,6 +54,13 @@ function categoryCacheKey(
   return `panana_home_category_cache:${slug}:${genderKey}:${safetyOn ? "1" : "0"}`;
 }
 
+function filterKnownGender(items: ContentCardItem[]): ContentCardItem[] {
+  return items.filter((it) => {
+    const g = getCharacterGender(it);
+    return g === "male" || g === "female";
+  });
+}
+
 function mixByGender(items: ContentCardItem[], seed: number): ContentCardItem[] {
   const male: ContentCardItem[] = [];
   const female: ContentCardItem[] = [];
@@ -130,6 +137,7 @@ export function CategoryClient({ category }: { category: Category }) {
     } catch {}
     return true;
   });
+  const [resetGenderHold, setResetGenderHold] = useState(false);
   const [newGenderLoading, setNewGenderLoading] = useState(false);
   const preferredGender = useMemo(() => preferredCharacterGender(userGender), [userGender]);
   const [paging, setPaging] = useState<{ offset: number; hasMore: boolean; loading: boolean }>({
@@ -176,10 +184,31 @@ export function CategoryClient({ category }: { category: Category }) {
       .finally(() => {
         if (!alive) return;
         setUserGenderLoading(false);
+        setResetGenderHold(false);
       });
     return () => {
       alive = false;
     };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const resetAt = localStorage.getItem("panana_account_info_reset_at");
+      const ts = resetAt ? Number(resetAt) : NaN;
+      if (!Number.isFinite(ts) || ts <= 0 || Date.now() - ts > 2 * 60 * 1000) return;
+      const raw = localStorage.getItem("panana_user_gender");
+      if (raw === "female" || raw === "male" || raw === "both" || raw === "private") return;
+      const draftRaw = localStorage.getItem("panana_airport_draft");
+      if (draftRaw) {
+        const draft = JSON.parse(draftRaw);
+        const g = String(draft?.gender || "");
+        if (g === "female" || g === "male" || g === "both" || g === "private") return;
+      }
+      setResetGenderHold(true);
+    } catch {
+      // ignore
+    }
   }, []);
 
   useEffect(() => {
@@ -214,26 +243,32 @@ export function CategoryClient({ category }: { category: Category }) {
       return s.includes("loved") || n.includes("모두에게");
     };
 
-    if (preferredGender && !hasGenderData(items)) return [];
-
     if (effectiveSafetyOn) {
       const filtered = items.filter((it) => Boolean((it as ContentCardItem).safetySupported));
-      const genderFiltered =
-        preferredGender && hasGenderData(filtered)
-          ? filtered.filter((it) => getCharacterGender(it) === preferredGender)
-          : filtered;
-      if (shouldMixGender && hasGenderData(genderFiltered) && (isForYou(category.slug, category.name) || isPopular(category.slug, category.name))) {
-        return mixByGender(genderFiltered, genderSeed);
+      const genderFiltered = preferredGender
+        ? filtered.filter((it) => getCharacterGender(it) === preferredGender)
+        : filtered;
+    if (
+      shouldMixGender &&
+      hasGenderData(genderFiltered) &&
+      (isForYou(category.slug, category.name) || isPopular(category.slug, category.name) || category.slug === "new")
+    ) {
+        const gendered = filterKnownGender(genderFiltered);
+        return gendered.length ? mixByGender(gendered, genderSeed) : genderFiltered;
       }
       return genderFiltered;
     }
     const filtered = items.filter((it) => !(it as ContentCardItem).safetySupported);
-    const genderFiltered =
-      preferredGender && hasGenderData(filtered)
-        ? filtered.filter((it) => getCharacterGender(it) === preferredGender)
-        : filtered;
-    if (shouldMixGender && hasGenderData(genderFiltered) && (isForYou(category.slug, category.name) || isPopular(category.slug, category.name))) {
-      return mixByGender(genderFiltered, genderSeed);
+    const genderFiltered = preferredGender
+      ? filtered.filter((it) => getCharacterGender(it) === preferredGender)
+      : filtered;
+    if (
+      shouldMixGender &&
+      hasGenderData(genderFiltered) &&
+      (isForYou(category.slug, category.name) || isPopular(category.slug, category.name) || category.slug === "new")
+    ) {
+      const gendered = filterKnownGender(genderFiltered);
+      return gendered.length ? mixByGender(gendered, genderSeed) : genderFiltered;
     }
     return genderFiltered;
   }, [items, effectiveSafetyOn, userGender, category.slug, category.name, genderSeed]);
@@ -458,6 +493,7 @@ export function CategoryClient({ category }: { category: Category }) {
         {!sourceReady ||
         !safetyReady ||
         userGenderLoading ||
+        resetGenderHold ||
         (preferredGender && !hasGenderData(items)) ||
         (category.slug === "new" && preferredGender && newGenderLoading) ||
         (category.slug === "new" && preferredGender && items === initialItemsRef.current) ? (

@@ -132,8 +132,14 @@ function hasGenderData(items: ContentCardItem[]): boolean {
 
 function filterByPreferredGender(items: ContentCardItem[], preferred: CharacterGender | null): ContentCardItem[] {
   if (!preferred) return items;
-  if (!hasGenderData(items)) return items;
   return items.filter((it) => getCharacterGender(it) === preferred);
+}
+
+function filterKnownGender(items: ContentCardItem[]): ContentCardItem[] {
+  return items.filter((it) => {
+    const g = getCharacterGender(it);
+    return g === "male" || g === "female";
+  });
 }
 
 function categoryCacheKey(
@@ -197,6 +203,7 @@ export function HomeClient({
     } catch {}
     return true;
   });
+  const [resetGenderHold, setResetGenderHold] = useState(false);
   const [newGenderLoading, setNewGenderLoading] = useState(false);
   const [genderSeed, setGenderSeed] = useState(1);
 
@@ -212,7 +219,7 @@ export function HomeClient({
 
   // 스파이시 ON일 때 adultVerified 확정 전까지 콘텐츠 숨김 (OFF→ON 깜빡임 완전 방지)
   const safetyReady = !safetyOn || !adultLoading;
-  const genderReady = !userGenderLoading;
+  const genderReady = !userGenderLoading && !resetGenderHold;
   const [adultModalOpen, setAdultModalOpen] = useState(false);
   const effectiveSafetyOn = safetyOn && adultVerified;
   const preferredGender = useMemo(() => preferredCharacterGender(userGender), [userGender]);
@@ -229,7 +236,6 @@ export function HomeClient({
               : !(it as any)?.safetySupported
           );
           if (!preferredGender) return filtered;
-          if (!hasGenderData(filtered)) return filtered;
           return filtered.filter((it) => getCharacterGender(it) === preferredGender);
         })(),
       }))
@@ -294,10 +300,31 @@ export function HomeClient({
       .finally(() => {
         if (!alive) return;
         setUserGenderLoading(false);
+        setResetGenderHold(false);
       });
     return () => {
       alive = false;
     };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const resetAt = localStorage.getItem("panana_account_info_reset_at");
+      const ts = resetAt ? Number(resetAt) : NaN;
+      if (!Number.isFinite(ts) || ts <= 0 || Date.now() - ts > 2 * 60 * 1000) return;
+      const raw = localStorage.getItem("panana_user_gender");
+      if (raw === "female" || raw === "male" || raw === "both" || raw === "private") return;
+      const draftRaw = localStorage.getItem("panana_airport_draft");
+      if (draftRaw) {
+        const draft = JSON.parse(draftRaw);
+        const g = String(draft?.gender || "");
+        if (g === "female" || g === "male" || g === "both" || g === "private") return;
+      }
+      setResetGenderHold(true);
+    } catch {
+      // ignore
+    }
   }, []);
 
   useEffect(() => {
@@ -725,9 +752,10 @@ export function HomeClient({
       if (
         shouldMixGender &&
         hasGenderData(items) &&
-        (isForYou(c.slug, c.name) || isPopular(c.slug, c.name))
+        (isForYou(c.slug, c.name) || isPopular(c.slug, c.name) || isNew(c.slug, c.name))
       ) {
-        items = mixByGender(items, genderSeed);
+        const gendered = filterKnownGender(items);
+        items = gendered.length ? mixByGender(gendered, genderSeed) : items;
       }
 
       return {
