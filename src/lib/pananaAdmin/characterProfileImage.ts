@@ -16,29 +16,28 @@ export function publicUrlFromPath(path: string) {
   return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
 }
 
-function extFromFile(file: File) {
-  const name = String(file.name || "");
-  const idx = name.lastIndexOf(".");
-  if (idx !== -1) return name.slice(idx + 1).toLowerCase();
-  const type = String(file.type || "").toLowerCase();
-  if (type.includes("png")) return "png";
-  if (type.includes("jpeg") || type.includes("jpg")) return "jpg";
-  if (type.includes("webp")) return "webp";
-  if (type.includes("gif")) return "gif";
-  return "png";
-}
-
+/** PNG/JPG 업로드 시 WebP로 변환해 Supabase에 저장 */
 export async function uploadCharacterProfileImage(characterId: string, file: File) {
   const supabase = getBrowserSupabase();
-  const ext = extFromFile(file);
-  const path = `profiles/${characterId}/${Date.now()}.${ext}`;
-  const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
-    upsert: false,
-    contentType: file.type,
-    cacheControl: "86400",
+  const { data: session } = await supabase.auth.getSession();
+  const token = session?.session?.access_token;
+  if (!token) throw new Error("로그인이 필요해요.");
+
+  const form = new FormData();
+  form.append("file", file);
+  form.append("characterId", characterId);
+
+  const base = typeof window !== "undefined" ? window.location.origin : "";
+  const res = await fetch(`${base}/api/admin/character-profile-image`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
   });
-  if (error) throw error;
-  return { path, publicUrl: publicUrlFromPath(path), title: file.name };
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || !json?.ok) {
+    throw new Error(json?.error || `업로드 실패 (${res.status})`);
+  }
+  return { path: json.path, publicUrl: json.publicUrl, title: file.name };
 }
 
 export async function deleteCharacterProfileImageByUrl(url: string) {
