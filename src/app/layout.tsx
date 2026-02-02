@@ -3,6 +3,7 @@ import "./globals.css";
 import { ConditionalFooter } from "@/app/_components/ConditionalFooter";
 import { AuthSessionProvider } from "@/app/_components/AuthSessionProvider";
 import { PananaIdentityInit } from "@/app/_components/PananaIdentityInit";
+import { VisitTracker } from "@/app/_components/VisitTracker";
 
 const siteUrl =
   process.env.NEXT_PUBLIC_SITE_URL || "https://panana-one.vercel.app";
@@ -73,6 +74,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <AuthSessionProvider>
           <PananaIdentityInit />
+          <VisitTracker />
           {children}
           <ConditionalFooter />
         </AuthSessionProvider>

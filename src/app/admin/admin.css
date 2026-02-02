@@ -24,3 +24,14 @@
   background: rgba(255, 255, 255, 0.30);
 }
 
+/* 어드민 select: 배경·글자 대비로 드롭다운 옵션 가독성 (폰트와 배경이 같아서 안 보이는 현상 방지) */
+.admin-scope select {
+  color: #fff;
+  background-color: #0f1014;
+}
+
+.admin-scope select option {
+  background-color: #1a1b22;
+  color: #e5e7eb;
+}
+

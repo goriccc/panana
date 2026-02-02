@@ -94,8 +94,11 @@ async function getTodayUsageCount(sb: SupabaseClient<any>, pananaId: string): Pr
   return count ?? 0;
 }
 
-async function logUsage(sb: SupabaseClient<any>, pananaId: string) {
-  await sb.from("panana_scene_image_log").insert({ panana_id: pananaId } as any);
+async function logUsage(sb: SupabaseClient<any>, pananaId: string, characterSlug?: string) {
+  await sb.from("panana_scene_image_log").insert({
+    panana_id: pananaId,
+    ...(characterSlug ? { character_slug: characterSlug } : {}),
+  } as any);
 }
 
 const APPEARANCE_KEYS = ["외형", "의상", "외모", "생김새", "appearance", "outfit", "costume"];
@@ -561,7 +564,7 @@ export async function POST(req: Request) {
     }
 
     try {
-      await logUsage(sbAdmin, pananaId);
+      await logUsage(sbAdmin, pananaId, characterSlug);
     } catch (logErr: any) {
       console.warn("[scene-image] logUsage failed (panana_scene_image_log may not exist):", logErr?.message);
     }

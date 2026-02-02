@@ -62,7 +62,7 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 
 export function AdminAuthGate({
   children,
-  hideLogoutButton,
+  hideLogoutButton = true,
 }: {
   children: React.ReactNode;
   hideLogoutButton?: boolean;

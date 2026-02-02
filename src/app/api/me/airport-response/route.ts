@@ -96,9 +96,7 @@ export async function GET(req: Request) {
       }
     } else {
       return NextResponse.json({ ok: true, response: null });
-    }
-
-    const { data, error } = await sb
+    }    const { data, error } = await sb
       .from("panana_airport_responses")
       .select("purpose, mood, character_type, updated_at")
       .eq("user_id", userId)

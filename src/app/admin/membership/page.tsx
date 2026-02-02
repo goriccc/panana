@@ -25,6 +25,7 @@ export default function AdminMembershipPage() {
   const [bActive, setBActive] = useState(true);
   const [dragId, setDragId] = useState<string | null>(null);
   const [savingOrder, setSavingOrder] = useState(false);
+  const [enlargeBannerUrl, setEnlargeBannerUrl] = useState<string | null>(null);
 
   const reloadBanners = async () => {
     setLoadingBanners(true);
@@ -303,15 +304,25 @@ export default function AdminMembershipPage() {
                         </div>
 
                         {banners.selected?.image_url ? (
-                          <div className="mt-3 overflow-hidden rounded-xl border border-white/10 bg-white/[0.02]">
-                            <div className="relative h-[160px] w-full">
-                              <Image
-                                src={banners.selected.image_url}
-                                alt={banners.selected.title || "membership banner"}
-                                fill
-                                className="object-cover"
-                              />
+                          <div className="mt-3">
+                            <div className="flex justify-center overflow-auto rounded-xl border border-white/10 bg-white/[0.02] p-2">
+                              <div className="relative h-[520px] w-[220px] shrink-0">
+                                <Image
+                                  src={banners.selected.image_url}
+                                  alt={banners.selected.title || "membership banner"}
+                                  fill
+                                  className="object-contain object-top"
+                                  sizes="220px"
+                                />
+                              </div>
                             </div>
+                            <button
+                              type="button"
+                              className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.06] px-4 py-2.5 text-[12px] font-semibold text-white/80 hover:bg-white/[0.08]"
+                              onClick={() => setEnlargeBannerUrl(banners.selected!.image_url!)}
+                            >
+                              원본 사이즈로 크게 보기
+                            </button>
                           </div>
                         ) : (
                           <div className="mt-3 rounded-xl bg-white/5 p-4 text-[12px] font-semibold text-white/45">이미지 미등록</div>
@@ -350,6 +361,37 @@ export default function AdminMembershipPage() {
           </div>
         </div>
       </div>
+
+      {enlargeBannerUrl ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center overflow-auto bg-black/85 p-4"
+          onClick={() => setEnlargeBannerUrl(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="배너 원본 크게 보기"
+        >
+          <div
+            className="inline-block min-h-0 min-w-0"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={enlargeBannerUrl}
+              alt="배너 원본"
+              className="block"
+              style={{ maxWidth: "none", maxHeight: "none", width: "auto", height: "auto" }}
+              draggable={false}
+            />
+          </div>
+          <button
+            type="button"
+            className="absolute right-4 top-4 rounded-xl bg-white/10 px-4 py-2 text-[13px] font-bold text-white hover:bg-white/20"
+            onClick={() => setEnlargeBannerUrl(null)}
+          >
+            닫기
+          </button>
+        </div>
+      ) : null}
     </AdminAuthGate>
   );
 }
