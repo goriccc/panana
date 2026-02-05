@@ -152,16 +152,21 @@ function categoryCacheKey(
   return `panana_home_category_cache:${slug}:${genderKey}:${safetyOn ? "1" : "0"}`;
 }
 
+const VALID_TABS = ["my", "home", "challenge", "ranking", "search"] as const;
+type TabId = (typeof VALID_TABS)[number];
+
 export function HomeClient({
   categories,
   initialSafetyOn,
   initialMenuVisibility,
   initialRecommendationSettings,
+  initialTab,
 }: {
   categories?: Category[];
   initialSafetyOn?: boolean;
   initialMenuVisibility?: MenuVisibility;
   initialRecommendationSettings?: RecommendationSettings;
+  initialTab?: string | null;
 }) {
   const router = useRouter();
   // 클라이언트에서는 localStorage를 우선해 즉시 렌더링 (뒤로가기 시 깜빡임 방지)
@@ -257,7 +262,9 @@ export function HomeClient({
   const [heroList, setHeroList] = useState<ContentCardItem[]>([]);
   const [heroIdx, setHeroIdx] = useState(0);
   const [heroPaused, setHeroPaused] = useState(false);
-  const [activeTab, setActiveTab] = useState<"my" | "home" | "challenge" | "ranking" | "search">("home");
+  const resolvedInitialTab: TabId =
+    initialTab && VALID_TABS.includes(initialTab as TabId) ? (initialTab as TabId) : "home";
+  const [activeTab, setActiveTab] = useState<TabId>(resolvedInitialTab);
   const [menuVisibility, setMenuVisibility] = useState<MenuVisibility>(
     initialMenuVisibility || defaultMenuVisibility
   );
@@ -306,6 +313,13 @@ export function HomeClient({
       alive = false;
     };
   }, []);
+
+  // URL tab 쿼리와 동기화 (뒤로가기 시 마이 탭 복원)
+  useEffect(() => {
+    if (initialTab && VALID_TABS.includes(initialTab as TabId)) {
+      setActiveTab(initialTab as TabId);
+    }
+  }, [initialTab]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1035,7 +1049,12 @@ export function HomeClient({
     >
       <HomeHeader
         active={activeTab}
-        onChange={setActiveTab}
+        onChange={(tab) => {
+          setActiveTab(tab);
+          // 탭별 URL 업데이트 → 브라우저 뒤로가기 시 올바른 탭 복원
+          const url = tab === "home" ? "/home" : `/home?tab=${tab}`;
+          router.replace(url);
+        }}
         safetyOn={safetyOn}
         onSafetyChange={(next) => {
           if (next && !adultVerified) {
@@ -1215,10 +1234,10 @@ export function HomeClient({
               {myTabFiltered.slice(0, 20).map((it) => (
               <Link
                 key={it.characterSlug}
-                href={`/c/${it.characterSlug}/chat`}
+                href={`/c/${it.characterSlug}/chat?from=my`}
                 className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4 last:border-b-0 hover:bg-white/[0.03]"
                 prefetch={true}
-                onMouseEnter={() => router.prefetch(`/c/${it.characterSlug}/chat`)}
+                onMouseEnter={() => router.prefetch(`/c/${it.characterSlug}/chat?from=my`)}
               >
                 <div className="flex min-w-0 items-center gap-3">
                   <div className="relative h-10 w-10 flex-none overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10">
@@ -1257,6 +1276,7 @@ export function HomeClient({
                 type="button"
                 onClick={() => {
                   setActiveTab("home");
+                  router.replace("/home");
                   window.scrollTo({ top: 0, behavior: "smooth" });
                 }}
                 className="mt-8 w-full max-w-[340px] rounded-2xl bg-panana-pink px-6 py-4 text-[14px] font-extrabold text-white"

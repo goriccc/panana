@@ -1063,7 +1063,13 @@ export function CharacterChatClient({
             </div>
             <button
               type="button"
-              onClick={() => router.push(`/adult/verify?return=/c/${characterSlug}/chat`)}
+              onClick={() =>
+                router.push(
+                  `/adult/verify?return=${encodeURIComponent(
+                    backHref.includes("tab=my") ? `/c/${characterSlug}/chat?from=my` : `/c/${characterSlug}/chat`
+                  )}`
+                )
+              }
               className="mt-5 w-full rounded-2xl bg-panana-pink px-5 py-4 text-[14px] font-extrabold text-white"
             >
               성인 인증하러 가기

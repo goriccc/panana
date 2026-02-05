@@ -11,7 +11,11 @@ export const metadata: Metadata = {
 
 export const revalidate = 60;
 
-export default async function HomePage() {
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
   const cookieStore = await cookies();
   const safetyCookie = cookieStore.get("panana_safety_on");
   const initialSafetyOn = safetyCookie ? safetyCookie.value === "1" : undefined;
@@ -21,12 +25,17 @@ export default async function HomePage() {
     fetchMenuVisibilityFromDb().catch(() => null),
     fetchRecommendationSettingsFromDb().catch(() => null),
   ]);
+
+  const sp = await searchParams;
+  const initialTab = sp?.tab;
+
   return (
     <HomeClient
       categories={cats || undefined}
       initialSafetyOn={initialSafetyOn}
       initialMenuVisibility={menuVisibility || undefined}
       initialRecommendationSettings={recommendationSettings || undefined}
+      initialTab={initialTab}
     />
   );
 }

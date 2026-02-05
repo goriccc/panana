@@ -14,16 +14,24 @@ export function generateMetadata({ params }: { params: { slug: string } }): Meta
   };
 }
 
-export default async function CharacterChatPage({ params }: { params: { slug: string } }) {
+export default async function CharacterChatPage({
+  params,
+  searchParams,
+}: {
+  params: { slug: string };
+  searchParams: Promise<{ from?: string }>;
+}) {
   const fromDb = await fetchCharacterProfileFromDb(params.slug).catch(() => null);
   const safetySupported = await fetchCharacterSafetySupportedFromDb(params.slug).catch(() => null);
   const c = fromDb || getCharacter(params.slug);
   if (!c) notFound();
+  const sp = await searchParams;
+  const fromMy = sp?.from === "my";
   return (
     <CharacterChatClient
       characterName={c.name}
       characterSlug={c.slug}
-      backHref={`/c/${c.slug}`}
+      backHref={fromMy ? "/home?tab=my" : `/c/${c.slug}`}
       characterAvatarUrl={(c as any).profileImageUrl || (c as any).profile_image_url || undefined}
       characterIntroTitle={(c as any).introTitle || (c as any).intro_title || ""}
       characterIntroLines={(c as any).introLines || (c as any).intro_lines || []}
