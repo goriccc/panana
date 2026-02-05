@@ -197,29 +197,27 @@ async function describeReferenceImage(imageUrl: string, cacheTtlMs: number): Pro
     return "";
   }
 
-  const sys = `You are an expert at describing character appearance for AI image generation. Your description will be used to recreate the EXACT same outfit in generated images.
+  const sys = `You are an expert at describing character appearance for AI image generation. Your description will be used as the FIXED appearance block so the generated image keeps the EXACT same outfit and hair.
 
-MANDATORY checklist - include ALL that are visible:
-1. HAIR: exact color, length, style (straight/wavy/curly), parting, bangs, accessories
-2. OUTFIT - EVERY visible element:
-   - Top: color, fabric, neckline, sleeves, collar, patterns
-   - Bottom if visible: color, length, fabric
-   - Accessories: jewelry, scarf, belt, hat
-   - Layers: cardigan/jacket/vest - colors and styles
-3. DISTINGUISHING: glasses, makeup, skin tone
+CRITICAL: Describe ONLY what is clearly visible in the image. Do NOT add, assume, or invent any item (brooch, scarf, pin, necklace, tie, hat, etc.) that is not visible. If no scarf is visible, do not mention scarf. If a brooch or name tag is visible, describe it exactly. Consistency means: what exists stays, what does not exist must not appear.
 
-Output as one dense paragraph. No preamble. Be exhaustive - every detail matters for consistency.`;
+MANDATORY - describe ALL visible elements in dense English:
+1. HAIR: color, length, style, parting, bangs, hair accessories only if visible (clip/band/ribbon).
+2. OUTFIT - each visible garment: top (color, fabric, neckline, sleeves, patterns), bottom if visible, layers. Accessories ONLY if visible: scarf, brooch, pin, name tag, necklace, earrings, belt, tie - with color and style. Omit any accessory not in the image.
+3. FACE/BODY: glasses yes/no only if visible, makeup, skin tone if notable.
+
+Output one dense paragraph. Start with "Wearing" or "She is wearing" / "He is wearing". No preamble. List only what you actually see - do not add anything.`;
 
   try {
     const raw = await callGeminiVision({
       apiKey,
       system: sys,
-      text: "Describe hair and outfit in maximum detail. Use the MANDATORY checklist. Include every visible element: colors, fabrics, neckline, sleeves, accessories, patterns. Output will recreate this exact look - consistency is critical.",
+      text: "Describe outfit and hair for exact replication. List only what is visible: garments, then accessories (brooch, scarf, name tag, etc.) only if present. Do not add scarf/brooch/jewelry if not in the image. Use the MANDATORY checklist.",
       base64,
       mimeType: mediaType,
-      maxTokens: 512,
+      maxTokens: 768,
     });
-    const desc = String(raw || "").trim().slice(0, 600);
+    const desc = String(raw || "").trim().slice(0, 950);
     if (desc) {
       visionAppearanceCache.set(imageUrl, { desc, ts: Date.now() });
       return desc;
@@ -230,26 +228,32 @@ Output as one dense paragraph. No preamble. Be exhaustive - every detail matters
   return "";
 }
 
+const WORLD_SUMMARY_MAX = 420;
+
 async function getCharacterData(slug: string): Promise<{
   profileImageUrl: string | null;
   name: string;
   appearance: string;
+  roleOrSetting: string;
+  worldSummary: string;
 }> {
   const supabase = getSupabaseAnon();
   const { data: charData, error: charErr } = await supabase
     .from("panana_public_characters_v")
-    .select("profile_image_url, name, studio_character_id, intro_lines")
+    .select("profile_image_url, name, studio_character_id, intro_lines, tagline")
     .eq("slug", slug)
     .maybeSingle();
   if (charErr || !charData) {
-    return { profileImageUrl: null, name: "", appearance: "" };
+    return { profileImageUrl: null, name: "", appearance: "", roleOrSetting: "", worldSummary: "" };
   }
   const profileImageUrl = String((charData as any)?.profile_image_url || "").trim() || null;
   const name = String((charData as any)?.name || "").trim() || "캐릭터";
   const studioCharacterId = (charData as any)?.studio_character_id;
   const introLines = (charData as any)?.intro_lines as string[] | undefined;
+  const roleOrSetting = String((charData as any)?.tagline || "").trim();
 
   let appearance = "";
+  let worldSummary = "";
   const keySet = new Set(APPEARANCE_KEYS.map((k) => k.toLowerCase()));
 
   if (studioCharacterId) {
@@ -274,6 +278,11 @@ async function getCharacterData(slug: string): Promise<{
           .map((e) => String(e.value || "").trim())
           .filter(Boolean);
         if (parts.length) appearance = parts.join(". ");
+        const fullLore = entries
+          .map((e) => `${String(e.key || "").trim()}: ${String(e.value || "").trim()}`)
+          .filter((s) => s.length > 1)
+          .join(". ");
+        if (fullLore) worldSummary = fullLore.slice(0, WORLD_SUMMARY_MAX);
       }
     } catch {
       /* studio tables may be inaccessible, fallback to intro_lines */
@@ -282,7 +291,7 @@ async function getCharacterData(slug: string): Promise<{
   if (!appearance && Array.isArray(introLines) && introLines.length > 0) {
     appearance = introLines.slice(0, 2).join(" ").trim();
   }
-  return { profileImageUrl, name, appearance };
+  return { profileImageUrl, name, appearance, roleOrSetting, worldSummary };
 }
 
 function parseEnPromptFromRaw(raw: string): string | null {
@@ -321,14 +330,27 @@ function parseEnPromptFromRaw(raw: string): string | null {
 async function messageToEnPrompt(
   userMessage: string,
   assistantMessage: string,
-  opts: { characterName?: string; appearance?: string; recentContext?: { role: string; content: string }[] }
+  opts: {
+    characterName?: string;
+    appearance?: string;
+    roleOrSetting?: string;
+    worldSummary?: string;
+    recentContext?: { role: string; content: string }[];
+  }
 ): Promise<string> {
   const appearanceHint = opts.appearance
     ? `\n[캐릭터 고정 정보 - 반드시 100% 유지] ${String(opts.appearance).slice(0, 500)}`
     : "";
+  const roleHint =
+    opts.roleOrSetting &&
+    `\n[캐릭터 역할·상황 - 장면의 장소·동작이 이에 맞아야 함] ${String(opts.roleOrSetting).slice(0, 300)}
+예: 스튜어디스 → 기내 갤리·통로에서 서 있거나 카트 옆, 승객용 좌석에 앉아 있는 모습 금지. 의사 → 진찰실·병원. 요리사 → 주방.`;
+  const worldHint =
+    opts.worldSummary &&
+    `\n[캐릭터 세계관/로어북 요약 - 장면 배경·장소 참고 (이 턴 지문에 장소가 있으면 그걸 우선, 없으면 아래를 기본 배경으로 사용)]\n${String(opts.worldSummary).slice(0, WORLD_SUMMARY_MAX)}`;
   const ctxLines =
     opts.recentContext && opts.recentContext.length > 0
-      ? "\n[최근 대화 맥락 - 장소·소품 추출용]\n" +
+      ? "\n[최근 대화 맥락 - 장소·소품·감정 추출용]\n" +
         opts.recentContext
           .slice(-6)
           .map((m) => `[${m.role}] ${String(m.content || "").slice(0, 300)}`)
@@ -336,14 +358,17 @@ async function messageToEnPrompt(
       : "";
   const system = `당신은 대화 장면을 Flux 이미지 생성용 영어 프롬프트로 변환합니다.
 [유저] ${String(userMessage || "").slice(0, 500)}
-[챗봇] ${String(assistantMessage || "").slice(0, 1500)}${appearanceHint}${ctxLines}
+[챗봇] ${String(assistantMessage || "").slice(0, 1500)}${appearanceHint}${roleHint || ""}${worldHint || ""}${ctxLines}
 
 반드시 포함 (MANDATORY checklist):
-1. OUTFIT/HAIR: [캐릭터 고정 정보]가 있으면 그대로 100% 포함. 헤어·의상 절대 변경 금지. 참조 이미지와 동일하게 유지.
-2. LOCATION/PROPS: 최근 대화에서 언급된 장소(갤러리, 와인바 등), 소품(와인잔, 유화, 테이블 등)을 영어로 추출해 프롬프트 앞부분에 포함. 동일 장면이면 동일 표현 유지.
-3. EXPRESSION/ACTION: 괄호() 지문의 표정·동작·감정을 영어로 포함. 예: "입을 벌려 하얗게 웃는다" → "smiling brightly", "고개를 기울인다" → "tilting her head".
-4. SHOT: full body, medium shot, close-up 중 장면에 맞게 선택.
-5. QUALITY: detailed, sharp, high quality 추가. (출력 1024x768이므로 4k/cinematic 제외)
+1. STYLE (필수): 실사만 허용. enPrompt에 반드시 "photorealistic", "realistic photograph", "real person", "natural lighting" 포함. illustration, anime, cartoon, drawing, painting 스타일 금지.
+2. OUTFIT/COLOR/ACCESSORIES: 의상·헤어·색상·악세서리는 enPrompt에서 새로 묘사하지 말 것. 참조와 동일한 복장·색상이 고정으로 들어감. 브로치·스카프·핀·네임택 등 있는 것은 있는 대로 유지, 없는데 갑자기 추가하면 안 됨. 대화맥락에서 의상 교체가 명시된 경우에만 의상 변경 허용; 그때도 색상·악세서리 톤 유지. 여기서는 장소·표정·포즈·쇼트만 작성.
+3. PRIMARY ACTION (필수 - 최우선): 괄호 지문과 대화에서 가장 눈에 띄는 액션·제스처를 반드시 추출해 enPrompt 앞부분에 구체적 영어로 넣기. 이 액션이 생성 이미지에 반드시 보여야 함. 정면 미소만 나오는 결과 금지. 예: "손으로 입을 가린다"→"covering her mouth with her hand, fingers on lips, hand visible in frame", "윙크하며"→"winking playfully with one eye closed", "머리카락을 귀 뒤로 넘기며"→"tucking a strand of hair behind her ear, hand near ear", "눈을 동그랗게 뜬다"→"eyes wide open, surprised expression". 손 동작이 있으면 반드시 손이 프레임에 보이도록 묘사.
+4. DIVERSITY (필수): 증명사진·여권사진 스타일(정면 얼굴만, 동일 포즈) 금지. 매번 다른 각도(3/4 view, slight side angle), 다른 표정, 다른 포즈. "front facing portrait", "looking at camera"만 반복 금지. 핵심 액션에 맞는 구도·표정으로 다양성 부여.
+5. ROLE-APPROPRIATE LOCATION & BACKGROUND (필수): [캐릭터 역할·상황] 또는 [캐릭터 세계관/로어북 요약] 또는 지문(괄호)에 장소가 나오면 반드시 그 장소를 enPrompt에 구체적으로 영어로 넣기. 꽃가게→flower shop interior, flowers in vases, flower arrangements, plants, shop counter, (밤/골목→dim alley, neon sign "Luna", glass door). 카페→cafe interior, tables, coffee. 위에 세계관 요약이 있으면 그 안의 장소·소품을 반드시 배경에 반영. 사무실·회색 벽·빈 배경만 나오면 안 됨. "plain wall", "empty background", "generic office" 금지. 장소에 맞는 소품·가구·조명을 2문장 이상으로 상세히.
+6. EXPRESSION/GESTURE: 3번 PRIMARY ACTION과 함께 지문·대화의 나머지 표정·제스처도 구체적 영어로. 단조로운 포즈·동일한 표정 반복 금지. "웃는다"→"smiling warmly", "고개 기울인다"→"tilting her head curiously".
+7. SHOT: full body, medium shot, close-up 중 장면에 맞게 선택. 손·액션이 보이려면 medium shot 이상, 손이 프레임에 들어가도록.
+8. QUALITY: detailed, sharp, high quality 추가. (출력 1024x768이므로 4k/cinematic 제외)
 
 enPrompt는 100단어 이상으로 상세히. 다음 JSON만 출력: {"enPrompt": "영어 프롬프트"}`;
 
@@ -360,7 +385,7 @@ enPrompt는 100단어 이상으로 상세히. 다음 JSON만 출력: {"enPrompt"
         const raw = await callGeminiText({
           apiKey: geminiKey,
           system,
-          userMessage: "변환해줘. MANDATORY checklist 모두 포함. enPrompt 100단어 이상 상세히.",
+          userMessage: "변환해줘. MANDATORY checklist 모두 포함. 3번 PRIMARY ACTION: 핵심 액션을 반드시 enPrompt에 넣고 손이 보이게. 4번 DIVERSITY: 증명사진처럼 정면만 똑같이 나오면 안 됨. 5번 배경: 지문/대화에 나온 장소(꽃가게·카페·골목 등)를 반드시 구체적으로—꽃가게면 flowers, vases, plants, shop interior; 회색 벽·사무실 배경 금지. enPrompt 100단어 이상 상세히.",
           maxTokens: 512,
           model,
           responseSchema: {
@@ -413,7 +438,7 @@ async function callFalFluxPulid(
       num_inference_steps: numSteps,
       max_sequence_length: "256",
       negative_prompt:
-        "bad quality, worst quality, text, signature, watermark, extra limbs, deformed, blurry, different outfit, changed clothes, different hair, different hairstyle, suit, jacket, blazer, shirt, polo",
+        "passport photo, id photo, frontal portrait only, same pose, repetitive, illustration, cartoon, anime, drawing, painting, digital art, 3d render, cgi, stylized, artistic, comic, manga, bad quality, worst quality, text, signature, watermark, extra limbs, deformed, blurry, different outfit, changed clothes, different dress, different top, different shirt, different uniform, different hair, different hairstyle, different hair color, different colors, color change, suit, jacket, blazer, shirt, polo, wearing different",
     }),
   });
   if (!res.ok) {
@@ -521,6 +546,8 @@ export async function POST(req: Request) {
       resolvedPrompt = await messageToEnPrompt(String(userMessage), String(assistantMessage), {
         characterName: characterData.name,
         appearance,
+        roleOrSetting: characterData.roleOrSetting || undefined,
+        worldSummary: characterData.worldSummary || undefined,
         recentContext: recentContext?.filter((m) => m?.role && m?.content),
       });
     }
@@ -543,9 +570,11 @@ export async function POST(req: Request) {
       );
     }
 
+    const stylePrefix = "Photorealistic, realistic photograph, 8k photo, real person, natural lighting. ";
+    const accessoryRule = "Accessories (brooch, scarf, pin, name tag, etc.): keep exactly as in reference; do not add any accessory not in the reference image. ";
     const finalPrompt = appearance
-      ? `${appearance}. ${resolvedPrompt}`
-      : resolvedPrompt;
+      ? `${stylePrefix}Same exact outfit, same colors, same hairstyle as reference. ${accessoryRule}${appearance}. [Scene and pose - do not change outfit, colors, or add/remove accessories] ${resolvedPrompt}`
+      : `${stylePrefix}${resolvedPrompt}`;
     const falUrl = await callFalFluxPulid(
       characterData.profileImageUrl,
       finalPrompt,

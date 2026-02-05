@@ -5,6 +5,7 @@ import { TopBar } from "@/components/TopBar";
 import { useSession } from "next-auth/react";
 import { useEffect, useMemo, useState } from "react";
 import { fetchMyAccountInfo, prefetchMyAccountInfo, type Gender } from "@/lib/pananaApp/accountInfo";
+import { ensurePananaIdentity } from "@/lib/pananaApp/identity";
 
 function PencilIcon() {
   return (
@@ -30,6 +31,9 @@ export function AccountClient() {
   const { data: session, status } = useSession();
   const [birth, setBirth] = useState<string | null>(null);
   const [gender, setGender] = useState<Gender | null>(null);
+  const [profileNote, setProfileNote] = useState("");
+  const [profileNoteSaving, setProfileNoteSaving] = useState(false);
+  const [profileNoteStatus, setProfileNoteStatus] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -38,6 +42,27 @@ export function AccountClient() {
       if (!alive || !info) return;
       setBirth(info.birth);
       setGender(info.gender);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const idt = ensurePananaIdentity();
+        const pananaId = String(idt?.id || "").trim();
+        if (!pananaId) return;
+        const qs = pananaId ? `?pananaId=${encodeURIComponent(pananaId)}` : "";
+        const res = await fetch(`/api/me/profile-note${qs}`);
+        const data = await res.json().catch(() => null);
+        if (!alive) return;
+        if (data?.ok && data.profileNote != null) setProfileNote(String(data.profileNote));
+      } catch {
+        if (alive) setProfileNote("");
+      }
     })();
     return () => {
       alive = false;
@@ -108,6 +133,54 @@ export function AccountClient() {
           <div className="flex items-center justify-between px-5 py-5">
             <div className="text-[13px] font-semibold text-white/70">성별</div>
             <div className="text-[13px] font-semibold text-white/60">{genderText}</div>
+          </div>
+
+          <div className="border-t border-white/10" />
+
+          {/* 캐릭터가 기억할 나에 대한 정보 */}
+          <div className="px-5 py-5">
+            <div className="text-[13px] font-extrabold text-white/85">캐릭터가 기억할 나에 대한 정보</div>
+            <div className="mt-2 text-[11px] font-semibold text-white/35">
+              대화할 때 캐릭터가 참고할 수 있어요. (이름, 좋아하는 것, 상황 등 자유롭게 적어 주세요.)
+            </div>
+            <textarea
+              value={profileNote}
+              onChange={(e) => setProfileNote(e.target.value)}
+              placeholder="예: 나는 민수야. 커피를 좋아해."
+              rows={3}
+              className="mt-3 w-full resize-y rounded-2xl border border-white/15 bg-white/[0.04] px-4 py-3 text-[13px] font-semibold text-white/85 outline-none placeholder:text-white/25"
+              aria-label="캐릭터가 기억할 나에 대한 정보"
+            />
+            {profileNoteStatus ? (
+              <div className="mt-2 text-[12px] font-semibold text-white/60">{profileNoteStatus}</div>
+            ) : null}
+            <button
+              type="button"
+              disabled={profileNoteSaving}
+              onClick={async () => {
+                setProfileNoteStatus(null);
+                setProfileNoteSaving(true);
+                try {
+                  const idt = ensurePananaIdentity();
+                  const pananaId = String(idt?.id || "").trim();
+                  const res = await fetch("/api/me/profile-note", {
+                    method: "PATCH",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({ pananaId: pananaId || undefined, profileNote: profileNote.trim() || null }),
+                  });
+                  const data = await res.json().catch(() => null);
+                  if (data?.ok) setProfileNoteStatus("저장됐어요.");
+                  else setProfileNoteStatus(data?.error || "저장에 실패했어요.");
+                } catch {
+                  setProfileNoteStatus("저장에 실패했어요.");
+                } finally {
+                  setProfileNoteSaving(false);
+                }
+              }}
+              className="mt-2 rounded-xl border border-panana-pink/50 bg-panana-pink/20 px-4 py-2 text-[12px] font-bold text-white/90 hover:bg-panana-pink/30 disabled:opacity-50"
+            >
+              {profileNoteSaving ? "저장 중..." : "저장"}
+            </button>
           </div>
 
           <div className="border-t border-white/10" />

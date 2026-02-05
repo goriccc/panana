@@ -40,6 +40,8 @@ const BodySchema = z.object({
   characterSlug: z.string().min(1).optional(),
   // (선택) 드라마형/씬 기반에서 씬 룰/라벨을 적용할 때 사용 (Studio scenes.id)
   sceneId: z.string().min(1).optional(),
+  // (선택) 유저가 ( ) 괄호 안에 입력한 지문(행동/상황 묘사) — 마지막 user 메시지에 주입
+  userScript: z.string().min(1).optional(),
   // 프론트 UX 옵션: 응답 길이를 짧게(2~3문장) 유도
   concise: z.boolean().optional(),
   // 홈 "스파이시" 토글이 켜졌을 때 성인 대화 허용을 요청(캐릭터가 지원할 때만 서버가 허용)
@@ -103,6 +105,23 @@ async function fetchAdultVerified(pananaId: string) {
     return Boolean((data as any)?.adult_verified);
   } catch {
     return false;
+  }
+}
+
+async function fetchProfileNote(pananaId: string): Promise<string | null> {
+  const sbAdmin = getSupabaseAdminIfPossible();
+  if (!sbAdmin || !isUuid(pananaId)) return null;
+  try {
+    const { data, error } = await sbAdmin
+      .from("panana_users")
+      .select("profile_note")
+      .eq("id", pananaId)
+      .maybeSingle();
+    if (error) return null;
+    const note = (data as any)?.profile_note;
+    return note != null && String(note).trim() ? String(note).trim() : null;
+  } catch {
+    return null;
   }
 }
 
@@ -615,6 +634,14 @@ export async function POST(req: Request) {
       system = system ? `${system}\n\n${rule}` : rule;
     }
 
+    if (pananaIdFromRuntime) {
+      const profileNote = await fetchProfileNote(pananaIdFromRuntime);
+      if (profileNote) {
+        const block = `\n\n[유저가 알려준 자신에 대한 정보]\n${profileNote}`;
+        system = system ? `${system}${block}` : block.trim();
+      }
+    }
+
     const nonSystem = body.messages.filter((m) => m.role !== "system");
     const userTurns = nonSystem.filter((m) => m.role === "user").length;
 
@@ -653,7 +680,19 @@ export async function POST(req: Request) {
     };
     const tvars = buildTemplateVars({ runtimeVariables: runtimeVariablesMerged || null });
     if (system) system = interpolateTemplate(system, tvars);
-    const nonSystemInterpolated = nonSystem.map((m) => ({ ...m, content: interpolateTemplate(m.content, tvars) }));
+    let nonSystemInterpolated = nonSystem.map((m) => ({ ...m, content: interpolateTemplate(m.content, tvars) }));
+    // 유저 지문(( ) 괄호 입력): 마지막 user 메시지 앞에 주입
+    const userScript = String((body as any).userScript || "").trim();
+    if (userScript) {
+      const lastIdx = nonSystemInterpolated.map((m) => m.role).lastIndexOf("user");
+      if (lastIdx >= 0) {
+        const last = nonSystemInterpolated[lastIdx];
+        const injected = `[유저 지문(이번 턴 행동/상황 묘사)] ${userScript}\n\n[유저 메시지] ${last.content}`;
+        nonSystemInterpolated = nonSystemInterpolated.map((m, i) =>
+          i === lastIdx ? { ...m, content: injected } : m
+        );
+      }
+    }
     // 트리거/시스템 이벤트에도 템플릿이 섞일 수 있으므로 응답 전에 치환(혹시 남으면 제거)
     if (runtimeEvents.length) {
       runtimeEvents = runtimeEvents.map((e) => {

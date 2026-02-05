@@ -74,8 +74,9 @@ function clearLocalChatData(pananaId?: string) {
     localStorage.removeItem("panana_my_chats_v1");
   } catch {}
 
-  // 캐릭터별 로컬 대화/런타임
+  // 캐릭터별 로컬 대화/스레드 목록/런타임
   clearLocalByPrefix(`panana_chat_history_v1:${String(pananaId || "").trim() || "anon"}:`);
+  clearLocalByPrefix(`panana_chat_threads_v1:${String(pananaId || "").trim() || "anon"}:`);
   clearLocalByPrefix("panana_chat_runtime:");
 }
 

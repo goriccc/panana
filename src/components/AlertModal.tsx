@@ -10,6 +10,8 @@ export function AlertModal({
   cancelText = "건너뛰기",
   confirmText = "이어하기",
   maxWidthClassName = "max-w-[620px]",
+  cancelTarget,
+  confirmTarget,
 }: {
   open: boolean;
   title?: string;
@@ -20,6 +22,10 @@ export function AlertModal({
   cancelText?: string;
   confirmText?: string;
   maxWidthClassName?: string;
+  /** 확인 버튼(링크일 때) 새 창 열기. 예: 검사결과 다시보기 */
+  confirmTarget?: "_blank";
+  /** 취소 버튼 새 창 열기 */
+  cancelTarget?: "_blank";
 }) {
   if (!open) return null;
 

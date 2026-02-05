@@ -6,7 +6,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchMyUserProfile } from "@/lib/pananaApp/userProfiles";
 import { loadRuntime, saveRuntime } from "@/lib/pananaApp/chatRuntime";
 import { recordMyChat } from "@/lib/pananaApp/myChats";
-import { loadChatHistory, saveChatHistory } from "@/lib/pananaApp/chatHistory";
+import {
+  loadChatHistory,
+  saveChatHistory,
+  getThreadList,
+  addThread,
+  setThreadUpdated,
+  updateThreadTitle,
+  isDefaultThread,
+  type ChatThread,
+} from "@/lib/pananaApp/chatHistory";
 import { ensurePananaIdentity, setPananaId } from "@/lib/pananaApp/identity";
 import { fetchAdultStatus } from "@/lib/pananaApp/adultVerification";
 import type { ChatRuntimeEvent, ChatRuntimeState } from "@/lib/studio/chatRuntimeEngine";
@@ -72,6 +81,36 @@ function renderChatText(text: string) {
   );
 }
 
+/** 유저 말풍선 전용: ( ) 지문은 이탤릭·저투명도, 대화는 다음 줄 */
+function renderUserChatText(text: string) {
+  const raw = String(text || "").trim();
+  if (!raw) return <div>&nbsp;</div>;
+
+  const scriptParts: string[] = [];
+  let m: RegExpExecArray | null;
+  const re = /\(([^)]*)\)/g;
+  while ((m = re.exec(raw)) !== null) {
+    if (m[1].trim()) scriptParts.push(m[1].trim());
+  }
+  const dialogue = raw.replace(/\([^)]*\)/g, "").replace(/\s+/g, " ").trim();
+
+  return (
+    <div className="whitespace-pre-wrap">
+      {scriptParts.length > 0 ? (
+        <div className="italic opacity-60">
+          ({scriptParts.join(" ")})
+        </div>
+      ) : null}
+      {dialogue ? (
+        <div className={scriptParts.length > 0 ? "mt-1" : ""}>
+          {dialogue}
+        </div>
+      ) : null}
+      {scriptParts.length === 0 && !dialogue ? raw : null}
+    </div>
+  );
+}
+
 function Bubble({
   from,
   text,
@@ -105,7 +144,7 @@ function Bubble({
     return (
       <div className="flex justify-end">
         <div className="inline-block w-fit max-w-[290px] rounded-[22px] rounded-br-[10px] bg-panana-pink px-4 py-3 text-[14px] font-semibold leading-[1.45] text-[#0B0C10]">
-          {renderChatText(text)}
+          {renderUserChatText(text)}
         </div>
       </div>
     );
@@ -154,6 +193,7 @@ function Bubble({
               type="button"
               onClick={() => onGenerateImage(prevUserMsg || "", text)}
               className="inline-flex w-fit items-center gap-1.5 rounded-full border border-panana-pink/40 bg-panana-pink/15 px-3 py-1.5 text-[11px] font-extrabold text-panana-pink transition hover:bg-panana-pink/25"
+              aria-label="장면 이미지 생성"
             >
               <span className="font-bold">
                 {sceneImageQuota.remaining}/{sceneImageQuota.dailyLimit}
@@ -175,14 +215,15 @@ function Bubble({
           {imgLoadError ? (
             <div className="flex max-w-[280px] flex-col items-center justify-center gap-2 rounded-xl bg-white/[0.04] px-4 py-6">
               <span className="text-[11px] font-semibold text-white/50">이미지를 불러올 수 없어요</span>
-              {onGenerateImage && prevUserMsg ? (
+              {onGenerateImage ? (
                 <button
                   type="button"
                   onClick={() => {
                     setImgLoadError(false);
-                    onGenerateImage(prevUserMsg, text);
+                    onGenerateImage(prevUserMsg ?? "", text);
                   }}
                   className="rounded-full border border-panana-pink/40 bg-panana-pink/15 px-3 py-1.5 text-[11px] font-bold text-panana-pink"
+                  aria-label="장면 이미지 다시 생성"
                 >
                   다시 생성
                 </button>
@@ -205,12 +246,12 @@ function Bubble({
               />
             </button>
           )}
-          {!imgLoadError && onGenerateImage && prevUserMsg ? (
+          {!imgLoadError && onGenerateImage ? (
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                onGenerateImage(prevUserMsg, text);
+                onGenerateImage(prevUserMsg ?? "", text);
               }}
               className="flex h-9 w-9 flex-none items-center justify-center text-panana-pink transition hover:text-panana-pink/80"
               aria-label="이미지 재생성"
@@ -304,6 +345,8 @@ export function CharacterChatClient({
   const [sending, setSending] = useState(false);
   const [showTyping, setShowTyping] = useState(false);
   const [value, setValue] = useState("");
+  const [scriptMode, setScriptMode] = useState(false); // 지문 입력 모드: ( ) 괄호 안 커서
+  const inputRef = useRef<HTMLInputElement>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(true);
@@ -343,6 +386,13 @@ export function CharacterChatClient({
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
   const [sceneImageModalUrl, setSceneImageModalUrl] = useState<string | null>(null);
   const [sceneImageQuota, setSceneImageQuota] = useState<{ remaining: number; dailyLimit: number } | null>(null);
+  const [currentThreadId, setCurrentThreadId] = useState("default");
+  const [threadList, setThreadListState] = useState<ChatThread[]>([]);
+  const [threadListOpen, setThreadListOpen] = useState(false);
+  const [onboardingDismissed, setOnboardingDismissed] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return localStorage.getItem("panana_onboarding_chat_v1") === "1";
+  });
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [composerHeight, setComposerHeight] = useState(64);
   const composerRef = useRef<HTMLDivElement | null>(null);
@@ -378,6 +428,14 @@ export function CharacterChatClient({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [sceneImageModalUrl]);
+
+  // 대화 목록 드롭다운: 바깥 클릭 시 닫기
+  useEffect(() => {
+    if (!threadListOpen) return;
+    const onDocClick = () => setThreadListOpen(false);
+    document.addEventListener("click", onDocClick, { capture: true });
+    return () => document.removeEventListener("click", onDocClick, { capture: true });
+  }, [threadListOpen]);
 
   // 장면 이미지 쿼터 초기 조회 (characterAvatarUrl 있을 때)
   useEffect(() => {
@@ -687,10 +745,13 @@ export function CharacterChatClient({
 
   useEffect(() => {
     let alive = true;
-    
-    // 1) 로컬 스토리지에서 즉시 메시지 로드 (깜빡임 방지)
     const pidCandidate = getPananaId();
-    const localMessages = loadChatHistory({ pananaId: pidCandidate, characterSlug });
+    const list = getThreadList({ pananaId: pidCandidate, characterSlug });
+    const hasDefault = list.some((t) => t.id === "default");
+    setThreadListState(hasDefault ? list : [{ id: "default", title: "현재 대화", updatedAt: Date.now() }, ...list]);
+
+    // 1) 로컬 스토리지에서 현재 스레드 메시지 로드 (깜빡임 방지)
+    const localMessages = loadChatHistory({ pananaId: pidCandidate, characterSlug, threadId: currentThreadId });
     if (localMessages.length > 0) {
       const rows = localMessages.map((m) => ({
         id: m.id,
@@ -700,13 +761,29 @@ export function CharacterChatClient({
       }));
       savedMsgIdsRef.current = new Set(rows.map((m) => m.id));
       setMessages(rows);
+      if (currentThreadId === "default") {
+        const firstUser = rows.find((m) => m.from === "user");
+        const title = firstUser?.text?.replace(/\s+/g, " ").trim().slice(0, 20) || "현재 대화";
+        setThreadUpdated({ pananaId: pidCandidate, characterSlug, threadId: "default", title });
+        setThreadListState(getThreadList({ pananaId: pidCandidate, characterSlug }));
+      }
+      if (!isDefaultThread(currentThreadId)) {
+        setHistoryLoading(false);
+      }
+    } else if (!isDefaultThread(currentThreadId)) {
+      savedMsgIdsRef.current = new Set();
+      setMessages([]);
       setHistoryLoading(false);
     } else {
       setHistoryLoading(true);
       void requestOpening();
     }
 
-    // 2) 서버에서 pananaId 확정 및 DB 메시지 로드 (백그라운드)
+    // 2) 기본 스레드일 때만 서버에서 pananaId 확정 및 DB 메시지 로드 (백그라운드)
+    if (!isDefaultThread(currentThreadId)) {
+      setHistoryLoading(false);
+      return;
+    }
     (async () => {
       let pid = pidCandidate;
       try {
@@ -727,14 +804,12 @@ export function CharacterChatClient({
         // ignore
       }
 
-      // DB에서 메시지 로드 (로컬과 다를 수 있으므로 업데이트)
       try {
         const res = await fetch(
           `/api/me/chat-messages?pananaId=${encodeURIComponent(pid)}&characterSlug=${encodeURIComponent(characterSlug)}&limit=120`
         );
         const data = await res.json().catch(() => null);
         if (!alive) return;
-        
         if (res.ok && data?.ok && Array.isArray(data.messages)) {
           const rows = data.messages
             .map((m: any) => ({
@@ -754,18 +829,13 @@ export function CharacterChatClient({
             warnedDbRef.current = true;
             setMessages((prev) => [
               ...prev,
-              {
-                id: `s-${Date.now()}-dbwarn`,
-                from: "system",
-                text: `대화 기록(DB)을 불러오지 못했어요. (${errText})`,
-              },
+              { id: `s-${Date.now()}-dbwarn`, from: "system", text: `대화 기록(DB)을 불러오지 못했어요. (${errText})` },
             ]);
           }
         }
       } catch {
         // ignore
       }
-
       if (alive) {
         setHistoryLoading(false);
         if (characterAvatarUrl && pid) {
@@ -781,18 +851,15 @@ export function CharacterChatClient({
         }
       }
     })();
-    
     return () => {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [characterSlug]);
+  }, [characterSlug, currentThreadId]);
 
   useEffect(() => {
-    // 메시지 변경 시 히스토리 저장(로컬 백업 + DB 동기화)
     const pid = pananaIdRef.current || getPananaId();
     if (!pid) return;
-    // 너무 잦은 저장 방지(짧은 debounce)
     const t = window.setTimeout(() => {
       saveChatHistory({
         pananaId: pid,
@@ -804,64 +871,66 @@ export function CharacterChatClient({
           at: Date.now(),
           sceneImageUrl: m.sceneImageUrl,
         })),
+        threadId: currentThreadId,
       });
-
-      // eslint-disable-next-line @typescript-eslint/no-floating-promises
-      persistToDb(pid, messages);
+      const firstUser = messages.find((m) => m.from === "user");
+      const titleSnippet = firstUser?.text?.replace(/\s+/g, " ").trim().slice(0, 20) || "대화";
+      setThreadUpdated({ pananaId: pid, characterSlug, threadId: currentThreadId, title: titleSnippet });
+      setThreadListState(getThreadList({ pananaId: pid, characterSlug }));
+      if (isDefaultThread(currentThreadId)) {
+        // eslint-disable-next-line @typescript-eslint/no-floating-promises
+        persistToDb(pid, messages);
+      }
     }, 80);
     return () => window.clearTimeout(t);
-  }, [characterSlug, messages]);
+  }, [characterSlug, currentThreadId, messages]);
 
   useEffect(() => {
-    // 뒤로가기/탭 종료 등에서 DB 저장 유실 방지
     const onPageHide = () => {
       const pid = pananaIdRef.current;
-      if (!pid) return;
+      if (!pid || !isDefaultThread(currentThreadId)) return;
       // eslint-disable-next-line @typescript-eslint/no-floating-promises
       persistToDb(pid, messages, { keepalive: true });
     };
     window.addEventListener("pagehide", onPageHide);
     return () => window.removeEventListener("pagehide", onPageHide);
-  }, [messages]);
+  }, [currentThreadId, messages]);
 
   // "MY" 리스트용: 대화 진입만 해도 목록에 기록
   useEffect(() => {
     recordMyChat({ characterSlug, characterName, avatarUrl: characterAvatarUrl });
   }, [characterAvatarUrl, characterName, characterSlug]);
 
-  const send = async () => {
-    const text = value.trim();
+  // ( ) 괄호 안 내용을 지문으로 추출 (첫 번째 쌍만)
+  const parseUserScript = (raw: string): { script: string | null; text: string } => {
+    const text = raw.trim();
+    const match = text.match(/\(([^)]*)\)/);
+    if (match) return { script: match[1].trim() || null, text };
+    return { script: null, text };
+  };
+
+  // 공통: 메시지 목록(마지막이 유저 메시지)으로 LLM 요청 후 봇 응답 반영. 재시도 시 사용.
+  const requestChat = async (messagesIncludingLastUser: Msg[], userScript: string | null) => {
+    const history = messagesIncludingLastUser.filter((m) => m.from !== "system");
+    const lastUser = history.filter((m) => m.from === "user").pop();
+    const text = lastUser?.text?.trim();
     if (!text) return;
 
-    setErr(null);
-    forceScrollRef.current = true;
-    hasSentRef.current = true;
-    isAtBottomRef.current = true;
-    setMessages((prev) => [...prev, { id: `u-${Date.now()}`, from: "user", text }]);
-    setValue("");
-
-    // 알파 테스트: 프론트에서 선택한 provider로 즉시 전환
     setSending(true);
-    // typing indicator flicker 방지:
-    // - 아주 빠른 응답에서는 아예 표시하지 않음(지연 표시)
-    // - 요청 ID 기반으로 타이머 무효화(응답 도착 직후 1프레임 깜빡임 방지)
     resetTyping();
     const reqId = Date.now();
     typingReqIdRef.current = reqId;
     typingTimerRef.current = window.setTimeout(() => {
-      if (typingReqIdRef.current === reqId) {
-        setShowTyping(true);
-      }
+      if (typingReqIdRef.current === reqId) setShowTyping(true);
     }, 650);
+
     try {
       const idt = ensurePananaIdentity();
       const identityNick = String(idt.nickname || "").trim();
       const resolvedUserName = String(userName || identityNick || idt.handle || "너").trim();
       const runtimeVariables = {
         ...(rt.variables || {}),
-        // 템플릿 치환용: 서버에서 buildTemplateVars()가 call_sign까지 채울 수 있게 user_name을 항상 보낸다.
         ...(resolvedUserName ? { user_name: resolvedUserName, call_sign: resolvedUserName } : {}),
-        // 기타 유저 식별자도 변수로 제공(콘텐츠에서 {{user_handle}} 등을 쓸 수 있게)
         ...(idt.handle ? { user_handle: String(idt.handle), panana_handle: String(idt.handle) } : {}),
         ...(idt.id ? { panana_id: String(idt.id) } : {}),
       };
@@ -874,11 +943,10 @@ export function CharacterChatClient({
           characterSlug,
           sceneId: sceneIdFromRuntime || undefined,
           concise: true,
-          // 홈 스파이시 토글(ON)일 때만 성인 대화 허용을 서버에 요청한다.
-          // 실제 허용 여부는 서버에서 캐릭터 safety_supported를 보고 최종 결정한다.
+          userScript: userScript || undefined,
           allowUnsafe: (() => {
             try {
-                return localStorage.getItem("panana_safety_on") === "1" && adultVerified;
+              return localStorage.getItem("panana_safety_on") === "1" && adultVerified;
             } catch {
               return false;
             }
@@ -893,11 +961,9 @@ export function CharacterChatClient({
           },
           messages: [
             { role: "system", content: `${characterName} 캐릭터로 자연스럽게 대화해.` },
-            ...messages
+            ...history
               .slice(-12)
-              .filter((m) => m.from !== "system")
               .map((m) => ({ role: m.from === "user" ? "user" : "assistant", content: m.text })),
-            { role: "user", content: text },
           ],
         }),
       });
@@ -922,7 +988,6 @@ export function CharacterChatClient({
             const label = varLabelKo((e as any).var, nextLabels || varLabels);
             const op = (e as any).op === "-" ? "-" : "+";
             const value = Number((e as any).value) || 0;
-            // 매핑 없는 변수키는 UI에 노출하지 않음(콘텐츠별 영어키 노출 방지)
             if (label && value) sysMsgs.push({ id: `s-${Date.now()}-${sysMsgs.length}`, from: "system", text: `${label} ${op}${value}` });
           }
           else if (e.type === "unlock_suggest") sysMsgs.push({ id: `s-${Date.now()}-${sysMsgs.length}`, from: "system", text: `해금 제안: ${String(e.text || "")}` });
@@ -935,8 +1000,7 @@ export function CharacterChatClient({
 
       const reply = String(data.text || "").trim() || "…";
       resetTyping();
-      const botId = `b-${Date.now()}`;
-      setMessages((prev) => [...prev, { id: botId, from: "bot", text: reply }]);
+      setMessages((prev) => [...prev, { id: `b-${Date.now()}`, from: "bot", text: reply }]);
 
       const next: ChatRuntimeState | null =
         data?.runtime?.chat
@@ -957,6 +1021,34 @@ export function CharacterChatClient({
       resetTyping();
       setSending(false);
     }
+  };
+
+  const send = async () => {
+    const text = value.trim();
+    if (!text) return;
+
+    const { script: userScript } = parseUserScript(text);
+
+    setErr(null);
+    forceScrollRef.current = true;
+    hasSentRef.current = true;
+    isAtBottomRef.current = true;
+    setMessages((prev) => [...prev, { id: `u-${Date.now()}`, from: "user", text }]);
+    setValue("");
+    setScriptMode(false);
+
+    await requestChat(
+      [...messages, { id: `u-${Date.now()}`, from: "user", text }],
+      userScript
+    );
+  };
+
+  const retrySend = () => {
+    const lastUser = [...messages].reverse().find((m) => m.from === "user");
+    if (!lastUser?.text?.trim()) return;
+    setErr(null);
+    const { script } = parseUserScript(lastUser.text);
+    requestChat(messages, script);
   };
 
   const needsAdultGate = Boolean(safetySupported) && !adultVerified && !adultLoading;
@@ -1012,10 +1104,80 @@ export function CharacterChatClient({
             </svg>
           </Link>
 
-          <div className="mx-auto text-[18px] font-semibold tracking-[-0.01em] text-[#ffa9d6]">
-            {characterName}
+          <div className="mx-auto flex flex-col items-center">
+            <span className="text-[18px] font-semibold tracking-[-0.01em] text-[#ffa9d6]">
+              {characterName}
+            </span>
+            {(() => {
+              const userTurns = messages.filter((m) => m.from === "user").length;
+              const stage =
+                userTurns < 3 ? null
+                : userTurns < 10 ? "조금 친해짐"
+                : userTurns < 25 ? "친해짐"
+                : "매우 친함";
+              return stage ? (
+                <span className="text-[11px] font-semibold text-white/50" aria-label={`관계: ${stage}`}>
+                  {stage}
+                </span>
+              ) : null;
+            })()}
+          </div>
+          <div className="absolute right-0 top-0 flex items-center gap-0.5">
+            <button
+              type="button"
+              onClick={() => setThreadListOpen((o) => !o)}
+              className="rounded-lg p-2 text-white/70 hover:bg-white/10 hover:text-white"
+              aria-label="대화 목록"
+              aria-expanded={threadListOpen}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+            </button>
           </div>
         </div>
+        {threadListOpen ? (
+          <div
+            className="absolute right-2 top-12 z-20 max-h-[60vh] w-[min(280px,85vw)] overflow-y-auto rounded-xl border border-white/10 bg-[#0B0C10] py-2 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                const pid = pananaIdRef.current || getPananaId();
+                const newId = `t-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+                addThread({ pananaId: pid, characterSlug, threadId: newId, title: "새 대화" });
+                setThreadListState(getThreadList({ pananaId: pid, characterSlug }));
+                setCurrentThreadId(newId);
+                setMessages([]);
+                setThreadListOpen(false);
+              }}
+              className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-[13px] font-semibold text-panana-pink hover:bg-white/5"
+              aria-label="새 대화"
+            >
+              <span className="text-base">+</span> 새 대화
+            </button>
+            {threadList.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => {
+                  setCurrentThreadId(t.id);
+                  setThreadListOpen(false);
+                }}
+                className={`flex w-full flex-col items-start gap-0.5 px-4 py-2.5 text-left text-[12px] hover:bg-white/5 ${
+                  t.id === currentThreadId ? "bg-white/10 text-white" : "text-white/75"
+                }`}
+                aria-label={`대화: ${t.title}`}
+              >
+                <span className="truncate font-semibold">{t.title}</span>
+                <span className="text-[11px] text-white/45">
+                  {t.updatedAt ? new Date(t.updatedAt).toLocaleDateString("ko-KR", { month: "short", day: "numeric" }) : ""}
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         {/* alpha LLM selector */}
         <div className="mt-2 flex items-center justify-center gap-2">
@@ -1034,6 +1196,7 @@ export function CharacterChatClient({
                     ? "bg-[#ff4da7]/20 text-[#ff8fc3] ring-[#ff4da7]/40"
                     : "bg-white/5 text-white/45 ring-white/10 hover:bg-white/10"
                 }`}
+                aria-label={`모델: ${p.label}`}
               >
                 {p.label}
               </button>
@@ -1044,6 +1207,37 @@ export function CharacterChatClient({
           알파 테스트: 모델을 바꿔가며 대화 품질을 비교할 수 있어요.
         </div>
       </header>
+
+      {!onboardingDismissed ? (
+        <div className="mx-auto w-full max-w-[420px] shrink-0 px-5 pt-2">
+          <div className="flex items-center gap-2 rounded-xl border border-panana-pink/30 bg-panana-pink/10 px-3 py-2.5">
+            <div className="flex-1 text-[11px] font-semibold leading-snug text-white/90">
+              <span>
+                <span className="font-extrabold text-panana-pink">지문</span>: 입력창 왼쪽{" "}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/jimun.png" alt="" width={16} height={16} className="inline h-4 w-4 align-middle opacity-90" aria-hidden />
+                {" "}버튼으로 상황·행동 묘사를 넣을 수 있어요.
+              </span>
+              <span className="mt-1 block">
+                <span className="font-extrabold text-panana-pink">장면 이미지</span>: 이미지생성 버튼을 눌러 생성할 수 있어요.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                try {
+                  localStorage.setItem("panana_onboarding_chat_v1", "1");
+                } catch {}
+                setOnboardingDismissed(true);
+              }}
+              className="shrink-0 rounded-lg bg-white/10 px-2 py-1 text-[11px] font-bold text-white/80 hover:bg-white/20"
+              aria-label="확인"
+            >
+              확인
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {/* 메시지 영역만 스크롤(카톡 스타일). 입력창과 겹치지 않음 */}
       <main
@@ -1061,7 +1255,20 @@ export function CharacterChatClient({
           isAtBottomRef.current = atBottom;
         }}
       >
-        {err ? <div className="mb-3 text-[12px] font-semibold text-[#ff9aa1]">{err}</div> : null}
+        {err ? (
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <span className="text-[12px] font-semibold text-[#ff9aa1]">{err}</span>
+            <button
+              type="button"
+              onClick={retrySend}
+              disabled={sending}
+              className="rounded-lg border border-white/20 bg-white/10 px-3 py-1.5 text-[12px] font-semibold text-white/90 hover:bg-white/20 disabled:opacity-50"
+              aria-label="다시 보내기"
+            >
+              다시 보내기
+            </button>
+          </div>
+        ) : null}
         <div className="space-y-3">
           {messages.map((m, idx) => {
             const prevUserMsg =
@@ -1189,8 +1396,60 @@ export function CharacterChatClient({
         }}
       >
         <div className="mx-auto w-full max-w-[420px] px-5 py-2.5">
-          <div className="relative w-full rounded-full border border-panana-pink/35 bg-white/[0.04] py-2 pl-3.5 pr-10">
+          <div className="relative w-full rounded-full border border-panana-pink/35 bg-white/[0.04] py-2 pl-11 pr-11">
+            <button
+              type="button"
+              aria-label={scriptMode ? "지문 입력 끝내기 (일반 대화)" : "지문 입력"}
+              onClick={() => {
+                const input = inputRef.current;
+                if (!input) return;
+                const start = input.selectionStart ?? value.length;
+                const end = input.selectionEnd ?? value.length;
+                const before = value.slice(0, start);
+                const after = value.slice(end);
+                if (scriptMode) {
+                  // 닫는 ) 오른쪽 바깥으로 이동, ) 뒤에 공백 한 칸 넣고 커서는 공백 뒤로
+                  const afterCursor = value.slice(end);
+                  const closeParen = afterCursor.indexOf(")");
+                  if (closeParen >= 0) {
+                    const parenPos = end + closeParen + 1;
+                    const afterParen = value.slice(parenPos);
+                    const needSpace = afterParen.length === 0 || afterParen[0] !== " ";
+                    setValue(
+                      needSpace
+                        ? value.slice(0, parenPos) + " " + value.slice(parenPos)
+                        : value
+                    );
+                    setScriptMode(false);
+                    requestAnimationFrame(() => {
+                      input.focus();
+                      const cursorPos = needSpace ? parenPos + 1 : parenPos;
+                      input.setSelectionRange(cursorPos, cursorPos);
+                    });
+                  } else {
+                    setScriptMode(false);
+                    requestAnimationFrame(() => {
+                      input.focus();
+                      input.setSelectionRange(value.length, value.length);
+                    });
+                  }
+                } else {
+                  setValue(before + "(" + ")" + after);
+                  setScriptMode(true);
+                  requestAnimationFrame(() => {
+                    input.focus();
+                    const pos = before.length + 1;
+                    input.setSelectionRange(pos, pos);
+                  });
+                }
+              }}
+              className="absolute left-[6px] top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/jimun.png" alt="" width={22} height={22} className="h-[22px] w-[22px] opacity-90" />
+            </button>
             <input
+              ref={inputRef}
               value={value}
               onChange={(e) => setValue(e.target.value)}
               onKeyDown={(e) => {
@@ -1205,24 +1464,17 @@ export function CharacterChatClient({
               className="w-full bg-transparent text-base font-semibold text-white/70 outline-none placeholder:text-white/30"
               placeholder="메시지를 입력하세요"
               style={{ fontSize: "16px" }}
+              aria-label="메시지 입력"
             />
             <button
               type="button"
               aria-label="전송"
               onClick={send}
               disabled={!value.trim() || sending}
-              className="absolute right-[1px] top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-white/10 ring-1 ring-white/10"
+              className="absolute right-[1px] top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M4 12h12" stroke="rgba(255,255,255,0.85)" strokeWidth="2" strokeLinecap="round" />
-                <path
-                  d="M13 5l7 7-7 7"
-                  stroke="rgba(255,255,255,0.85)"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/send.png" alt="전송" width={20} height={20} className="h-5 w-5 object-contain" />
             </button>
           </div>
         </div>
