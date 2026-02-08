@@ -6,6 +6,7 @@ const NAV_ITEMS = [
   { href: "/admin", label: "대시보드" },
   { href: "/admin/categories", label: "카테고리" },
   { href: "/admin/characters", label: "캐릭터" },
+  { href: "/admin/challenges", label: "도전" },
   { href: "/admin/notices", label: "공지사항" },
   { href: "/admin/billing", label: "충전 상품" },
   { href: "/admin/membership", label: "멤버십" },

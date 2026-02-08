@@ -66,10 +66,10 @@ export const characters: CharacterProfile[] = [
         ],
       },
       {
-        title: "# 도전모드는 어때?",
+        title: "# 도전은 어때?",
         items: [
-          { ...sampleCard, id: "challenge-1", author: "@도전모드", title: "여사친고백작전", tags: ["#여사친", "#고백공격"] },
-          { ...sampleCard, id: "challenge-2", author: "@도전모드", title: "방탈출 콜렉션 12", tags: ["#스릴러", "#방탈출"] },
+          { ...sampleCard, id: "challenge-1", author: "@도전", title: "여사친고백작전", tags: ["#여사친", "#고백공격"] },
+          { ...sampleCard, id: "challenge-2", author: "@도전", title: "방탈출 콜렉션 12", tags: ["#스릴러", "#방탈출"] },
         ],
       },
     ],

@@ -24,8 +24,8 @@ const defaultVisibility: MenuVisibility = {
 const menuLabels: Record<keyof MenuVisibility, string> = {
   my: "마이",
   home: "홈",
-  challenge: "도전모드",
-  ranking: "랭킹",
+  challenge: "도전",
+  ranking: "순위",
   search: "찾기",
 };
 

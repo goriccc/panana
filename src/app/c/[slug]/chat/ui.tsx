@@ -50,6 +50,21 @@ function saveProvider(p: Provider) {
   } catch {}
 }
 
+/** 제3자 개입 시스템 메시지: [시스템] system_message:"..." 형태면 따옴표 안 내용만 반환 */
+function getSystemMessageDisplayText(raw: string): string {
+  const s = String(raw || "").trim();
+  const match = /\[시스템\]\s*system_message\s*:\s*"([^"]*)"/.exec(s);
+  if (match) return match[1].trim();
+  const idx = s.indexOf('system_message:"');
+  if (idx !== -1) {
+    const start = idx + 'system_message:"'.length;
+    const end = s.indexOf('"', start);
+    if (end !== -1) return s.slice(start, end).trim();
+  }
+  return s;
+}
+
+/** 봇/시스템 메시지용: ( ) 지문은 문장 내 위치와 관계없이 이탤릭·저투명도 */
 function renderChatText(text: string) {
   const lines = String(text || "").split("\n");
   return (
@@ -59,21 +74,27 @@ function renderChatText(text: string) {
         const trimmed = raw.trim();
         if (!trimmed) return <div key={idx}>&nbsp;</div>;
 
-        if (trimmed.startsWith("(") && trimmed.includes(")")) {
-          const closeIdx = trimmed.indexOf(")");
-          const nar = trimmed.slice(0, closeIdx + 1);
-          const rest = trimmed.slice(closeIdx + 1).trim();
-          return (
-            <div key={idx}>
-              <div className="text-white/45 italic">{nar}</div>
-              {rest ? <div className="text-white/80">{rest}</div> : null}
-            </div>
-          );
+        const parts: { script: boolean; text: string }[] = [];
+        const re = /(\([^)]*\))|([^(]+)/g;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(raw)) !== null) {
+          if (m[1]) parts.push({ script: true, text: m[1] });
+          else if (m[2]) parts.push({ script: false, text: m[2] });
         }
 
         return (
-          <div key={idx} className="text-white/80">
-            {raw}
+          <div key={idx}>
+            {parts.map((p, i) =>
+              p.script ? (
+                <span key={i} className="text-white/45 italic">
+                  {p.text}
+                </span>
+              ) : (
+                <span key={i} className="text-white/80">
+                  {p.text}
+                </span>
+              )
+            )}
           </div>
         );
       })}
@@ -81,32 +102,31 @@ function renderChatText(text: string) {
   );
 }
 
-/** 유저 말풍선 전용: ( ) 지문은 이탤릭·저투명도, 대화는 다음 줄 */
+/** 유저 말풍선 전용: ( ) 지문은 문장 내 위치와 관계없이 이탤릭·저투명도 */
 function renderUserChatText(text: string) {
   const raw = String(text || "").trim();
   if (!raw) return <div>&nbsp;</div>;
 
-  const scriptParts: string[] = [];
+  // ( ) 괄호·괄호 내부·그 외 텍스트를 순서대로 분리
+  const parts: { script: boolean; text: string }[] = [];
+  const re = /(\([^)]*\))|([^(]+)/g;
   let m: RegExpExecArray | null;
-  const re = /\(([^)]*)\)/g;
   while ((m = re.exec(raw)) !== null) {
-    if (m[1].trim()) scriptParts.push(m[1].trim());
+    if (m[1]) parts.push({ script: true, text: m[1] });
+    else if (m[2]) parts.push({ script: false, text: m[2] });
   }
-  const dialogue = raw.replace(/\([^)]*\)/g, "").replace(/\s+/g, " ").trim();
 
   return (
     <div className="whitespace-pre-wrap">
-      {scriptParts.length > 0 ? (
-        <div className="italic opacity-60">
-          ({scriptParts.join(" ")})
-        </div>
-      ) : null}
-      {dialogue ? (
-        <div className={scriptParts.length > 0 ? "mt-1" : ""}>
-          {dialogue}
-        </div>
-      ) : null}
-      {scriptParts.length === 0 && !dialogue ? raw : null}
+      {parts.map((p, i) =>
+        p.script ? (
+          <span key={i} className="italic opacity-60">
+            {p.text}
+          </span>
+        ) : (
+          <span key={i}>{p.text}</span>
+        )
+      )}
     </div>
   );
 }
@@ -151,10 +171,11 @@ function Bubble({
   }
 
   if (from === "system") {
+    const displayText = getSystemMessageDisplayText(text);
     return (
       <div className="flex justify-center">
         <div className="max-w-[320px] rounded-2xl bg-white/[0.06] px-4 py-2 text-center text-[12px] font-semibold text-white/70 ring-1 ring-white/10">
-          {renderChatText(text)}
+          {renderChatText(displayText)}
         </div>
       </div>
     );
@@ -388,7 +409,6 @@ export function CharacterChatClient({
   const [sceneImageQuota, setSceneImageQuota] = useState<{ remaining: number; dailyLimit: number } | null>(null);
   const [currentThreadId, setCurrentThreadId] = useState("default");
   const [threadList, setThreadListState] = useState<ChatThread[]>([]);
-  const [threadListOpen, setThreadListOpen] = useState(false);
   const [onboardingDismissed, setOnboardingDismissed] = useState(() => {
     if (typeof window === "undefined") return true;
     return localStorage.getItem("panana_onboarding_chat_v1") === "1";
@@ -428,14 +448,6 @@ export function CharacterChatClient({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [sceneImageModalUrl]);
-
-  // 대화 목록 드롭다운: 바깥 클릭 시 닫기
-  useEffect(() => {
-    if (!threadListOpen) return;
-    const onDocClick = () => setThreadListOpen(false);
-    document.addEventListener("click", onDocClick, { capture: true });
-    return () => document.removeEventListener("click", onDocClick, { capture: true });
-  }, [threadListOpen]);
 
   // 장면 이미지 쿼터 초기 조회 (characterAvatarUrl 있을 때)
   useEffect(() => {
@@ -1091,7 +1103,7 @@ export function CharacterChatClient({
     <div className="h-dvh overflow-hidden bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.12),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white flex flex-col">
       <style>{`@keyframes pananaDot{0%,100%{transform:translateY(0);opacity:.55}50%{transform:translateY(-4px);opacity:1}}`}</style>
       <>
-      <header className="mx-auto w-full max-w-[420px] shrink-0 px-5 pt-3">
+      <header className="sticky top-0 z-20 mx-auto w-full max-w-[420px] shrink-0 bg-[#07070B]/95 px-5 pb-3 pt-3 backdrop-blur-sm">
         <div className="relative flex h-11 items-center">
           <Link 
             href={backHref} 
@@ -1128,63 +1140,7 @@ export function CharacterChatClient({
               ) : null;
             })()}
           </div>
-          <div className="absolute right-0 top-0 flex items-center gap-0.5">
-            <button
-              type="button"
-              onClick={() => setThreadListOpen((o) => !o)}
-              className="rounded-lg p-2 text-white/70 hover:bg-white/10 hover:text-white"
-              aria-label="대화 목록"
-              aria-expanded={threadListOpen}
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-              </svg>
-            </button>
-          </div>
         </div>
-        {threadListOpen ? (
-          <div
-            className="absolute right-2 top-12 z-20 max-h-[60vh] w-[min(280px,85vw)] overflow-y-auto rounded-xl border border-white/10 bg-[#0B0C10] py-2 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              type="button"
-              onClick={() => {
-                const pid = pananaIdRef.current || getPananaId();
-                const newId = `t-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-                addThread({ pananaId: pid, characterSlug, threadId: newId, title: "새 대화" });
-                setThreadListState(getThreadList({ pananaId: pid, characterSlug }));
-                setCurrentThreadId(newId);
-                setMessages([]);
-                setThreadListOpen(false);
-              }}
-              className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-[13px] font-semibold text-panana-pink hover:bg-white/5"
-              aria-label="새 대화"
-            >
-              <span className="text-base">+</span> 새 대화
-            </button>
-            {threadList.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => {
-                  setCurrentThreadId(t.id);
-                  setThreadListOpen(false);
-                }}
-                className={`flex w-full flex-col items-start gap-0.5 px-4 py-2.5 text-left text-[12px] hover:bg-white/5 ${
-                  t.id === currentThreadId ? "bg-white/10 text-white" : "text-white/75"
-                }`}
-                aria-label={`대화: ${t.title}`}
-              >
-                <span className="truncate font-semibold">{t.title}</span>
-                <span className="text-[11px] text-white/45">
-                  {t.updatedAt ? new Date(t.updatedAt).toLocaleDateString("ko-KR", { month: "short", day: "numeric" }) : ""}
-                </span>
-              </button>
-            ))}
-          </div>
-        ) : null}
-
         {/* alpha LLM selector */}
         <div className="mt-2 flex items-center justify-center gap-2">
           {PROVIDERS.map((p) => {

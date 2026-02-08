@@ -26,6 +26,8 @@ function sanitizeAssistantText(raw: string, tvars: Record<string, any>) {
     s = s.replace(/\[([^\]]*)\]/g, (_m, inner) => `[${replaceInner(inner)}]`);
     s = s.replace(/【([^】]*)】/g, (_m, inner) => `【${replaceInner(inner)}】`);
   }
+  // 5) AI가 말 앞에 붙이는 ... 제거
+  s = s.replace(/^[\s.]*\.{2,}[\s.]*/g, "").replace(/^[\s]*…[\s]*/g, "");
   return s.trim();
 }
 
@@ -42,6 +44,8 @@ const BodySchema = z.object({
   sceneId: z.string().min(1).optional(),
   // (선택) 유저가 ( ) 괄호 안에 입력한 지문(행동/상황 묘사) — 마지막 user 메시지에 주입
   userScript: z.string().min(1).optional(),
+  // (선택) 도전 모드: challengeId가 있으면 지문 사용 금지 + 성공 키워드 감지
+  challengeId: z.string().uuid().optional(),
   // 프론트 UX 옵션: 응답 길이를 짧게(2~3문장) 유도
   concise: z.boolean().optional(),
   // 홈 "스파이시" 토글이 켜졌을 때 성인 대화 허용을 요청(캐릭터가 지원할 때만 서버가 허용)
@@ -90,6 +94,75 @@ function getSupabaseAdminIfPossible() {
 
 function isUuid(v: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(v || ""));
+}
+
+async function loadChallengeById(challengeId: string): Promise<{ successKeywords: string[]; partialMatch: boolean } | null> {
+  const sb = getSupabaseAdminIfPossible();
+  if (!sb || !isUuid(challengeId)) return null;
+  const { data, error } = await sb
+    .from("panana_challenges")
+    .select("success_keywords, partial_match")
+    .eq("id", challengeId)
+    .eq("active", true)
+    .maybeSingle();
+  if (error || !data) return null;
+  const keywords = Array.isArray((data as any).success_keywords) ? (data as any).success_keywords : [];
+  const partialMatch = Boolean((data as any).partial_match);
+  return { successKeywords: keywords.filter((k: string) => String(k || "").trim()), partialMatch };
+}
+
+function removeParenthesisBlocks(s: string): string {
+  return String(s || "")
+    .replace(/\([^)]*\)/g, "")
+    .replace(/（[^）]*）/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function checkChallengeSuccess(text: string, keywords: string[], partialMatch: boolean): boolean {
+  if (!keywords.length) return false;
+  const t = String(text || "").toLowerCase();
+  for (const k of keywords) {
+    const kw = String(k || "").trim();
+    if (!kw) continue;
+    const kwLower = kw.toLowerCase();
+    if (partialMatch && t.includes(kwLower)) return true;
+    if (!partialMatch && t === kwLower) return true;
+  }
+  return false;
+}
+
+/** LLM 판사: 키워드가 있어도 문맥상 캐릭터가 진심으로 수락했는지 판단. (예: "사랑은 다른 문제죠" → 거절) */
+async function judgeChallengeAcceptance(args: {
+  aiResponse: string;
+  lastUserMessage: string;
+  keywords: string[];
+}): Promise<boolean> {
+  const apiKey = getEnvKey("gemini");
+  if (!apiKey) return false;
+  const prompt = `[도전 모드 성공 판정]
+캐릭터가 유저의 고백/사랑 표현을 진심으로 받아들였는가?
+- 유저 마지막 메시지: "${String(args.lastUserMessage || "").slice(0, 200)}"
+- 캐릭터 응답: "${String(args.aiResponse || "").slice(0, 400)}"
+- 성공 키워드(예시): ${(args.keywords || []).slice(0, 5).join(", ")}
+
+캐릭터가 회피·거절·부정("사랑은 다른 문제", "아직 아닌 것 같아" 등)했으면 아니오.
+캐릭터가 수락·호응·동의("저도 사랑해요", "받아줄게" 등)했으면 예.
+예 또는 아니오로만 답하시오.`;
+  try {
+    const out = await callGemini({
+      apiKey,
+      model: "gemini-2.5-flash",
+      temperature: 0,
+      max_tokens: 8,
+      top_p: 1,
+      messages: [{ role: "user", content: prompt }],
+    });
+    const raw = String(out.text || "").trim();
+    return /^예\b/i.test(raw) || /^yes\b/i.test(raw);
+  } catch {
+    return false;
+  }
 }
 
 async function fetchAdultVerified(pananaId: string) {
@@ -165,7 +238,7 @@ function selectGeminiModel(
     .reverse()
     .find((m) => m.role === "assistant")
     ?.content?.length || 0;
-  if (totalChars > 8000 || msgCount > 12 || lastAssistant > 500) return "gemini-2.5-pro";
+  if (totalChars > 12000 || msgCount > 10 || lastAssistant > 400) return "gemini-2.5-pro";
   return "gemini-2.5-flash";
 }
 
@@ -634,6 +707,19 @@ export async function POST(req: Request) {
       system = system ? `${system}\n\n${rule}` : rule;
     }
 
+    let challengeMeta: { successKeywords: string[]; partialMatch: boolean } | null = null;
+    if (body.challengeId) {
+      challengeMeta = await loadChallengeById(body.challengeId);
+      // 지문(괄호) 금지 규칙 제거: LLM은 자유롭게 지문 포함 출력, 후처리(removeParenthesisBlocks)로 괄호 제거
+      // 성공 판정은 괄호 제거 후 대화 텍스트에만 적용(checkChallengeSuccess)
+      const kwList = (challengeMeta?.successKeywords || []).filter(Boolean).join(", ");
+      const kwHint = kwList
+        ? `다음 표현은 대화가 충분히 진행된 후에만 사용한다: ${kwList}. 초반에는 절대 사용하지 않는다. `
+        : "";
+      const challengeBlock = `[도전 모드] 이 대화는 도전 모드이다. 당신은 쉽게 마음을 열지 않는다. ${kwHint}유저가 초반에 고백·사랑 표현·결정적 키워드를 해도 당황하거나 회피하거나 부담스러워하며 거절·무시·주제 전환한다. 대화가 자연스럽게 깊어지고 분위기가 무르익은 후에만 진심을 받아들일 수 있다.`;
+      system = system ? `${system}\n\n${challengeBlock}` : challengeBlock;
+    }
+
     if (pananaIdFromRuntime) {
       const profileNote = await fetchProfileNote(pananaIdFromRuntime);
       if (profileNote) {
@@ -682,7 +768,7 @@ export async function POST(req: Request) {
     if (system) system = interpolateTemplate(system, tvars);
     let nonSystemInterpolated = nonSystem.map((m) => ({ ...m, content: interpolateTemplate(m.content, tvars) }));
     // 유저 지문(( ) 괄호 입력): 마지막 user 메시지 앞에 주입
-    const userScript = String((body as any).userScript || "").trim();
+    const userScript = body.challengeId ? "" : String((body as any).userScript || "").trim();
     if (userScript) {
       const lastIdx = nonSystemInterpolated.map((m) => m.role).lastIndexOf("user");
       if (lastIdx >= 0) {
@@ -795,6 +881,24 @@ export async function POST(req: Request) {
     }
 
     let text = sanitizeAssistantText(String(out.text || ""), tvars);
+    if (challengeMeta) {
+      text = removeParenthesisBlocks(text);
+    }
+    const minTurnsForSuccess = 4;
+    const keywordMatch =
+      challengeMeta &&
+      challengeMeta.successKeywords.length > 0 &&
+      userTurns >= minTurnsForSuccess &&
+      checkChallengeSuccess(text, challengeMeta.successKeywords, challengeMeta.partialMatch);
+    const lastUserMsg = [...nonSystem].reverse().find((m) => m.role === "user")?.content || "";
+    const challengeSuccess =
+      keywordMatch &&
+      (await judgeChallengeAcceptance({
+        aiResponse: text,
+        lastUserMessage: lastUserMsg,
+        keywords: challengeMeta!.successKeywords,
+      }));
+
     if (!text) {
       if (body.provider === "gemini") {
         // 1회 자동 재시도: 시스템/대화 축약 + 텍스트 출력 강제 규칙 추가
@@ -836,6 +940,7 @@ export async function POST(req: Request) {
       provider: body.provider,
       model,
       text,
+      ...(body.challengeId ? { challengeSuccess } : {}),
       runtime: {
         ...(body.runtime || {}),
         variables: runtimeVariablesMerged,
@@ -851,7 +956,10 @@ export async function POST(req: Request) {
       events: runtimeEvents,
     });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || "Unknown error" }, { status: 400 });
+    const msg = e?.message || "Unknown error";
+    const zodIssues = Array.isArray((e as any)?.issues) ? JSON.stringify((e as any).issues) : "";
+    const full = zodIssues ? `${msg} [Zod: ${zodIssues}]` : msg;
+    return NextResponse.json({ ok: false, error: full }, { status: 400 });
   }
 }
 

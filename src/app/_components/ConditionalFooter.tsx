@@ -9,6 +9,7 @@ export function ConditionalFooter() {
     pathname.startsWith("/admin") ||
     pathname.startsWith("/studio") ||
     pathname.startsWith("/airport/chat") ||
+    pathname.startsWith("/challenge/") ||
     (pathname.startsWith("/c/") && pathname.includes("/chat"))
   ) {
     return null;

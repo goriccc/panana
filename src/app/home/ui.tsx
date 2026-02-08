@@ -281,6 +281,14 @@ export function HomeClient({
   const [cachedPersonalizedSlugs, setCachedPersonalizedSlugs] = useState<string[] | null>(null);
   const [popularSlugs, setPopularSlugs] = useState<string[] | null>(null);
   const [popularReady, setPopularReady] = useState(false);
+  const [challengeItems, setChallengeItems] = useState<
+    Array<{ id: string; title: string; challengeGoal: string; challengeSituation: string; characterSlug: string; characterName: string; profileImageUrl: string | null; hashtags: string[] }>
+  >([]);
+  const [challengeLoading, setChallengeLoading] = useState(false);
+  const [rankingItems, setRankingItems] = useState<
+    Array<{ slug: string; name: string; profileImageUrl: string | null; tagline: string | null; handle: string | null; hashtags: string[] }>
+  >([]);
+  const [rankingLoading, setRankingLoading] = useState(false);
   const [categoryItemsBySlug, setCategoryItemsBySlug] = useState<Record<string, ContentCardItem[]>>({});
   const [categoryPagingBySlug, setCategoryPagingBySlug] = useState<
     Record<string, { offset: number; hasMore: boolean; loading: boolean }>
@@ -1030,6 +1038,68 @@ export function HomeClient({
     setSearchLimit(8);
   }, [searchQ]);
 
+  // 도전·순위 탭 데이터 미리 로드 (홈 진입 시 즉시 fetch → 탭 선택 시 즉시 표시)
+  useEffect(() => {
+    if (userGenderLoading) return;
+    let alive = true;
+    const genderQCh = userGender && userGender !== "private" ? `gender=${userGender}` : "";
+    const genderQRk = userGender && userGender !== "private" ? `&gender=${userGender}` : "";
+    setChallengeLoading(true);
+    setRankingLoading(true);
+    Promise.all([
+      fetch(`/api/challenges${genderQCh ? `?${genderQCh}` : ""}`).then((r) => r.json()),
+      fetch(`/api/characters/ranking?limit=24${genderQRk}`).then((r) => r.json()),
+    ])
+      .then(([chData, rkData]) => {
+        if (!alive) return;
+        if (chData?.ok && Array.isArray(chData.items)) {
+          setChallengeItems(
+            chData.items.map((it: any) => ({
+              id: it.id,
+              title: it.title || "",
+              challengeGoal: it.challengeGoal || "",
+              challengeSituation: it.challengeSituation || "",
+              characterSlug: it.characterSlug || "",
+              characterName: it.characterName || it.characterSlug || "",
+              profileImageUrl: it.profileImageUrl || null,
+              hashtags: Array.isArray(it.hashtags) ? it.hashtags : [],
+            }))
+          );
+        } else {
+          setChallengeItems([]);
+        }
+        if (rkData?.ok && Array.isArray(rkData.items)) {
+          setRankingItems(
+            rkData.items.map((it: any) => ({
+              slug: it.slug || "",
+              name: it.name || it.slug || "",
+              profileImageUrl: it.profileImageUrl || null,
+              tagline: it.tagline || null,
+              handle: it.handle || null,
+              hashtags: Array.isArray(it.hashtags) ? it.hashtags : [],
+            }))
+          );
+        } else {
+          setRankingItems([]);
+        }
+      })
+      .catch(() => {
+        if (alive) {
+          setChallengeItems([]);
+          setRankingItems([]);
+        }
+      })
+      .finally(() => {
+        if (alive) {
+          setChallengeLoading(false);
+          setRankingLoading(false);
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, [userGenderLoading, userGender]);
+
   useEffect(() => {
     if (activeTab !== "search") return;
     // 탭 클릭 직후 바로 포커스가 들어가야 스샷처럼 테마 핑크 포커싱이 보인다.
@@ -1047,9 +1117,10 @@ export function HomeClient({
           : "bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.18),transparent_60%),linear-gradient(#07070B,#0B0C10)]",
       ].join(" ")}
     >
-      <HomeHeader
-        active={activeTab}
-        onChange={(tab) => {
+      <header className="sticky top-0 z-20 w-full bg-[#07070B]/95 pb-4 backdrop-blur-sm">
+        <HomeHeader
+          active={activeTab}
+          onChange={(tab) => {
           setActiveTab(tab);
           // 탭별 URL 업데이트 → 브라우저 뒤로가기 시 올바른 탭 복원
           const url = tab === "home" ? "/home" : `/home?tab=${tab}`;
@@ -1068,7 +1139,8 @@ export function HomeClient({
           } catch {}
         }}
         menuVisibility={menuVisibility}
-      />
+        />
+      </header>
 
       <main className="mx-auto w-full max-w-[420px] px-5 pb-10 pt-5">
         {activeTab === "search" ? (
@@ -1287,7 +1359,165 @@ export function HomeClient({
           </div>
         ) : null}
 
-        {activeTab === "my" || activeTab === "search" ? null : !safetyReady || !genderReady ? (
+        {activeTab === "challenge" ? (
+          <div className="space-y-6 pb-10">
+            {challengeLoading ? (
+              <div className="mt-6 space-y-6">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="overflow-hidden border border-white/10 bg-white/[0.03]">
+                    <div className="aspect-[16/9] w-full animate-pulse bg-white/[0.06]" />
+                    <div className="space-y-2 p-4">
+                      <div className="h-3 w-40 rounded-full bg-white/10 animate-pulse" />
+                      <div className="h-5 w-full rounded-full bg-white/10 animate-pulse" />
+                      <div className="h-3 w-full rounded-full bg-white/10 animate-pulse" />
+                      <div className="h-3 w-24 rounded-full bg-white/10 animate-pulse" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : challengeItems.length === 0 ? (
+              <div className="mt-10 text-center text-[13px] font-semibold text-white/50">등록된 도전이 없어요.</div>
+            ) : (
+              <div className="mt-6 space-y-6">
+                {challengeItems.map((it) => {
+                  const allTags = (it.hashtags || []).map((t) => (t.startsWith("#") ? t : `#${t}`));
+                  const displayTags = allTags.slice(0, 5);
+                  const extraCount = allTags.length - 5;
+                  return (
+                    <Link
+                      key={it.id}
+                      href={`/challenge/${it.id}`}
+                    className="block overflow-hidden border border-white/10 bg-white/[0.03] transition hover:bg-white/[0.05]"
+                    prefetch={true}
+                    >
+                      <div className="relative aspect-[16/9] w-full">
+                        {it.profileImageUrl ? (
+                          /* eslint-disable-next-line @next/next/no-img-element */
+                          <img
+                            src={it.profileImageUrl}
+                            alt=""
+                            className="h-full w-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center bg-white/10">
+                            <Image src="/dumyprofile.png" alt="" width={80} height={80} className="opacity-60" />
+                          </div>
+                        )}
+                      </div>
+                      <div className="bg-white/[0.02] p-4">
+                        {it.characterSlug ? <div className="text-[11px] font-semibold text-white/45">@{it.characterSlug}</div> : null}
+                        <div className="mt-1 text-[16px] font-extrabold leading-snug text-white/95">{it.title}</div>
+                        {it.challengeSituation ? (
+                          <div className="mt-2 line-clamp-2 text-[12px] font-semibold leading-relaxed text-white/60">
+                            {it.challengeSituation}
+                          </div>
+                        ) : null}
+                        {(displayTags.length > 0 || extraCount > 0) ? (
+                          <div className="mt-3 flex flex-nowrap gap-x-2 text-[12px] font-semibold leading-[18px] text-[#ffa9d6]">
+                            {displayTags.map((t) => (
+                              <span key={t} className="max-w-[10rem] truncate">
+                                {t}
+                              </span>
+                            ))}
+                            {extraCount > 0 ? (
+                              <span className="shrink-0 text-[#ffa9d6]/70">+{extraCount}</span>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ) : activeTab === "ranking" ? (
+          <div className="space-y-6 pb-10">
+            {rankingLoading ? (
+              <div className="mt-6 space-y-6">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="overflow-hidden border border-white/10 bg-white/[0.03]">
+                    <div className="relative aspect-[4/5] w-full animate-pulse bg-white/[0.06]" />
+                    <div className="space-y-2 p-4">
+                      <div className="h-3 w-16 rounded-full bg-white/10 animate-pulse" />
+                      <div className="h-5 w-32 rounded-full bg-white/10 animate-pulse" />
+                      <div className="h-3 w-full rounded-full bg-white/10 animate-pulse" />
+                      <div className="h-3 w-24 rounded-full bg-white/10 animate-pulse" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : rankingItems.length === 0 ? (
+              <div className="mt-10 text-center text-[13px] font-semibold text-white/50">순위 데이터가 없어요.</div>
+            ) : (
+              <>
+                <div className="mt-6 space-y-6">
+                  {rankingItems.map((it, idx) => {
+                    const handle = it.handle ? (it.handle.startsWith("@") ? it.handle : `@${it.handle}`) : it.slug ? `@${it.slug}` : null;
+                    const allTags = (it.hashtags || []).map((t) => (t.startsWith("#") ? t : `#${t}`));
+                    const displayTags = allTags.slice(0, 5);
+                    const extraCount = allTags.length - 5;
+                    return (
+                      <Link
+                        key={it.slug}
+                        href={it.slug ? `/c/${it.slug}` : "/home"}
+                        className="block overflow-hidden border border-white/10 bg-white/[0.03] transition hover:bg-white/[0.05]"
+                        prefetch={true}
+                      >
+                        <div className="relative aspect-[4/5] w-full">
+                          <span className="absolute left-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-panana-pink/90 text-[13px] font-extrabold text-white shadow-lg">
+                            #{idx + 1}
+                          </span>
+                          {it.profileImageUrl ? (
+                            /* eslint-disable-next-line @next/next/no-img-element */
+                            <img
+                              src={it.profileImageUrl}
+                              alt=""
+                              className="h-full w-full object-cover"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center bg-white/10">
+                              <Image src="/dumyprofile.png" alt="" width={80} height={80} className="opacity-60" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="bg-white/[0.02] p-4">
+                          {handle ? <div className="text-[11px] font-semibold text-white/45">{handle}</div> : null}
+                          <div className="mt-1 text-[16px] font-extrabold leading-snug text-white/95">{it.name}</div>
+                          {it.tagline ? (
+                            <div className="mt-2 line-clamp-2 text-[12px] font-semibold leading-relaxed text-white/60">{it.tagline}</div>
+                          ) : null}
+                          {(displayTags.length > 0 || extraCount > 0) ? (
+                            <div className="mt-2 flex flex-nowrap gap-x-2 text-[12px] font-semibold leading-[18px] text-[#ffa9d6]">
+                              {displayTags.map((t) => (
+                                <span key={t} className="max-w-[10rem] truncate">
+                                  {t}
+                                </span>
+                              ))}
+                              {extraCount > 0 ? (
+                                <span className="shrink-0 text-[#ffa9d6]/70">+{extraCount}</span>
+                              ) : null}
+                            </div>
+                          ) : null}
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
+                <div className="mt-8 text-center">
+                  <Link
+                    href="/home"
+                    className="text-[13px] font-extrabold text-panana-pink"
+                  >
+                    메인 화면으로 이동
+                  </Link>
+                </div>
+              </>
+            )}
+          </div>
+        ) : activeTab === "my" || activeTab === "search" ? null : !safetyReady || !genderReady ? (
           <div className="space-y-6">
             <div className="aspect-[16/9] w-full animate-pulse rounded-[8px] bg-white/[0.04]" />
             <div className="mt-14 space-y-16">

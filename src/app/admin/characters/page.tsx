@@ -43,8 +43,37 @@ export default function AdminCharactersPage() {
   const selected = useMemo(() => rows.find((r) => r.id === selectedId) || null, [rows, selectedId]);
   const pageSize = 10;
   const [page, setPage] = useState(1);
-  const pageCount = useMemo(() => Math.max(1, Math.ceil(rows.length / pageSize)), [rows.length]);
-  const pagedRows = useMemo(() => rows.slice((page - 1) * pageSize, page * pageSize), [rows, page]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [genderFilter, setGenderFilter] = useState<"" | "male" | "female">("");
+
+  const filteredRows = useMemo(() => {
+    let list = rows;
+    if (genderFilter) {
+      list = list.filter((r) => r.gender === genderFilter);
+    }
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter((r) => {
+      const name = (r.name || "").toLowerCase();
+      const slug = (r.slug || "").toLowerCase();
+      const handle = (r.handle || "").replace(/^@/, "").toLowerCase();
+      const tagline = (r.tagline || "").toLowerCase();
+      const hashtagStr = (r.hashtags || []).join(" ").toLowerCase();
+      return (
+        name.includes(q) ||
+        slug.includes(q) ||
+        handle.includes(q) ||
+        tagline.includes(q) ||
+        hashtagStr.includes(q)
+      );
+    });
+  }, [rows, searchQuery, genderFilter]);
+
+  const pageCount = useMemo(() => Math.max(1, Math.ceil(filteredRows.length / pageSize)), [filteredRows.length]);
+  const pagedRows = useMemo(
+    () => filteredRows.slice((page - 1) * pageSize, page * pageSize),
+    [filteredRows, page]
+  );
 
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [studioCharacters, setStudioCharacters] = useState<StudioCharacterPick[]>([]);
@@ -593,11 +622,63 @@ export default function AdminCharactersPage() {
 
         <div>
           <div>
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/10 bg-white/[0.02] px-3 py-2 text-[12px] font-semibold text-white/45">
-              <div>
-                {rows.length === 0
+            <div className="mb-3 flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.02] px-3 py-2">
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGenderFilter("");
+                    setPage(1);
+                  }}
+                  className={`rounded-lg px-3 py-1.5 text-[12px] font-extrabold transition ${
+                    !genderFilter ? "bg-panana-pink/30 text-panana-pink ring-1 ring-panana-pink/50" : "bg-white/5 text-white/60 hover:bg-white/10"
+                  }`}
+                >
+                  전체
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGenderFilter("male");
+                    setPage(1);
+                  }}
+                  className={`rounded-lg px-3 py-1.5 text-[12px] font-extrabold transition ${
+                    genderFilter === "male" ? "bg-panana-pink/30 text-panana-pink ring-1 ring-panana-pink/50" : "bg-white/5 text-white/60 hover:bg-white/10"
+                  }`}
+                >
+                  남성
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGenderFilter("female");
+                    setPage(1);
+                  }}
+                  className={`rounded-lg px-3 py-1.5 text-[12px] font-extrabold transition ${
+                    genderFilter === "female" ? "bg-panana-pink/30 text-panana-pink ring-1 ring-panana-pink/50" : "bg-white/5 text-white/60 hover:bg-white/10"
+                  }`}
+                >
+                  여성
+                </button>
+              </div>
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setPage(1);
+                }}
+                placeholder="이름, 슬러그, 핸들, 태그라인, 해시태그로 검색"
+                className="min-w-[200px] flex-1 rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-[12px] font-semibold text-white/80 placeholder:text-white/35 outline-none focus:border-panana-pink/40"
+                aria-label="캐릭터 검색"
+              />
+              <div className="flex items-center gap-2 text-[12px] font-semibold text-white/45">
+                {filteredRows.length === 0
                   ? "0개"
-                  : `${(page - 1) * pageSize + 1}-${Math.min(page * pageSize, rows.length)} / ${rows.length}개`}
+                  : `${(page - 1) * pageSize + 1}-${Math.min(page * pageSize, filteredRows.length)} / ${filteredRows.length}개`}
+                {searchQuery.trim() && filteredRows.length !== rows.length ? (
+                  <span className="text-panana-pink/80">(전체 {rows.length}개 중)</span>
+                ) : null}
               </div>
               <div className="flex items-center gap-2">
                 <AdminButton variant="ghost" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>

@@ -460,7 +460,7 @@ export function CategoryClient({ category }: { category: Category }) {
 
   return (
     <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.14),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">
-      <header className="mx-auto w-full max-w-[420px] px-5 pt-3">
+      <header className="sticky top-0 z-20 mx-auto w-full max-w-[420px] bg-[#07070B]/95 px-5 pb-4 pt-3 backdrop-blur-sm">
         <div className="relative flex h-11 items-center">
           <Link href="/home" aria-label="뒤로가기" className="absolute left-0 p-2">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
