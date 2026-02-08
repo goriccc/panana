@@ -760,7 +760,6 @@ export function ChallengeClient({
                   }
                 }}
                 placeholder="메시지를 입력하세요"
-                disabled={sending}
                 className="w-full bg-transparent text-base font-semibold text-white/70 outline-none placeholder:text-white/30"
                 style={{ fontSize: "16px" }}
                 aria-label="메시지 입력"
