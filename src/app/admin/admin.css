@@ -28,9 +28,7 @@
 .admin-scope select {
   color: #fff;
   background-color: #0f1014;
-}
-
-.admin-scope select option {
+}.admin-scope select option {
   background-color: #1a1b22;
   color: #e5e7eb;
 }

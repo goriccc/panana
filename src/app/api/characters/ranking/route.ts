@@ -45,6 +45,8 @@ export async function GET(req: Request) {
     const limit = Math.max(4, Math.min(60, Number(url.searchParams.get("limit") || 24)));
     const gender = String(url.searchParams.get("gender") || "").trim().toLowerCase();
     const validGender = ["female", "male"].includes(gender) ? gender : null;
+    const safetyParam = url.searchParams.get("safetySupported");
+    const filterBySafety = safetyParam === "true" ? true : safetyParam === "false" ? false : null;
 
     const popular = await loadPopularSettings();
     const days = Math.max(7, Math.min(120, Number(url.searchParams.get("days") || popular.days)));
@@ -158,12 +160,17 @@ export async function GET(req: Request) {
 
     let charQ = sb
       .from("panana_characters")
-      .select("slug, name, tagline, profile_image_url, handle, hashtags, gender")
+      .select("slug, name, tagline, profile_image_url, handle, hashtags, gender, safety_supported")
       .eq("active", true)
       .in("slug", slugs);
 
     if (validGender) {
       charQ = charQ.or(`gender.eq.${validGender},gender.is.null`);
+    }
+    if (filterBySafety === true) {
+      charQ = charQ.eq("safety_supported", true);
+    } else if (filterBySafety === false) {
+      charQ = charQ.eq("safety_supported", false);
     }
 
     const { data: chars, error: charErr } = await charQ;
@@ -178,6 +185,7 @@ export async function GET(req: Request) {
       handle: string | null;
       hashtags: string[];
       gender: string | null;
+      safetySupported: boolean;
       msgCount: number;
       recentCount: number;
       userCount: number;
@@ -196,6 +204,7 @@ export async function GET(req: Request) {
         handle: c.handle || null,
         hashtags: hashtags.filter((h: string) => String(h || "").trim()),
         gender: c.gender || null,
+        safetySupported: Boolean((c as any)?.safety_supported),
         msgCount: r.msgCount,
         recentCount: r.recentCount,
         userCount: r.userCount,

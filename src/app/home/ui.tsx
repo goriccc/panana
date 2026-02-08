@@ -132,7 +132,10 @@ function hasGenderData(items: ContentCardItem[]): boolean {
 
 function filterByPreferredGender(items: ContentCardItem[], preferred: CharacterGender | null): ContentCardItem[] {
   if (!preferred) return items;
-  return items.filter((it) => getCharacterGender(it) === preferred);
+  return items.filter((it) => {
+    const g = getCharacterGender(it);
+    return g === preferred || g === "unknown";
+  });
 }
 
 function filterKnownGender(items: ContentCardItem[]): ContentCardItem[] {
@@ -231,20 +234,34 @@ export function HomeClient({
 
   const sourceBase = categories?.length ? categories : fallbackCategories;
   const source = useMemo(() => {
-    return (sourceBase || [])
-      .map((c) => ({
-        ...c,
-        items: (() => {
-          const filtered = (c.items || []).filter((it) =>
-            effectiveSafetyOn
-              ? Boolean((it as any)?.safetySupported)
-              : !(it as any)?.safetySupported
-          );
-          if (!preferredGender) return filtered;
-          return filtered.filter((it) => getCharacterGender(it) === preferredGender);
-        })(),
-      }))
-      .filter((c) => (c.items || []).length > 0);
+    const base = sourceBase || [];
+    const mapped = base.map((c) => ({
+      ...c,
+      items: (() => {
+        const filtered = (c.items || []).filter((it) =>
+          effectiveSafetyOn
+            ? Boolean((it as any)?.safetySupported)
+            : !(it as any)?.safetySupported
+        );
+        if (!preferredGender) return filtered;
+        return filtered.filter((it) => getCharacterGender(it) === preferredGender);
+      })(),
+    }));
+    const withItems = mapped.filter((c) => (c.items || []).length > 0);
+    // 스파이시 ON인데 서버 카테고리에 스파이시 아이템이 하나도 없으면 fallback 표시 (빈 화면 방지)
+    if (effectiveSafetyOn && withItems.length === 0 && base.length > 0) {
+      return (fallbackCategories || [])
+        .map((c) => ({
+          ...c,
+          items: (() => {
+            const filtered = (c.items || []).filter((it) => Boolean((it as any)?.safetySupported));
+            if (!preferredGender) return filtered;
+            return filtered.filter((it) => getCharacterGender(it) === preferredGender);
+          })(),
+        }))
+        .filter((c) => (c.items || []).length > 0);
+    }
+    return withItems;
   }, [effectiveSafetyOn, sourceBase, preferredGender]);
   const allItems = useMemo(() => {
     const all = (source || []).flatMap((c) => c.items || []);
@@ -859,8 +876,8 @@ export function HomeClient({
     }
   }, [topCategories, categoryItemsBySlug, preferredGender, effectiveSafetyOn]);
 
+  // "새로 올라온" 카테고리: preferredGender 있으면 성별별 API 호출, null(둘다/공개안함)이면 성별 없이 호출해 남녀 모두 표시
   useEffect(() => {
-    if (!preferredGender) return;
     let alive = true;
     (async () => {
       try {
@@ -877,20 +894,20 @@ export function HomeClient({
             }
           } catch {}
         }
-        if (cached?.length) {
+        if (cached?.length && preferredGender) {
           setCategoryItemsBySlug((prev) => ({ ...prev, new: cached as ContentCardItem[] }));
           setNewGenderLoading(false);
         } else {
           setNewGenderLoading(true);
-          setCategoryItemsBySlug((prev) => ({ ...prev, new: [] }));
+          if (!preferredGender) setCategoryItemsBySlug((prev) => ({ ...prev, new: [] }));
         }
         const params = new URLSearchParams({
           slug: "new",
           offset: "0",
           limit: "12",
           safetySupported: String(effectiveSafetyOn),
-          gender: preferredGender,
         });
+        if (preferredGender) params.set("gender", preferredGender);
         const res = await fetch(`/api/category-items?${params.toString()}`);
         const data = await res.json().catch(() => null);
         if (!alive) return;
@@ -998,7 +1015,6 @@ export function HomeClient({
       isForYou(cat.slug, cat.name) || isPopular(cat.slug, cat.name) || isNew(cat.slug, cat.name)
         ? categoryItemsBySlug[cat.slug] || cat.items || []
         : categoryItemsBySlug[cat.slug] || cat.items || [];
-    if (preferredGender && !hasGenderData(base)) return [];
     const genderFiltered = filterByPreferredGender(base, preferredGender);
     if (effectiveSafetyOn) return genderFiltered.filter((it) => Boolean((it as any)?.safetySupported));
     return genderFiltered.filter((it) => !(it as any)?.safetySupported);
@@ -1038,7 +1054,7 @@ export function HomeClient({
     setSearchLimit(8);
   }, [searchQ]);
 
-  // 도전·순위 탭 데이터 미리 로드 (홈 진입 시 즉시 fetch → 탭 선택 시 즉시 표시)
+  // 도전·순위 탭 데이터 미리 로드 (홈 진입 시 즉시 fetch → 탭 선택 시 즉시 표시). 스파이시 ON/OFF에 따라 순위 탭 필터 적용.
   useEffect(() => {
     if (userGenderLoading) return;
     let alive = true;
@@ -1046,11 +1062,12 @@ export function HomeClient({
     const rankCharGender =
       userGender === "male" ? "female" : userGender === "female" ? "male" : null;
     const genderQRk = rankCharGender ? `&gender=${rankCharGender}` : "";
+    const safetyQ = `&safetySupported=${effectiveSafetyOn}`;
     setChallengeLoading(true);
     setRankingLoading(true);
     Promise.all([
       fetch(`/api/challenges${genderQCh ? `?${genderQCh}` : ""}`).then((r) => r.json()),
-      fetch(`/api/characters/ranking?limit=48${genderQRk}`).then((r) => r.json()),
+      fetch(`/api/characters/ranking?limit=48${genderQRk}${safetyQ}`).then((r) => r.json()),
     ])
       .then(([chData, rkData]) => {
         if (!alive) return;
@@ -1100,7 +1117,7 @@ export function HomeClient({
     return () => {
       alive = false;
     };
-  }, [userGenderLoading, userGender]);
+  }, [userGenderLoading, userGender, effectiveSafetyOn]);
 
   useEffect(() => {
     if (activeTab !== "search") return;
@@ -1440,7 +1457,7 @@ export function HomeClient({
               <div className="mt-6 space-y-6">
                 {Array.from({ length: 4 }).map((_, i) => (
                   <div key={i} className="overflow-hidden border border-white/10 bg-white/[0.03]">
-                    <div className="relative aspect-[4/5] w-full animate-pulse bg-white/[0.06]" />
+                    <div className="relative aspect-square w-full animate-pulse bg-white/[0.06]" />
                     <div className="space-y-2 p-4">
                       <div className="h-3 w-16 rounded-full bg-white/10 animate-pulse" />
                       <div className="h-5 w-32 rounded-full bg-white/10 animate-pulse" />
@@ -1467,7 +1484,7 @@ export function HomeClient({
                         className="block overflow-hidden border border-white/10 bg-white/[0.03] transition hover:bg-white/[0.05]"
                         prefetch={true}
                       >
-                        <div className="relative aspect-[4/5] w-full">
+                        <div className="relative aspect-square w-full">
                           <span className="absolute left-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-panana-pink/90 text-[13px] font-extrabold text-white shadow-lg">
                             #{idx + 1}
                           </span>
@@ -1607,7 +1624,7 @@ export function HomeClient({
                 const displayItems = getDisplayItems(cat);
                 const paging = categoryPagingBySlug[cat.slug];
                 const baseItems = categoryItemsBySlug[cat.slug] || cat.items || [];
-                const showNewGenderSkeleton = cat.slug === "new" && preferredGender && (newGenderLoading || !hasGenderData(baseItems));
+                const showNewGenderSkeleton = cat.slug === "new" && newGenderLoading;
                 const showPopularGenderSkeleton =
                   isPopular(cat.slug, cat.name) &&
                   ((!popularReady) || (preferredGender && !hasGenderData(baseItems)));

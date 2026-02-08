@@ -35,7 +35,7 @@ export async function GET(req: Request) {
         partial_match,
         gender,
         sort_order,
-        panana_characters!inner(slug, name, profile_image_url, hashtags)
+        panana_characters!inner(slug, name, profile_image_url, hashtags, safety_supported)
       `
       )
       .eq("active", true)

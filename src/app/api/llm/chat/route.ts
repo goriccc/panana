@@ -126,8 +126,18 @@ function checkChallengeSuccess(text: string, keywords: string[], partialMatch: b
     const kw = String(k || "").trim();
     if (!kw) continue;
     const kwLower = kw.toLowerCase();
-    if (partialMatch && t.includes(kwLower)) return true;
-    if (!partialMatch && t === kwLower) return true;
+    // partialMatch=true: 부분 포함 검사, partialMatch=false: 단어 경계 기준 포함 검사
+    // (기존 exact match(t===kw)는 AI 응답 전체와 키워드 비교라 사실상 항상 실패하므로 폐기)
+    if (partialMatch) {
+      if (t.includes(kwLower)) return true;
+    } else {
+      // 단어 경계(공백·마침표·쉼표·줄바꿈 등) 기준으로 키워드가 독립적으로 포함되었는지 확인
+      const escaped = kwLower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp(`(?:^|[\\s.,!?~…·。，！？\\n])${escaped}(?:[\\s.,!?~…·。，！？\\n]|$)`);
+      if (re.test(t)) return true;
+      // fallback: 문장 부호 없이 바로 붙어있는 경우도 허용 (한국어 특성: "사랑해요." → "사랑해요" 포함)
+      if (t.includes(kwLower)) return true;
+    }
   }
   return false;
 }
@@ -137,17 +147,26 @@ async function judgeChallengeAcceptance(args: {
   aiResponse: string;
   lastUserMessage: string;
   keywords: string[];
+  recentHistory?: Array<{ role: string; content: string }>;
 }): Promise<boolean> {
   const apiKey = getEnvKey("gemini");
   if (!apiKey) return false;
+  // 최근 대화 맥락 구성 (최대 6턴)
+  const historyLines = (args.recentHistory || [])
+    .slice(-6)
+    .map((m) => `${m.role === "user" ? "유저" : "캐릭터"}: ${String(m.content || "").slice(0, 150)}`)
+    .join("\n");
   const prompt = `[도전 모드 성공 판정]
-캐릭터가 유저의 고백/사랑 표현을 진심으로 받아들였는가?
-- 유저 마지막 메시지: "${String(args.lastUserMessage || "").slice(0, 200)}"
-- 캐릭터 응답: "${String(args.aiResponse || "").slice(0, 400)}"
-- 성공 키워드(예시): ${(args.keywords || []).slice(0, 5).join(", ")}
+캐릭터의 최신 응답에 성공 키워드가 포함되어 있다. 이 키워드가 긍정적·진심 어린 맥락에서 사용되었는지 판단하라.
 
-캐릭터가 회피·거절·부정("사랑은 다른 문제", "아직 아닌 것 같아" 등)했으면 아니오.
-캐릭터가 수락·호응·동의("저도 사랑해요", "받아줄게" 등)했으면 예.
+${historyLines ? `[최근 대화 흐름]\n${historyLines}\n\n` : ""}- 캐릭터 최신 응답: "${String(args.aiResponse || "").slice(0, 500)}"
+- 성공 키워드: ${(args.keywords || []).slice(0, 6).join(", ")}
+
+판정 기준:
+- 캐릭터가 성공 키워드를 부정·회피·반어적으로 사용("사랑은 다른 문제", "아직 아닌 것 같아", "사랑이 뭔지 모르겠어" 등)했으면 → 아니오
+- 캐릭터가 성공 키워드를 긍정적·호의적·진심 어린 맥락에서 사용("사랑해요", "좋아해요", "받아줄게", "저도요" 등)했으면 → 예
+- 유저가 말해달라고 요청/지시했더라도, 캐릭터의 응답 자체가 진심이면 → 예
+
 예 또는 아니오로만 답하시오.`;
   try {
     const out = await callGemini({
@@ -891,12 +910,14 @@ export async function POST(req: Request) {
       userTurns >= minTurnsForSuccess &&
       checkChallengeSuccess(text, challengeMeta.successKeywords, challengeMeta.partialMatch);
     const lastUserMsg = [...nonSystem].reverse().find((m) => m.role === "user")?.content || "";
+    const recentHistory = nonSystem.slice(-6).map((m) => ({ role: m.role, content: m.content }));
     const challengeSuccess =
       keywordMatch &&
       (await judgeChallengeAcceptance({
         aiResponse: text,
         lastUserMessage: lastUserMsg,
         keywords: challengeMeta!.successKeywords,
+        recentHistory,
       }));
 
     if (!text) {

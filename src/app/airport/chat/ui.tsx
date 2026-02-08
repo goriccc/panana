@@ -1,9 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertModal } from "@/components/AlertModal";
 import { ScreenShell } from "@/components/ScreenShell";
+import { SurfaceCard } from "@/components/SurfaceCard";
 import { ensurePananaIdentity } from "@/lib/pananaApp/identity";
 import { fetchMyAccountInfo, type Gender, updateMyAccountInfo } from "@/lib/pananaApp/accountInfo";
 
@@ -409,16 +410,38 @@ export function AirportChatClient() {
         </div>
       </ScreenShell>
 
-      <AlertModal
-        open={modal.isOpen}
-        message={
-          "입국 심사를 건너뛰면 나에게 맞는\n캐릭터들을 못 만날 수 있어요.\n그래도 건너뛸까요?"
-        }
-        cancelHref="/airport/complete"
-        onConfirm={modal.close}
-        cancelText="건너뛰기"
-        confirmText="이어하기"
-      />
+      {modal.isOpen ? (
+        <div className="fixed inset-0 z-50">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" />
+          <div className="absolute inset-0 grid place-items-center px-3">
+            <SurfaceCard variant="outglow" className="w-[min(420px,calc(100vw-24px))] p-6">
+              <div className="text-center text-[16px] font-semibold text-white/90">입국 심사 건너뛰기</div>
+              <div className="mt-4 whitespace-pre-line text-center text-[14px] leading-[1.45] text-white/70">
+                입국 심사를 건너뛰면 나에게 맞는
+                {"\n"}
+                캐릭터들을 못 만날 수 있어요.
+                {"\n"}
+                그래도 건너뛸까요?
+              </div>
+              <div className="mt-6 flex gap-4">
+                <Link
+                  href="/airport/complete"
+                  className="flex-1 basis-0 whitespace-nowrap rounded-xl bg-white px-4 py-3 text-center text-[15px] font-semibold text-[#0B0C10]"
+                >
+                  건너뛰기
+                </Link>
+                <button
+                  type="button"
+                  onClick={modal.close}
+                  className="flex-1 basis-0 whitespace-nowrap rounded-xl bg-panana-pink px-4 py-3 text-center text-[15px] font-semibold text-white"
+                >
+                  이어하기
+                </button>
+              </div>
+            </SurfaceCard>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

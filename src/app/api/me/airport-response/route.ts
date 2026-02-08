@@ -101,9 +101,7 @@ export async function GET(req: Request) {
       .maybeSingle();
 
     if (error) throw error;
-    if (!data) return NextResponse.json({ ok: true, response: null });
-
-    return NextResponse.json({
+    if (!data) return NextResponse.json({ ok: true, response: null });    return NextResponse.json({
       ok: true,
       response: {
         purpose: String((data as any).purpose || ""),

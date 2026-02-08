@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { SurfaceCard } from "@/components/SurfaceCard";
 import { ensurePananaIdentity } from "@/lib/pananaApp/identity";
 
 function getPananaId(): string {
@@ -355,6 +356,8 @@ export function ChallengeClient({
     }
   }, [value, sending, messages, challenge, startedAt, startSession, provider, loadRanking]);
 
+  const [showGiveUpConfirm, setShowGiveUpConfirm] = useState(false);
+
   const giveUp = useCallback(async () => {
     const pid = pananaIdRef.current || getPananaId();
     try {
@@ -366,6 +369,26 @@ export function ChallengeClient({
     } catch {}
     router.push("/home?tab=challenge");
   }, [challenge.id, router]);
+
+  const confirmGiveUp = useCallback(() => {
+    setShowGiveUpConfirm(true);
+  }, []);
+
+  // 브라우저 뒤로가기(popstate) 방지: chat 뷰에서만 동작
+  useEffect(() => {
+    if (view !== "chat") return;
+    // history에 dummy state를 push하여 뒤로가기를 가로챔
+    window.history.pushState({ challengeChat: true }, "");
+    const handlePopState = (e: PopStateEvent) => {
+      // 뒤로가기 시 다시 dummy state를 push하고 확인 팝업 표시
+      window.history.pushState({ challengeChat: true }, "");
+      setShowGiveUpConfirm(true);
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, [view]);
 
   const backHref = "/home?tab=challenge";
 
@@ -512,7 +535,7 @@ export function ChallengeClient({
         <header className="flex justify-center border-b border-white/10 bg-[#07070B]/95 py-3 backdrop-blur-sm">
           <div className="flex w-full max-w-[420px] flex-col px-4">
           <div className="flex items-center">
-            <button type="button" onClick={giveUp} className="shrink-0 p-1 text-[#ffa1cc]" aria-label="뒤로">
+            <button type="button" onClick={confirmGiveUp} className="shrink-0 p-1 text-[#ffa1cc]" aria-label="뒤로">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M19 12H5M12 19l-7-7 7-7" />
               </svg>
@@ -780,6 +803,40 @@ export function ChallengeClient({
           </div>
         </div>
         )}
+
+        {/* 포기 확인 모달 - 마이페이지 서비스 이용 초기화와 동일 스타일 */}
+        {showGiveUpConfirm ? (
+          <div className="fixed inset-0 z-[60]">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" />
+            <div className="absolute inset-0 grid place-items-center px-3">
+              <SurfaceCard variant="outglow" className="w-[min(420px,calc(100vw-24px))] p-6">
+                <div className="text-center text-[16px] font-semibold text-white/90">정말 포기하시겠어요?</div>
+                <div className="mt-4 whitespace-pre-line text-center text-[14px] leading-[1.45] text-white/70">
+                  도전을 포기하면 현재 진행 중인 대화 기록이 사라져요.
+                </div>
+                <div className="mt-6 flex gap-4">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowGiveUpConfirm(false);
+                      giveUp();
+                    }}
+                    className="flex-1 basis-0 whitespace-nowrap rounded-xl bg-white px-4 py-3 text-center text-[15px] font-semibold text-[#0B0C10]"
+                  >
+                    포기하기
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowGiveUpConfirm(false)}
+                    className="flex-1 basis-0 whitespace-nowrap rounded-xl bg-panana-pink px-4 py-3 text-center text-[15px] font-semibold text-white"
+                  >
+                    계속하기
+                  </button>
+                </div>
+              </SurfaceCard>
+            </div>
+          </div>
+        ) : null}
 
         {/* 프로필 이미지 크게 보기 모달 */}
         {avatarModalOpen && challenge.profileImageUrl ? (
