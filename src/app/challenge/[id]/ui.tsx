@@ -172,8 +172,6 @@ export function ChallengeClient({
     const el = scrollRef.current;
     if (!el) return;
     const rafId = requestAnimationFrame(() => {
-      // 입력창 포커스 시 강제 스크롤하면 iOS에서 키보드가 내려가는 문제 방지
-      if (isInputFocusedRef.current) return;
       el.scrollTop = el.scrollHeight;
     });
     return () => cancelAnimationFrame(rafId);
