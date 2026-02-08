@@ -1412,6 +1412,8 @@ export function CharacterChatClient({
             </button>
             <input
               ref={inputRef}
+              type="text"
+              inputMode="text"
               value={value}
               onChange={(e) => setValue(e.target.value)}
               onKeyDown={(e) => {

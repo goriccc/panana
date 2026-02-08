@@ -420,7 +420,8 @@ export function ChallengeClient({
     return (
       <div className="flex h-dvh flex-col overflow-hidden bg-[linear-gradient(#07070B,#0B0C10)] text-white">
         <style>{`@keyframes pananaDot{0%,100%{transform:translateY(0);opacity:.55}50%{transform:translateY(-4px);opacity:1}}`}</style>
-        <header className="shrink-0 flex justify-center border-b border-white/10 bg-[#07070B]/95 py-3 backdrop-blur-sm">
+        <div className="sticky top-0 z-10 shrink-0 flex flex-col bg-[#07070B]">
+        <header className="flex justify-center border-b border-white/10 bg-[#07070B]/95 py-3 backdrop-blur-sm">
           <div className="flex w-full max-w-[420px] flex-col px-4">
           <div className="flex items-center">
             <button type="button" onClick={giveUp} className="shrink-0 p-1 text-[#ffa1cc]" aria-label="뒤로">
@@ -486,10 +487,11 @@ export function ChallengeClient({
             </span>
           </div>
         </div>
+        </div>
 
         <main
           ref={scrollRef}
-          className="chat-scrollbar mx-auto w-full max-w-[420px] flex-1 min-h-0 overflow-y-auto px-5 pb-4 pt-4"
+          className="chat-scrollbar mx-auto w-full max-w-[420px] flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 pb-4 pt-4"
           style={{
             paddingBottom: challengeSuccess ? "320px" : "88px",
             scrollPaddingBottom: challengeSuccess ? "320px" : "88px",
@@ -630,6 +632,7 @@ export function ChallengeClient({
             <div className="relative w-full rounded-full border border-panana-pink/35 bg-white/[0.04] py-2 pl-4 pr-11">
               <input
                 type="text"
+                inputMode="text"
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
                 onKeyDown={(e) => {
