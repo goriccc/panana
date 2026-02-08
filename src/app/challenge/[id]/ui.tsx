@@ -160,6 +160,14 @@ export function ChallengeClient({
   }, [startedAt, challengeSuccess]);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLDivElement | null>(null);
+  const challengeInputRef = useRef<HTMLInputElement | null>(null);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [composerHeight, setComposerHeight] = useState(64);
+  const lastKeyboardHeightRef = useRef(0);
+  const isInputFocusedRef = useRef(false);
+  const isAtBottomRef = useRef(true);
+
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -168,6 +176,86 @@ export function ChallengeClient({
     });
     return () => cancelAnimationFrame(rafId);
   }, [messages.length, showTyping]);
+
+  // 모바일 키보드 감지 및 레이아웃 조정 (일반 채팅과 동일)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let initialHeight = window.innerHeight;
+    let focusRafId: number | null = null;
+    const calcKeyboardHeight = () => {
+      if (window.visualViewport) {
+        const viewport = window.visualViewport;
+        const viewportBottom = viewport.offsetTop + viewport.height;
+        const kh = window.innerHeight - viewportBottom;
+        return kh > 20 ? kh : 0;
+      }
+      return 0;
+    };
+    const updateKeyboardHeight = () => {
+      const next = calcKeyboardHeight();
+      if (Math.abs(next - lastKeyboardHeightRef.current) < 2) return;
+      lastKeyboardHeightRef.current = next;
+      setKeyboardHeight(next);
+    };
+    const handleFocus = () => {
+      isInputFocusedRef.current = true;
+      if (focusRafId != null) window.cancelAnimationFrame(focusRafId);
+      focusRafId = null;
+      const start = performance.now();
+      const tick = () => {
+        updateKeyboardHeight();
+        if (performance.now() - start < 400) focusRafId = window.requestAnimationFrame(tick);
+      };
+      focusRafId = window.requestAnimationFrame(tick);
+      updateKeyboardHeight();
+      if (isAtBottomRef.current) endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+    };
+    const handleBlur = () => {
+      isInputFocusedRef.current = false;
+      if (focusRafId != null) window.cancelAnimationFrame(focusRafId);
+      lastKeyboardHeightRef.current = 0;
+      setKeyboardHeight(0);
+      initialHeight = window.innerHeight;
+    };
+    let onViewportChange: (() => void) | null = null;
+    if (window.visualViewport) {
+      onViewportChange = () => {
+        if (!isInputFocusedRef.current && lastKeyboardHeightRef.current === 0) return;
+        updateKeyboardHeight();
+      };
+      window.visualViewport.addEventListener("resize", onViewportChange, { passive: true });
+      window.visualViewport.addEventListener("scroll", onViewportChange, { passive: true });
+    }
+    const input = composerRef.current?.querySelector("input");
+    if (input) {
+      input.addEventListener("focus", handleFocus, { passive: true });
+      input.addEventListener("blur", handleBlur, { passive: true });
+    }
+    return () => {
+      if (window.visualViewport && onViewportChange) {
+        window.visualViewport.removeEventListener("resize", onViewportChange);
+        window.visualViewport.removeEventListener("scroll", onViewportChange);
+      }
+      if (input) {
+        input.removeEventListener("focus", handleFocus);
+        input.removeEventListener("blur", handleBlur);
+      }
+    };
+  }, [view, challengeSuccess]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || view !== "chat" || challengeSuccess) return;
+    const el = composerRef.current;
+    if (!el) return;
+    const update = () => setComposerHeight(Math.max(64, el.getBoundingClientRect().height));
+    update();
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(update);
+      ro.observe(el);
+    }
+    return () => { ro?.disconnect(); };
+  }, [view, challengeSuccess]);
 
   const startSession = useCallback(async () => {
     if (hasStartedSessionRef.current) return;
@@ -420,7 +508,7 @@ export function ChallengeClient({
     return (
       <div className="flex h-dvh flex-col overflow-hidden bg-[linear-gradient(#07070B,#0B0C10)] text-white">
         <style>{`@keyframes pananaDot{0%,100%{transform:translateY(0);opacity:.55}50%{transform:translateY(-4px);opacity:1}}`}</style>
-        <div className="sticky top-0 z-10 shrink-0 flex flex-col bg-[#07070B]">
+        <div className="fixed top-0 left-0 right-0 z-20 flex flex-col bg-[#07070B] shrink-0">
         <header className="flex justify-center border-b border-white/10 bg-[#07070B]/95 py-3 backdrop-blur-sm">
           <div className="flex w-full max-w-[420px] flex-col px-4">
           <div className="flex items-center">
@@ -489,12 +577,24 @@ export function ChallengeClient({
         </div>
         </div>
 
+        <div className="shrink-0 h-[180px]" aria-hidden />
+
         <main
           ref={scrollRef}
           className="chat-scrollbar mx-auto w-full max-w-[420px] flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 pb-4 pt-4"
           style={{
-            paddingBottom: challengeSuccess ? "320px" : "88px",
-            scrollPaddingBottom: challengeSuccess ? "320px" : "88px",
+            paddingBottom: challengeSuccess
+              ? "320px"
+              : `${Math.max(0, keyboardHeight) + Math.max(0, composerHeight) + 12}px`,
+            scrollPaddingBottom: challengeSuccess
+              ? "320px"
+              : `${Math.max(0, keyboardHeight) + Math.max(0, composerHeight) + 12}px`,
+          }}
+          onScroll={() => {
+            const el = scrollRef.current;
+            if (!el) return;
+            const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+            isAtBottomRef.current = atBottom;
           }}
         >
           <div className="space-y-3">
@@ -577,7 +677,14 @@ export function ChallengeClient({
               </div>
             </div>
           ) : null}
-          <div ref={endRef} style={{ scrollMarginBottom: challengeSuccess ? "320px" : "88px" }} />
+          <div
+            ref={endRef}
+            style={{
+              scrollMarginBottom: challengeSuccess
+                ? "320px"
+                : `${Math.max(0, keyboardHeight) + Math.max(0, composerHeight) + 12}px`,
+            }}
+          />
           </div>
         </main>
 
@@ -625,12 +732,17 @@ export function ChallengeClient({
         ) : (
         /* 대화입력창: 일반 채팅과 동일, 지문 입력 버튼만 제외 */
         <div
+          ref={composerRef}
           className="fixed left-0 right-0 bottom-0 z-40 border-t border-white/10 bg-[#0B0C10]/90 backdrop-blur"
-          style={{ paddingBottom: "max(env(safe-area-inset-bottom), 16px)" }}
+          style={{
+            transform: keyboardHeight > 0 ? `translateY(-${keyboardHeight}px)` : "translateY(0)",
+            paddingBottom: keyboardHeight > 0 ? "8px" : "max(env(safe-area-inset-bottom), 16px)",
+          }}
         >
           <div className="mx-auto w-full max-w-[420px] px-5 py-2.5">
             <div className="relative w-full rounded-full border border-panana-pink/35 bg-white/[0.04] py-2 pl-4 pr-11">
               <input
+                ref={challengeInputRef}
                 type="text"
                 inputMode="text"
                 value={value}
@@ -639,6 +751,7 @@ export function ChallengeClient({
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
                     sendMessage();
+                    requestAnimationFrame(() => challengeInputRef.current?.focus());
                   }
                 }}
                 placeholder="메시지를 입력하세요"

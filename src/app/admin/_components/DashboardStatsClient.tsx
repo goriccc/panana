@@ -587,7 +587,7 @@ export function DashboardStatsClient() {
       <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-3">
         <AdminSectionHeader
           title="인기 캐릭터"
-          subtitle="남성/여성 캐릭터별 톱20, 대화한 유저 수·평균 대화 지속 시간"
+          subtitle="남성/여성 캐릭터별 톱20 (최근 30일 대화한 유저 수 내림차순)·평균 대화 지속 시간"
         />
         <div className="mt-1.5 grid gap-6 sm:grid-cols-2">
           <div>

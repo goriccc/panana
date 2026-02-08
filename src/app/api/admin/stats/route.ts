@@ -475,9 +475,14 @@ function computeCharacterCounts(
 async function computePopularCharacters(
   sb: SupabaseClient<any>,
   characterRows: CharacterRow[],
-  fromIso: string,
-  toIso: string
+  _fromIso: string,
+  _toIso: string
 ): Promise<{ male: Array<{ slug: string; name?: string; userCount: number; avgDurationMin: number }>; female: Array<{ slug: string; name?: string; userCount: number; avgDurationMin: number }> }> {
+  const now = new Date();
+  const from30d = new Date(now);
+  from30d.setDate(from30d.getDate() - 30);
+  const fromIso = from30d.toISOString();
+  const toIso = now.toISOString();
   const { data: chatRows } = await sb
     .from("panana_chat_messages")
     .select("user_id, character_slug, created_at")

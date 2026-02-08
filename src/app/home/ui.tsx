@@ -1043,12 +1043,14 @@ export function HomeClient({
     if (userGenderLoading) return;
     let alive = true;
     const genderQCh = userGender && userGender !== "private" ? `gender=${userGender}` : "";
-    const genderQRk = userGender && userGender !== "private" ? `&gender=${userGender}` : "";
+    const rankCharGender =
+      userGender === "male" ? "female" : userGender === "female" ? "male" : null;
+    const genderQRk = rankCharGender ? `&gender=${rankCharGender}` : "";
     setChallengeLoading(true);
     setRankingLoading(true);
     Promise.all([
       fetch(`/api/challenges${genderQCh ? `?${genderQCh}` : ""}`).then((r) => r.json()),
-      fetch(`/api/characters/ranking?limit=24${genderQRk}`).then((r) => r.json()),
+      fetch(`/api/characters/ranking?limit=48${genderQRk}`).then((r) => r.json()),
     ])
       .then(([chData, rkData]) => {
         if (!alive) return;

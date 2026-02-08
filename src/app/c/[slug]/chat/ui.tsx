@@ -1423,6 +1423,7 @@ export function CharacterChatClient({
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   send();
+                  requestAnimationFrame(() => inputRef.current?.focus());
                 }
               }}
               className="w-full bg-transparent text-base font-semibold text-white/70 outline-none placeholder:text-white/30"

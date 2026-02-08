@@ -147,7 +147,9 @@ export async function GET(req: Request) {
       return { slug, score, msgCount: s.msgCount, recentCount: s.recentCount, userCount };
     });
 
-    const ranked = scored.sort((a, b) => b.score - a.score).slice(0, limit * 2);
+    const ranked = scored
+      .sort((a, b) => (b.userCount !== a.userCount ? b.userCount - a.userCount : b.score - a.score))
+      .slice(0, limit * 2);
     const slugs = ranked.map((r) => r.slug);
 
     if (!slugs.length) {
