@@ -1417,13 +1417,13 @@ export function CharacterChatClient({
               value={value}
               onChange={(e) => setValue(e.target.value)}
               onKeyDown={(e) => {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const composing = (e.nativeEvent as any)?.isComposing;
+                const composing = (e.nativeEvent as KeyboardEvent & { isComposing?: boolean })?.isComposing;
                 if (composing) return;
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   send();
-                  requestAnimationFrame(() => inputRef.current?.focus());
+                  // 모바일에서 rAF는 너무 빨라 키보드가 내려감. setTimeout으로 지연 포커스
+                  setTimeout(() => inputRef.current?.focus(), 100);
                 }
               }}
               className="w-full bg-transparent text-base font-semibold text-white/70 outline-none placeholder:text-white/30"
@@ -1434,7 +1434,11 @@ export function CharacterChatClient({
             <button
               type="button"
               aria-label="전송"
-              onClick={send}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                send();
+                setTimeout(() => inputRef.current?.focus(), 100);
+              }}
               disabled={!value.trim() || sending}
               className="absolute right-[1px] top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center"
             >

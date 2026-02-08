@@ -583,7 +583,7 @@ export function ChallengeClient({
 
         <main
           ref={scrollRef}
-          className="chat-scrollbar mx-auto w-full max-w-[420px] flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 pb-4 pt-4"
+          className="chat-scrollbar mx-auto w-full max-w-[420px] flex-1 min-h-0 overflow-y-auto px-5 pb-4 pt-4"
           style={{
             paddingBottom: challengeSuccess
               ? "320px"
@@ -750,10 +750,13 @@ export function ChallengeClient({
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
                 onKeyDown={(e) => {
+                  const composing = (e.nativeEvent as KeyboardEvent & { isComposing?: boolean })?.isComposing;
+                  if (composing) return;
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
                     sendMessage();
-                    requestAnimationFrame(() => challengeInputRef.current?.focus());
+                    // 모바일에서 rAF는 너무 빨라 키보드가 내려감. setTimeout으로 지연 포커스
+                    setTimeout(() => challengeInputRef.current?.focus(), 100);
                   }
                 }}
                 placeholder="메시지를 입력하세요"
@@ -765,7 +768,11 @@ export function ChallengeClient({
               <button
                 type="button"
                 aria-label="전송"
-                onClick={sendMessage}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  sendMessage();
+                  setTimeout(() => challengeInputRef.current?.focus(), 100);
+                }}
                 disabled={!value.trim() || sending}
                 className="absolute right-[1px] top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center"
               >
