@@ -62,6 +62,10 @@ export function VoiceSessionClient({
   const recorderRef = useRef<AudioRecorder | null>(null);
   const streamerRef = useRef<AudioStreamer | null>(null);
   const initSentRef = useRef(false);
+  const userStoppedRef = useRef(true);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptRef = useRef(0);
+  const startedRef = useRef(false);
   const onUserRef = useRef(onUserTranscript);
   const onAssistantRef = useRef(onAssistantTranscript);
   onUserRef.current = onUserTranscript;
@@ -91,6 +95,23 @@ export function VoiceSessionClient({
     }
     if (buf) onAssistantRef.current?.(buf);
   }, [flushUser]);
+
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+  }, []);
+
+  const ensurePlaybackResumed = useCallback(async () => {
+    const streamer = streamerRef.current;
+    if (!streamer) return;
+    try {
+      await streamer.resume();
+    } catch {
+      // ignore
+    }
+  }, []);
 
   const connect = useCallback(async () => {
     setError(null);
@@ -147,6 +168,7 @@ export function VoiceSessionClient({
           return;
         }
         if (msg.type === "audio" && msg.data) {
+          void ensurePlaybackResumed();
           const buf = base64ToArrayBuffer(msg.data);
           streamerRef.current?.addPCM16(new Uint8Array(buf));
           return;
@@ -188,7 +210,9 @@ export function VoiceSessionClient({
     };
 
     ws.onerror = () => {
-      setError("WebSocket 연결 오류");
+      if (!userStoppedRef.current) {
+        setError("WebSocket 연결 오류");
+      }
     };
 
     ws.onclose = () => {
@@ -196,14 +220,42 @@ export function VoiceSessionClient({
       flushUser();
       setConnected(false);
       initSentRef.current = false;
+
+      if (wsRef.current === ws) {
+        wsRef.current = null;
+      }
+
+      // 사용자가 명시적으로 끊지 않았고(started 유지), 연결이 닫히면 자동 재연결
+      if (!userStoppedRef.current && startedRef.current) {
+        clearReconnectTimer();
+        const retryInMs = Math.min(1000 * 2 ** reconnectAttemptRef.current, 5000);
+        reconnectAttemptRef.current += 1;
+        setError("연결이 잠시 끊겼어요. 자동 재연결 중...");
+
+        reconnectTimerRef.current = setTimeout(async () => {
+          if (userStoppedRef.current || !startedRef.current) return;
+          await connect();
+          // fetch/초기화 단계에서 실패해 소켓이 안 만들어진 경우에도 재시도 유지
+          if (!wsRef.current && !userStoppedRef.current && startedRef.current) {
+            clearReconnectTimer();
+            const nextRetryInMs = Math.min(1000 * 2 ** reconnectAttemptRef.current, 5000);
+            reconnectAttemptRef.current += 1;
+            reconnectTimerRef.current = setTimeout(async () => {
+              if (userStoppedRef.current || !startedRef.current) return;
+              await connect();
+            }, nextRetryInMs);
+          }
+        }, retryInMs);
+      }
     };
-  }, [characterSlug, callSign, flushAssistant, flushUser]);
+  }, [characterSlug, callSign, clearReconnectTimer, ensurePlaybackResumed, flushAssistant, flushUser]);
 
   useEffect(() => {
     // 기존 동작 유지: PC/Android는 마운트 시 선초기화
     // iOS만 클릭 제스처 시점(startVoice)으로 초기화 지연
     if (isIOSDevice()) {
       return () => {
+        clearReconnectTimer();
         recorderRef.current?.stop();
         streamerRef.current?.stop();
         wsRef.current?.close();
@@ -240,15 +292,47 @@ export function VoiceSessionClient({
     setup();
 
     return () => {
+      clearReconnectTimer();
       recorderRef.current?.stop();
       streamerRef.current?.stop();
       wsRef.current?.close();
       recorderRef.current = null;
       streamerRef.current = null;
     };
-  }, []);
+  }, [clearReconnectTimer]);
 
   const [started, setStarted] = useState(false);
+
+  useEffect(() => {
+    startedRef.current = started;
+  }, [started]);
+
+  // iOS Safari: 백그라운드 복귀/포커스 복귀 후 AudioContext가 suspended 상태가 되면 무음이 날 수 있어 복구한다.
+  useEffect(() => {
+    if (!isIOSDevice()) return;
+
+    const resumeIfStarted = () => {
+      if (!startedRef.current) return;
+      void ensurePlaybackResumed();
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        resumeIfStarted();
+      }
+    };
+
+    window.addEventListener("pageshow", resumeIfStarted);
+    window.addEventListener("focus", resumeIfStarted);
+    window.addEventListener("touchstart", resumeIfStarted, { passive: true });
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.removeEventListener("pageshow", resumeIfStarted);
+      window.removeEventListener("focus", resumeIfStarted);
+      window.removeEventListener("touchstart", resumeIfStarted);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [ensurePlaybackResumed]);
 
   const startVoice = useCallback(async () => {
     // iOS 전용: 사용자 클릭 제스처 내에서 오디오/마이크 초기화
@@ -281,13 +365,20 @@ export function VoiceSessionClient({
     }
 
     if (!recorderRef.current || !streamerRef.current) return;
+    userStoppedRef.current = false;
+    reconnectAttemptRef.current = 0;
+    clearReconnectTimer();
     setError(null);
+    void ensurePlaybackResumed();
     await connect();
     await recorderRef.current.start();
     setStarted(true);
-  }, [connect]);
+  }, [clearReconnectTimer, connect, ensurePlaybackResumed]);
 
   const stopVoice = useCallback(() => {
+    userStoppedRef.current = true;
+    reconnectAttemptRef.current = 0;
+    clearReconnectTimer();
     flushAssistant();
     flushUser();
     recorderRef.current?.stop();
@@ -295,7 +386,7 @@ export function VoiceSessionClient({
     setConnected(false);
     setStarted(false);
     initSentRef.current = false;
-  }, [flushAssistant, flushUser]);
+  }, [clearReconnectTimer, flushAssistant, flushUser]);
 
   return (
     <div className="flex items-center justify-between gap-2 rounded-xl border border-panana-pink/30 bg-panana-pink/10 px-4 py-3">
