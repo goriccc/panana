@@ -137,13 +137,12 @@ export function VoiceSessionClient({
     const config = {
       responseModalities: ["AUDIO" as const],
       proactivity: { proactiveAudio: true },
-      // 내 음성 전사는 항상 한국어(ko-KR)로 인식되도록 강제
+      // Vertex Live는 snake_case 필드만 인식하므로 language_code 사용
       inputAudioTranscription: {
-        languageCode: "ko-KR",
+        language_code: "ko-KR",
       },
-      // 필요 시 AI 발화 전사도 한국어로
       outputAudioTranscription: {
-        languageCode: "ko-KR",
+        language_code: "ko-KR",
       },
       speechConfig: {
         voiceConfig: { prebuiltVoiceConfig: { voiceName } },
