@@ -137,13 +137,8 @@ export function VoiceSessionClient({
     const config = {
       responseModalities: ["AUDIO" as const],
       proactivity: { proactiveAudio: true },
-      // Vertex Live는 snake_case 필드만 인식하므로 language_code 사용
-      inputAudioTranscription: {
-        language_code: "ko-KR",
-      },
-      outputAudioTranscription: {
-        language_code: "ko-KR",
-      },
+      // 전사 설정은 proxy 내부에서 Vertex 스펙에 맞게 세팅되도록 두고,
+      // 여기서는 추가 필드를 보내지 않는다 (1007 Invalid JSON 방지).
       speechConfig: {
         voiceConfig: { prebuiltVoiceConfig: { voiceName } },
       },
