@@ -137,8 +137,14 @@ export function VoiceSessionClient({
     const config = {
       responseModalities: ["AUDIO" as const],
       proactivity: { proactiveAudio: true },
-      outputAudioTranscription: {},
-      inputAudioTranscription: {},
+      // 내 음성 전사는 항상 한국어(ko-KR)로 인식되도록 강제
+      inputAudioTranscription: {
+        languageCode: "ko-KR",
+      },
+      // 필요 시 AI 발화 전사도 한국어로
+      outputAudioTranscription: {
+        languageCode: "ko-KR",
+      },
       speechConfig: {
         voiceConfig: { prebuiltVoiceConfig: { voiceName } },
       },
