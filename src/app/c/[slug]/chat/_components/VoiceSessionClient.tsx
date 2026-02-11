@@ -5,9 +5,16 @@ import { AudioRecorder } from "@/lib/voice/genai-live/audio-recorder";
 import { AudioStreamer } from "@/lib/voice/genai-live/audio-streamer";
 import { audioContext, base64ToArrayBuffer } from "@/lib/voice/genai-live/utils";
 import VolMeterWorklet from "@/lib/voice/genai-live/worklets/vol-meter";
-import { createWorkletFromSrc } from "@/lib/voice/genai-live/audioworklet-registry";
 
 const LIVE_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025";
+
+function isIOSDevice(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && typeof navigator.maxTouchPoints === "number" && navigator.maxTouchPoints > 1)
+  );
+}
 
 function resolveWsUrl(): string {
   const envProxy = String(process.env.NEXT_PUBLIC_VERTEX_LIVE_PROXY_URL || "").trim();
@@ -193,13 +200,22 @@ export function VoiceSessionClient({
   }, [characterSlug, callSign, flushAssistant, flushUser]);
 
   useEffect(() => {
-    let streamer: AudioStreamer | null = null;
-    let recorder: AudioRecorder | null = null;
+    // 기존 동작 유지: PC/Android는 마운트 시 선초기화
+    // iOS만 클릭 제스처 시점(startVoice)으로 초기화 지연
+    if (isIOSDevice()) {
+      return () => {
+        recorderRef.current?.stop();
+        streamerRef.current?.stop();
+        wsRef.current?.close();
+        recorderRef.current = null;
+        streamerRef.current = null;
+      };
+    }
 
     const setup = async () => {
       try {
         const outCtx = await audioContext({ id: "voice-panana-out" });
-        streamer = new AudioStreamer(outCtx);
+        const streamer = new AudioStreamer(outCtx);
         await streamer.addWorklet("vumeter-out", VolMeterWorklet, (d: unknown) => {
           const ev = d as MessageEvent;
           const vol = (ev?.data as { volume?: number })?.volume;
@@ -208,7 +224,7 @@ export function VoiceSessionClient({
         streamerRef.current = streamer;
         await streamer.resume();
 
-        recorder = new AudioRecorder(16000);
+        const recorder = new AudioRecorder(16000);
         recorder.on("data", (base64: string) => {
           if (wsRef.current?.readyState === WebSocket.OPEN && initSentRef.current) {
             wsRef.current.send(JSON.stringify({ type: "audio", data: base64, mimeType: "audio/pcm;rate=16000" }));
@@ -224,8 +240,8 @@ export function VoiceSessionClient({
     setup();
 
     return () => {
-      recorder?.stop();
-      streamer?.stop();
+      recorderRef.current?.stop();
+      streamerRef.current?.stop();
       wsRef.current?.close();
       recorderRef.current = null;
       streamerRef.current = null;
@@ -235,6 +251,35 @@ export function VoiceSessionClient({
   const [started, setStarted] = useState(false);
 
   const startVoice = useCallback(async () => {
+    // iOS 전용: 사용자 클릭 제스처 내에서 오디오/마이크 초기화
+    if (isIOSDevice() && (!recorderRef.current || !streamerRef.current)) {
+      try {
+        const outCtx = new AudioContext();
+        await outCtx.resume();
+
+        const streamer = new AudioStreamer(outCtx);
+        await streamer.addWorklet("vumeter-out", VolMeterWorklet, (d: unknown) => {
+          const ev = d as MessageEvent;
+          const vol = (ev?.data as { volume?: number })?.volume;
+          if (typeof vol === "number") setOutVolume(vol);
+        });
+        streamerRef.current = streamer;
+        await streamer.resume();
+
+        const recorder = new AudioRecorder(16000);
+        recorder.on("data", (base64: string) => {
+          if (wsRef.current?.readyState === WebSocket.OPEN && initSentRef.current) {
+            wsRef.current.send(JSON.stringify({ type: "audio", data: base64, mimeType: "audio/pcm;rate=16000" }));
+          }
+        });
+        recorder.on("volume", (v: number) => setInVolume(v));
+        recorderRef.current = recorder;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "오디오 초기화 실패");
+        return;
+      }
+    }
+
     if (!recorderRef.current || !streamerRef.current) return;
     setError(null);
     await connect();
