@@ -2,15 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { AdminAuthGate } from "../_components/AdminAuthGate";
-import { AdminButton, AdminInput, AdminSectionHeader, AdminTable } from "../_components/AdminUI";
+import { AdminButton, AdminInput, AdminSectionHeader } from "../_components/AdminUI";
 import { getBrowserSupabase } from "@/lib/supabase/browser";
-
-type Provider = "anthropic" | "gemini" | "deepseek";
 
 type LlmSettingRow = {
   id: string;
   scope: string;
-  provider: Provider;
+  provider: string;
   model: string;
   temperature: number;
   max_tokens: number;
@@ -19,20 +17,10 @@ type LlmSettingRow = {
   nsfw_filter: boolean;
 };
 
-const providers: Provider[] = ["anthropic", "gemini", "deepseek"];
-
-function boolLabel(v: boolean) {
-  return v ? (
-    <span className="rounded-full bg-[#22c55e]/15 px-2 py-1 text-[11px] font-extrabold text-[#6ee7b7]">ON</span>
-  ) : (
-    <span className="rounded-full bg-white/10 px-2 py-1 text-[11px] font-extrabold text-white/45">OFF</span>
-  );
-}
-
 export default function AdminLlmSettingsPage() {
   const supabase = useMemo(() => getBrowserSupabase(), []);
   const [rows, setRows] = useState<LlmSettingRow[]>([]);
-  const [selectedProvider, setSelectedProvider] = useState<Provider>("anthropic");
+  const selectedProvider = "gemini";
   const selected = rows.find((r) => r.scope === "global" && r.provider === selectedProvider) || null;
 
   const [model, setModel] = useState("");
@@ -56,10 +44,6 @@ export default function AdminLlmSettingsPage() {
         .order("provider", { ascending: true });
       if (error) throw error;
       setRows((data || []) as any);
-      if (data && data.length) {
-        const hasSelected = (data as any[]).some((d) => d.provider === selectedProvider);
-        if (!hasSelected) setSelectedProvider(((data as any[])[0]?.provider as Provider) || "anthropic");
-      }
     } catch (e: any) {
       setErr(e?.message || "불러오기에 실패했어요.");
     } finally {
@@ -79,7 +63,7 @@ export default function AdminLlmSettingsPage() {
     setMaxTokens(typeof selected?.max_tokens === "number" ? selected.max_tokens : 1024);
     setForceParenthesis(Boolean(selected?.force_parenthesis));
     setNsfwFilter(Boolean(selected?.nsfw_filter ?? true));
-  }, [selectedProvider, selected?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selected?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = async () => {
     setErr(null);
@@ -127,42 +111,15 @@ export default function AdminLlmSettingsPage() {
         {err ? <div className="mb-4 text-[12px] font-semibold text-[#ff9aa1]">{err}</div> : null}
         {loading ? <div className="mb-4 text-[12px] font-semibold text-white/45">불러오는 중...</div> : null}
 
-        <div className="grid gap-6 lg:grid-cols-[1fr_420px]">
-          <AdminTable
-            columns={[
-              { key: "provider", header: "Provider" },
-              { key: "model", header: "Model" },
-              { key: "temp", header: "Temp" },
-              { key: "max", header: "MaxTokens" },
-              { key: "safety", header: "NSFW Filter" },
-              { key: "actions", header: "선택" },
-            ]}
-            rows={providers.map((p) => {
-              const r = rows.find((x) => x.provider === p && x.scope === "global");
-              return {
-                provider: <span className="text-white/80">{p}</span>,
-                model: <span className="text-white/55">{r?.model || "-"}</span>,
-                temp: <span className="text-white/55">{typeof r?.temperature === "number" ? r.temperature.toFixed(2) : "-"}</span>,
-                max: <span className="text-white/55">{r?.max_tokens ?? "-"}</span>,
-                safety: boolLabel(Boolean(r?.nsfw_filter)),
-                actions: (
-                  <AdminButton variant="ghost" onClick={() => setSelectedProvider(p)}>
-                    편집
-                  </AdminButton>
-                ),
-              };
-            })}
-          />
-
-          <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-            <div className="text-[13px] font-extrabold text-white/80">편집 ({selectedProvider})</div>
+        <div className="mx-auto max-w-[420px] rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+            <div className="text-[13px] font-extrabold text-white/80">Gemini 설정</div>
             <div className="mt-4 space-y-4">
               <div>
                 <AdminInput
                   label="Model"
                   value={model}
                   onChange={setModel}
-                  placeholder="예: Claude 4.5Sonnet / Gemini 2.5Pro / DeepSeek V3"
+                  placeholder="예: gemini-2.5-flash, gemini-2.5-pro"
                 />
                 <div className="mt-2 text-[11px] font-semibold leading-[1.45] text-white/35">
                   사용할 모델 이름/ID 입니다. (프로바이더별 실제 API 모델 문자열과 일치해야 합니다)
@@ -268,7 +225,6 @@ export default function AdminLlmSettingsPage() {
             <div className="mt-4 text-[11px] font-semibold leading-[1.5] text-white/35">
               이 페이지는 설정만 저장합니다. 실제 LLM 호출은 서버 라우트(`/api/llm/chat`)에서 Vercel env의 키로 수행하세요.
             </div>
-          </div>
         </div>
       </div>
     </AdminAuthGate>

@@ -40,27 +40,6 @@ function formatDuration(ms: number): string {
   return `${s}초`;
 }
 
-type Provider = "anthropic" | "gemini" | "deepseek";
-const PROVIDERS: Array<{ key: Provider; label: string }> = [
-  { key: "anthropic", label: "Claude" },
-  { key: "gemini", label: "Gemini" },
-  { key: "deepseek", label: "DeepSeek" },
-];
-
-function getSavedProvider(): Provider {
-  try {
-    const v = localStorage.getItem("panana_llm_provider");
-    if (v === "anthropic" || v === "gemini" || v === "deepseek") return v;
-  } catch {}
-  return "anthropic";
-}
-
-function saveProvider(p: Provider) {
-  try {
-    localStorage.setItem("panana_llm_provider", p);
-  } catch {}
-}
-
 /** 문장 부호 뒤 줄바꿈 추가 (엔터 한 번) */
 function formatMessageReadability(text: string): string {
   const s = String(text || "").trim();
@@ -105,10 +84,6 @@ export function ChallengeClient({
   const [showTyping, setShowTyping] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
-  const [provider, setProvider] = useState<Provider>(() => {
-    if (typeof window === "undefined") return "anthropic";
-    return getSavedProvider();
-  });
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [timerMs, setTimerMs] = useState(0);
   const timerRef = useRef<number | null>(null);
@@ -309,7 +284,7 @@ export function ChallengeClient({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          provider,
+          provider: "gemini",
           messages: history,
           characterSlug: challenge.characterSlug,
           challengeId: challenge.id,
@@ -354,7 +329,7 @@ export function ChallengeClient({
     } finally {
       setSending(false);
     }
-  }, [value, sending, messages, challenge, startedAt, startSession, provider, loadRanking]);
+  }, [value, sending, messages, challenge, startedAt, startSession, loadRanking]);
 
   const [showGiveUpConfirm, setShowGiveUpConfirm] = useState(false);
 
@@ -543,34 +518,7 @@ export function ChallengeClient({
             <h1 className="min-w-0 flex-1 truncate text-center text-[16px] font-extrabold text-[#ffa1cc]">{challenge.characterName}</h1>
             <div className="w-10 shrink-0" />
           </div>
-          {/* alpha LLM selector - 일반 채팅과 동일 */}
-          <div className="mt-2 flex items-center justify-center gap-2">
-            {PROVIDERS.map((p) => {
-              const active = p.key === provider;
-              return (
-                <button
-                  key={p.key}
-                  type="button"
-                  onClick={() => {
-                    setProvider(p.key);
-                    saveProvider(p.key);
-                  }}
-                  className={`rounded-full px-3 py-1 text-[11px] font-extrabold ring-1 transition ${
-                    active
-                      ? "bg-[#ff4da7]/20 text-[#ff8fc3] ring-[#ff4da7]/40"
-                      : "bg-white/5 text-white/45 ring-white/10 hover:bg-white/10"
-                  }`}
-                  aria-label={`모델: ${p.label}`}
-                >
-                  {p.label}
-                </button>
-              );
-            })}
-          </div>
-          <div className="mt-1 text-center text-[11px] font-semibold text-white/35">
-            알파 테스트: 모델을 바꿔가며 대화 품질을 비교할 수 있어요.
-          </div>
-          </div>
+        </div>
         </header>
 
         {/* 도전목표 바 (성공 시 딤 컬러) */}
@@ -600,7 +548,7 @@ export function ChallengeClient({
         </div>
         </div>
 
-        <div className="shrink-0 h-[180px]" aria-hidden />
+        <div className="shrink-0 h-[120px]" aria-hidden />
 
         <main
           ref={scrollRef}

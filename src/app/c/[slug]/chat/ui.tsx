@@ -28,28 +28,6 @@ type Msg = {
   sceneImageLoading?: boolean;
   sceneImageError?: string;
 };
-type Provider = "anthropic" | "gemini" | "deepseek";
-
-const PROVIDERS: Array<{ key: Provider; label: string }> = [
-  { key: "anthropic", label: "Claude" },
-  { key: "gemini", label: "Gemini" },
-  { key: "deepseek", label: "DeepSeek" },
-];
-
-function getSavedProvider(): Provider {
-  try {
-    const v = localStorage.getItem("panana_llm_provider");
-    if (v === "anthropic" || v === "gemini" || v === "deepseek") return v;
-  } catch {}
-  return "anthropic";
-}
-
-function saveProvider(p: Provider) {
-  try {
-    localStorage.setItem("panana_llm_provider", p);
-  } catch {}
-}
-
 /** 제3자 개입 시스템 메시지: [시스템] system_message:"..." 형태면 따옴표 안 내용만 반환 */
 function getSystemMessageDisplayText(raw: string): string {
   const s = String(raw || "").trim();
@@ -399,11 +377,6 @@ export function CharacterChatClient({
   const typingTimerRef = useRef<number | null>(null);
   const hasSentRef = useRef(false);
   const openingReqRef = useRef(false);
-  // localStorage에서 즉시 읽어서 초기 상태 설정 (깜빡임 방지)
-  const [provider, setProvider] = useState<Provider>(() => {
-    if (typeof window === "undefined") return "anthropic";
-    return getSavedProvider();
-  });
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
   const [sceneImageModalUrl, setSceneImageModalUrl] = useState<string | null>(null);
   const [sceneImageQuota, setSceneImageQuota] = useState<{ remaining: number; dailyLimit: number } | null>(null);
@@ -652,7 +625,7 @@ export function CharacterChatClient({
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          provider,
+          provider: "gemini",
           characterSlug,
           sceneId: sceneIdFromRuntime || undefined,
           concise: false,
@@ -951,7 +924,7 @@ export function CharacterChatClient({
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          provider,
+          provider: "gemini",
           characterSlug,
           sceneId: sceneIdFromRuntime || undefined,
           concise: true,
@@ -1140,33 +1113,6 @@ export function CharacterChatClient({
               ) : null;
             })()}
           </div>
-        </div>
-        {/* alpha LLM selector */}
-        <div className="mt-2 flex items-center justify-center gap-2">
-          {PROVIDERS.map((p) => {
-            const active = p.key === provider;
-            return (
-              <button
-                key={p.key}
-                type="button"
-                onClick={() => {
-                  setProvider(p.key);
-                  saveProvider(p.key);
-                }}
-                className={`rounded-full px-3 py-1 text-[11px] font-extrabold ring-1 transition ${
-                  active
-                    ? "bg-[#ff4da7]/20 text-[#ff8fc3] ring-[#ff4da7]/40"
-                    : "bg-white/5 text-white/45 ring-white/10 hover:bg-white/10"
-                }`}
-                aria-label={`모델: ${p.label}`}
-              >
-                {p.label}
-              </button>
-            );
-          })}
-        </div>
-        <div className="mt-1 text-center text-[11px] font-semibold text-white/35">
-          알파 테스트: 모델을 바꿔가며 대화 품질을 비교할 수 있어요.
         </div>
       </header>
 

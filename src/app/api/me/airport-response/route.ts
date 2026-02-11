@@ -98,9 +98,7 @@ export async function GET(req: Request) {
       .from("panana_airport_responses")
       .select("purpose, mood, character_type, updated_at")
       .eq("user_id", userId)
-      .maybeSingle();
-
-    if (error) throw error;
+      .maybeSingle();    if (error) throw error;
     if (!data) return NextResponse.json({ ok: true, response: null });    return NextResponse.json({
       ok: true,
       response: {
