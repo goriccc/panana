@@ -192,7 +192,14 @@ export function MyEditClient() {
                 fd.set("file", avatarFile);
                 const res = await fetch("/api/me/profile-image", { method: "POST", body: fd });
                 const data = await res.json().catch(() => null);
-                if (!res.ok || !data?.ok) throw new Error(data?.error || "프로필 이미지 업로드에 실패했어요.");
+                if (!res.ok || !data?.ok) {
+                  if (res.status === 401) {
+                    setStatus("로그인이 필요합니다. 다시 로그인 후 프로필 이미지를 변경해 주세요.");
+                    return;
+                  }
+                  setStatus(String(data?.error || "프로필 이미지 업로드에 실패했어요."));
+                  return;
+                }
                 const publicUrl = String(data.publicUrl || "").trim();
                 if (publicUrl) {
                   // 이미지 캐시(브라우저/Next Image) 무효화를 위해 version query 추가
@@ -217,6 +224,9 @@ export function MyEditClient() {
               }
               setStatus("저장 완료!");
               setAvatarFile(null);
+            } catch (e: unknown) {
+              const msg = e instanceof Error ? e.message : "저장에 실패했어요.";
+              setStatus(msg);
             } finally {
               setSaving(false);
             }

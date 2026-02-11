@@ -19,6 +19,8 @@ import {
 import { ensurePananaIdentity, setPananaId } from "@/lib/pananaApp/identity";
 import { fetchAdultStatus } from "@/lib/pananaApp/adultVerification";
 import type { ChatRuntimeEvent, ChatRuntimeState } from "@/lib/studio/chatRuntimeEngine";
+import { useSession } from "next-auth/react";
+import { VoiceSessionClient } from "./_components/VoiceSessionClient";
 
 type Msg = {
   id: string;
@@ -42,35 +44,33 @@ function getSystemMessageDisplayText(raw: string): string {
   return s;
 }
 
-/** 봇/시스템 메시지용: ( ) 지문은 문장 내 위치와 관계없이 이탤릭·저투명도 */
+/** 봇/시스템 메시지용: ( ) （ ） 괄호 안만 반투명 이탤릭, 괄호 밖은 불투명 흰색 */
 function renderChatText(text: string) {
   const lines = String(text || "").split("\n");
   return (
-    <div className="whitespace-pre-wrap">
+    <div className="whitespace-pre-wrap text-white">
       {lines.map((line, idx) => {
         const raw = String(line);
         const trimmed = raw.trim();
         if (!trimmed) return <div key={idx}>&nbsp;</div>;
 
         const parts: { script: boolean; text: string }[] = [];
-        const re = /(\([^)]*\))|([^(]+)/g;
+        // 캡처 그룹:
+        // m[1] = ( ... ) 지문, m[2] = （ ... ） 지문, m[3] = 괄호 밖 일반 대사
+        const re = /(\([^)]*\))|(（[^）]*）)|([^(（]+)/g;
         let m: RegExpExecArray | null;
         while ((m = re.exec(raw)) !== null) {
-          if (m[1]) parts.push({ script: true, text: m[1] });
-          else if (m[2]) parts.push({ script: false, text: m[2] });
+          if (m[1] || m[2]) parts.push({ script: true, text: m[1] || m[2] });
+          else if (m[3]) parts.push({ script: false, text: m[3] });
         }
 
         return (
           <div key={idx}>
             {parts.map((p, i) =>
               p.script ? (
-                <span key={i} className="text-white/45 italic">
-                  {p.text}
-                </span>
+                <span key={i} className="italic opacity-60">{p.text}</span>
               ) : (
-                <span key={i} className="text-white/80">
-                  {p.text}
-                </span>
+                <span key={i} className="not-italic text-white">{p.text}</span>
               )
             )}
           </div>
@@ -80,33 +80,11 @@ function renderChatText(text: string) {
   );
 }
 
-/** 유저 말풍선 전용: ( ) 지문은 문장 내 위치와 관계없이 이탤릭·저투명도 */
+/** 유저 말풍선 전용: 불투명 검정색, 이탤릭 없음 */
 function renderUserChatText(text: string) {
   const raw = String(text || "").trim();
   if (!raw) return <div>&nbsp;</div>;
-
-  // ( ) 괄호·괄호 내부·그 외 텍스트를 순서대로 분리
-  const parts: { script: boolean; text: string }[] = [];
-  const re = /(\([^)]*\))|([^(]+)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(raw)) !== null) {
-    if (m[1]) parts.push({ script: true, text: m[1] });
-    else if (m[2]) parts.push({ script: false, text: m[2] });
-  }
-
-  return (
-    <div className="whitespace-pre-wrap">
-      {parts.map((p, i) =>
-        p.script ? (
-          <span key={i} className="italic opacity-60">
-            {p.text}
-          </span>
-        ) : (
-          <span key={i}>{p.text}</span>
-        )
-      )}
-    </div>
-  );
+  return <div className="whitespace-pre-wrap not-italic">{raw}</div>;
 }
 
 function Bubble({
@@ -140,7 +118,7 @@ function Bubble({
   }, [sceneImageUrl]);
   if (from === "user") {
     return (
-      <div className="flex justify-end">
+      <div className="flex w-full justify-end">
         <div className="inline-block w-fit max-w-[290px] rounded-[22px] rounded-br-[10px] bg-panana-pink px-4 py-3 text-[14px] font-semibold leading-[1.45] text-[#0B0C10]">
           {renderUserChatText(text)}
         </div>
@@ -160,8 +138,9 @@ function Bubble({
   }
 
   return (
-    <div className="flex w-full flex-col gap-2">
-      <div className="flex max-w-[320px] items-end gap-2">
+    <div className="flex w-full justify-start">
+      <div className="flex max-w-[320px] flex-col gap-2">
+        <div className="flex items-end gap-2">
         {avatarUrl && onAvatarClick ? (
           <button
             type="button"
@@ -181,7 +160,7 @@ function Bubble({
           </div>
         )}
         <div className="flex flex-col gap-2">
-          <div className="rounded-[22px] rounded-bl-[10px] bg-white/[0.06] px-4 py-3 text-[14px] font-semibold leading-[1.45] text-white/80">
+          <div className="rounded-[22px] rounded-bl-[10px] bg-white/[0.06] px-4 py-3 text-[14px] font-semibold leading-[1.45] text-white">
             {renderChatText(text)}
           </div>
           {sceneImageError ? (
@@ -265,6 +244,7 @@ function Bubble({
           ) : null}
         </div>
       ) : null}
+      </div>
     </div>
   );
 }
@@ -388,6 +368,9 @@ export function CharacterChatClient({
   });
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [composerHeight, setComposerHeight] = useState(64);
+  const [voiceModalOpen, setVoiceModalOpen] = useState(false);
+  const { data: session } = useSession();
+  const userAvatarUrl = String((session as any)?.profileImageUrl || (session as any)?.user?.image || "").trim() || undefined;
   const composerRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const isAtBottomRef = useRef(true);
@@ -1113,8 +1096,21 @@ export function CharacterChatClient({
               ) : null;
             })()}
           </div>
+          <button
+            type="button"
+            onClick={() => setVoiceModalOpen(true)}
+            className="absolute right-0 p-2 text-white/70 hover:text-panana-pink transition"
+            aria-label="음성 대화"
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+              <line x1="12" y1="19" x2="12" y2="22" />
+            </svg>
+          </button>
         </div>
       </header>
+
 
       {!onboardingDismissed ? (
         <div className="mx-auto w-full max-w-[420px] shrink-0 px-5 pt-2">
@@ -1304,7 +1300,23 @@ export function CharacterChatClient({
         }}
       >
         <div className="mx-auto w-full max-w-[420px] px-5 py-2.5">
-          <div className="relative w-full rounded-full border border-panana-pink/35 bg-white/[0.04] py-2 pl-11 pr-11">
+          {voiceModalOpen ? (
+            <VoiceSessionClient
+              characterSlug={characterSlug}
+              characterName={characterName}
+              callSign={userName}
+              onClose={() => setVoiceModalOpen(false)}
+              onUserTranscript={(text) => {
+                setMessages((prev) => [...prev, { id: `u-voice-${Date.now()}`, from: "user", text }]);
+              }}
+              onAssistantTranscript={(text) => {
+                setMessages((prev) => [...prev, { id: `b-voice-${Date.now()}`, from: "bot", text }]);
+              }}
+              characterAvatarUrl={characterAvatarUrl}
+              userAvatarUrl={userAvatarUrl}
+            />
+          ) : null}
+          <div className={`relative w-full rounded-full border border-panana-pink/35 bg-white/[0.04] py-2 pl-11 pr-11 ${voiceModalOpen ? "mt-3" : ""}`}>
             <button
               type="button"
               aria-label={scriptMode ? "지문 입력 끝내기 (일반 대화)" : "지문 입력"}
