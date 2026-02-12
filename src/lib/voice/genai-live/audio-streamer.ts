@@ -4,15 +4,20 @@
 
 import { createWorkletFromSrc, registeredWorklets } from "./audioworklet-registry";
 
+/** iOS 등에서 AudioBufferSourceNode 다수 재생 시 크랙 완화용: 이 샘플 수만큼 묶어서 한 번에 재생 */
+const DEFAULT_MERGE_CHUNK_SAMPLES = 0;
+const IOS_MERGE_CHUNK_SAMPLES = 24000; // 24k @ 24kHz = 1초, 재생 횟수 감소로 크랙 완화
+
 export class AudioStreamer {
   private sampleRate = 24000;
   private bufferSize = 7680;
+  private initialBufferTime = 0.1;
+  private mergeChunkSamples: number;
   private audioQueue: Float32Array[] = [];
   private isPlaying = false;
   private isStreamComplete = false;
   private checkInterval: number | null = null;
   private scheduledTime = 0;
-  private initialBufferTime = 0.1;
 
   public gainNode: GainNode;
   public source: AudioBufferSourceNode;
@@ -21,7 +26,13 @@ export class AudioStreamer {
 
   public onComplete = () => {};
 
-  constructor(public context: AudioContext) {
+  constructor(
+    public context: AudioContext,
+    options?: { bufferSize?: number; initialBufferTime?: number; mergeChunkSamples?: number }
+  ) {
+    if (options?.bufferSize != null) this.bufferSize = options.bufferSize;
+    if (options?.initialBufferTime != null) this.initialBufferTime = options.initialBufferTime;
+    this.mergeChunkSamples = options?.mergeChunkSamples ?? DEFAULT_MERGE_CHUNK_SAMPLES;
     this.gainNode = this.context.createGain();
     this.source = this.context.createBufferSource();
     this.gainNode.connect(this.context.destination);
@@ -99,7 +110,28 @@ export class AudioStreamer {
     const SCHEDULE_AHEAD_TIME = 0.2;
 
     while (this.audioQueue.length > 0 && this.scheduledTime < this.context.currentTime + SCHEDULE_AHEAD_TIME) {
-      const audioData = this.audioQueue.shift()!;
+      let audioData: Float32Array;
+      if (this.mergeChunkSamples > 0) {
+        const toMerge: Float32Array[] = [];
+        let total = 0;
+        while (this.audioQueue.length > 0 && (total === 0 || total < this.mergeChunkSamples)) {
+          const chunk = this.audioQueue.shift()!;
+          toMerge.push(chunk);
+          total += chunk.length;
+        }
+        if (toMerge.length === 1) {
+          audioData = toMerge[0];
+        } else {
+          audioData = new Float32Array(total);
+          let offset = 0;
+          for (const c of toMerge) {
+            audioData.set(c, offset);
+            offset += c.length;
+          }
+        }
+      } else {
+        audioData = this.audioQueue.shift()!;
+      }
       const audioBuffer = this.createAudioBuffer(audioData);
       const source = this.context.createBufferSource();
 

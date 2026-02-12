@@ -367,7 +367,8 @@ export function VoiceSessionClient({
         const outCtx = new AudioContext({ sampleRate: 24000 });
         await outCtx.resume();
 
-        const streamer = new AudioStreamer(outCtx);
+        // iOS 16: AudioBufferSourceNode 다수 재생 시 지글거림 → 1초 단위로 묶어 재생 횟수 감소
+        const streamer = new AudioStreamer(outCtx, { mergeChunkSamples: 24000 });
         await streamer.addWorklet("vumeter-out", VolMeterWorklet, (d: unknown) => {
           const ev = d as MessageEvent;
           const vol = (ev?.data as { volume?: number })?.volume;
