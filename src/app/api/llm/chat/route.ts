@@ -178,7 +178,9 @@ ${historyLines ? `[최근 대화 흐름]\n${historyLines}\n\n` : ""}- 캐릭터 
       messages: [{ role: "user", content: prompt }],
     });
     const raw = String(out.text || "").trim();
-    return /^예\b/i.test(raw) || /^yes\b/i.test(raw);
+    const firstLine = raw.split(/\r?\n/)[0]?.trim() || raw;
+    // 맨 앞만 보지 않고 첫 줄 안에서 긍정 표현 인정 (판사가 "판정: 예", "네, 예" 등으로 답해도 성공)
+    return /\b(예|yes|네)\b/i.test(firstLine) && !/\b(아니오|no)\b/i.test(firstLine);
   } catch {
     return false;
   }
@@ -594,8 +596,9 @@ function composeSystemPrompt(args: {
         .join("\n\n")
     : "";
 
+  // forceBracketNarration이 명시적으로 false가 아니면 괄호 지문 지시 포함(미설정 시 기본 적용)
   const authorFlags = [
-    a?.forceBracketNarration ? "- 행동 묘사는 괄호()로 서술" : null,
+    a?.forceBracketNarration !== false ? "- 행동 묘사는 괄호()로 서술" : null,
     a?.shortLongLimit ? "- 답변 길이 제한을 지킨다" : null,
     a?.nsfwFilterOff ? "- (주의) NSFW 필터 OFF" : null,
   ]
@@ -735,7 +738,8 @@ export async function POST(req: Request) {
       const kwHint = kwList
         ? `다음 표현은 대화가 충분히 진행된 후에만 사용한다: ${kwList}. 초반에는 절대 사용하지 않는다. `
         : "";
-      const challengeBlock = `[도전 모드] 이 대화는 도전 모드이다. 당신은 쉽게 마음을 열지 않는다. ${kwHint}유저가 초반에 고백·사랑 표현·결정적 키워드를 해도 당황하거나 회피하거나 부담스러워하며 거절·무시·주제 전환한다. 대화가 자연스럽게 깊어지고 분위기가 무르익은 후에만 진심을 받아들일 수 있다.`;
+      const challengeBlock = `[도전 모드] 이 대화는 도전 모드이다. 당신은 쉽게 마음을 열지 않는다. ${kwHint}유저가 초반에 고백·사랑 표현·결정적 키워드를 해도 당황하거나 회피하거나 부담스러워하며 거절·무시·주제 전환한다. 대화가 자연스럽게 깊어지고 분위기가 무르익은 후에만 진심을 받아들일 수 있다.
+[도전 모드 출력 규칙] 지문(괄호 안 행동·상황 묘사)을 넣지 말고 대사만 쓴다. 문장을 중간에 끊지 말고 반드시 끝까지 완성한 뒤 마침표로 마친다.`;
       system = system ? `${system}\n\n${challengeBlock}` : challengeBlock;
     }
 

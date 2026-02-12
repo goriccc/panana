@@ -32,13 +32,18 @@ export class AudioRecorder extends EventEmitter {
     super();
   }
 
-  async start() {
-    if (!navigator.mediaDevices?.getUserMedia) {
+  /** @param existingStream 사용자 제스처 직후 이미 취득한 스트림(예: iOS 마이크 권한 한 번만 팝업) */
+  async start(existingStream?: MediaStream) {
+    if (existingStream) {
+      this.stream = existingStream;
+    } else if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error("Could not request user media");
     }
 
     this.starting = new Promise(async (resolve) => {
-      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!this.stream) {
+        this.stream = await navigator.mediaDevices!.getUserMedia({ audio: true });
+      }
       this.audioContext = await audioContext({ sampleRate: this.sampleRate });
       this.source = this.audioContext.createMediaStreamSource(this.stream);
 

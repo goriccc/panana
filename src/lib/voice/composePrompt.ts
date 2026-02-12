@@ -28,6 +28,14 @@ function stripParentheticalText(input: string): string {
   return String(input || "")
     .replace(/\([^)]*\)/g, "")
     .replace(/（[^）]*）/g, "")
+    .replace(/\[[^\]]*\]/g, "")
+    .replace(/【[^】]*】/g, "")
+    .replace(/\{[^}]*\}/g, "")
+    .replace(/「[^」]*」/g, "")
+    .replace(/『[^』]*』/g, "")
+    // 롤플레잉 지문 관용 표기(*웃음*, _한숨_) 제거
+    .replace(/\*[^*]*\*/g, "")
+    .replace(/_[^_]*_/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -38,7 +46,12 @@ function sanitizeVoiceInstructionText(input: string): string {
   // 음성 모드에서는 지문/괄호 출력 지시 라인을 제거한다.
   const cleaned = text
     .split(/\r?\n/)
-    .filter((line) => !/(괄호|지문|행동\s*묘사|나레이션|서술)/i.test(line))
+    .filter(
+      (line) =>
+        !/(\*[^*]*\*|_[^_]*_|\(|\)|（|）|\[|\]|\{|\}|「|」|『|』|괄호|지문|행동\s*묘사|나레이션|서술|stage\s*direction|narration|action\s*description|roleplay|rp\s*style)/i.test(
+          line
+        )
+    )
     .join("\n")
     .trim();
   return stripParentheticalText(cleaned);
@@ -69,9 +82,15 @@ export function composeSystemPrompt(args: {
       }))
     : few;
 
-  const lore = (args.studioLorebook || [])
-    .map((x) => `- ${String(x.key)}: ${String(x.value)}`)
-    .join("\n");
+  const loreRows = (args.studioLorebook || [])
+    .map((x) => {
+      const key = String(x.key || "").trim();
+      const rawValue = String(x.value || "");
+      const value = args.forVoice ? sanitizeVoiceInstructionText(rawValue) : rawValue;
+      return { key, value };
+    })
+    .filter((x) => x.key && x.value);
+  const lore = loreRows.map((x) => `- ${x.key}: ${x.value}`).join("\n");
 
   const fewText = fewActual.length
     ? fewActual

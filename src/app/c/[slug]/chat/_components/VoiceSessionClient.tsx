@@ -35,6 +35,21 @@ function resolveWsUrl(): string {
   return "";
 }
 
+function stripNarration(text: string): string {
+  return String(text || "")
+    .replace(/\([^)]*\)/g, "")
+    .replace(/（[^）]*）/g, "")
+    .replace(/\[[^\]]*\]/g, "")
+    .replace(/【[^】]*】/g, "")
+    .replace(/\{[^}]*\}/g, "")
+    .replace(/「[^」]*」/g, "")
+    .replace(/『[^』]*』/g, "")
+    .replace(/\*[^*]*\*/g, "")
+    .replace(/_[^_]*_/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function VoiceSessionClient({
   characterSlug,
   characterName,
@@ -74,6 +89,8 @@ export function VoiceSessionClient({
   const assistantDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const userBufferRef = useRef("");
   const userDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** iOS: 사용자 탭 직후(await 전)에 마이크 권한 요청을 시작해 한 번만 컨펌받고 저장되도록 함 */
+  const iosMicStreamPromiseRef = useRef<Promise<MediaStream> | null>(null);
 
   const flushUser = useCallback(() => {
     const buf = userBufferRef.current.trim();
@@ -192,7 +209,9 @@ export function VoiceSessionClient({
               flushUser();
             }, 800);
           } else {
-            assistantBufferRef.current += (assistantBufferRef.current ? " " : "") + raw;
+            const spokenOnly = stripNarration(raw);
+            if (!spokenOnly) return;
+            assistantBufferRef.current += (assistantBufferRef.current ? " " : "") + spokenOnly;
             const endsWithSentence = /[.?!…]\s*$/.test(assistantBufferRef.current) || /\n\s*$/.test(assistantBufferRef.current);
             if (assistantDebounceRef.current) clearTimeout(assistantDebounceRef.current);
             if (endsWithSentence) {
@@ -335,6 +354,11 @@ export function VoiceSessionClient({
   }, [ensurePlaybackResumed]);
 
   const startVoice = useCallback(async () => {
+    // iOS: 탭 직후 같은 턴에서 마이크 권한 요청을 시작 → 한 번 허용하면 저장되어 이후엔 팝업 안 뜸
+    if (isIOSDevice() && typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia && !iosMicStreamPromiseRef.current) {
+      iosMicStreamPromiseRef.current = navigator.mediaDevices.getUserMedia({ audio: true });
+    }
+
     // iOS 전용: 사용자 클릭 제스처 내에서 오디오/마이크 초기화
     if (isIOSDevice() && (!recorderRef.current || !streamerRef.current)) {
       try {
@@ -371,7 +395,10 @@ export function VoiceSessionClient({
     setError(null);
     void ensurePlaybackResumed();
     await connect();
-    await recorderRef.current.start();
+
+    const stream = iosMicStreamPromiseRef.current ? await iosMicStreamPromiseRef.current : undefined;
+    if (iosMicStreamPromiseRef.current) iosMicStreamPromiseRef.current = null;
+    await recorderRef.current.start(stream);
     setStarted(true);
   }, [clearReconnectTimer, connect, ensurePlaybackResumed]);
 
