@@ -185,9 +185,11 @@ export function VoiceSessionClient({
           return;
         }
         if (msg.type === "audio" && msg.data) {
-          void ensurePlaybackResumed();
           const buf = base64ToArrayBuffer(msg.data);
-          streamerRef.current?.addPCM16(new Uint8Array(buf));
+          const pcm = new Uint8Array(buf);
+          ensurePlaybackResumed().then(() => {
+            streamerRef.current?.addPCM16(pcm);
+          });
           return;
         }
         if (msg.type === "error") {
@@ -360,11 +362,22 @@ export function VoiceSessionClient({
       iosMicStreamPromiseRef.current = navigator.mediaDevices.getUserMedia({ audio: true });
     }
 
+    // iOS: 사용자 제스처 직후 무음 재생으로 오디오 세션 활성화 → iOS 26 등에서 재생 무음 방지
+    if (isIOSDevice() && typeof window !== "undefined") {
+      try {
+        const unlock = new Audio();
+        unlock.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
+        await unlock.play();
+      } catch {
+        /* ignore */
+      }
+    }
+
     // iOS 전용: 사용자 클릭 제스처 내에서 오디오/마이크 초기화
     if (isIOSDevice() && (!recorderRef.current || !streamerRef.current)) {
       try {
-        // 재생 샘플레이트(24k)와 동일한 context → iOS Safari 리샘플링 노이즈/크랙 완화
-        const outCtx = new AudioContext({ sampleRate: 24000 });
+        // iOS 26: sampleRate 지정 시 일부 기기에서 무음 → 우선 기본 샘플레이트 사용 후 재생 확인
+        const outCtx = new AudioContext();
         await outCtx.resume();
 
         // iOS 16: AudioBufferSourceNode 다수 재생 시 지글거림 → 1초 단위로 묶어 재생 횟수 감소
