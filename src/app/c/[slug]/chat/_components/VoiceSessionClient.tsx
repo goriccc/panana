@@ -362,15 +362,11 @@ export function VoiceSessionClient({
       iosMicStreamPromiseRef.current = navigator.mediaDevices.getUserMedia({ audio: true });
     }
 
-    // iOS: 사용자 제스처 직후 무음 재생으로 오디오 세션 활성화 → iOS 26 등에서 재생 무음 방지
+    // iOS: 사용자 제스처 직후 무음 재생으로 오디오 세션 활성화(논블로킹, 버튼 멈춤 방지)
     if (isIOSDevice() && typeof window !== "undefined") {
-      try {
-        const unlock = new Audio();
-        unlock.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
-        await unlock.play();
-      } catch {
-        /* ignore */
-      }
+      const unlock = new Audio();
+      unlock.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
+      void unlock.play().catch(() => {});
     }
 
     // iOS 전용: 사용자 클릭 제스처 내에서 오디오/마이크 초기화
@@ -468,7 +464,8 @@ export function VoiceSessionClient({
               type="button"
               onClick={startVoice}
               disabled={!!error}
-              className="rounded-lg bg-panana-pink px-4 py-2 text-[13px] font-bold text-[#0B0C10] transition hover:bg-panana-pink/90 disabled:opacity-50"
+              style={{ touchAction: "manipulation" }}
+              className="rounded-lg bg-panana-pink px-4 py-2 text-[13px] font-bold text-[#0B0C10] transition hover:bg-panana-pink/90 disabled:opacity-50 active:opacity-90"
             >
               음성 시작
             </button>
