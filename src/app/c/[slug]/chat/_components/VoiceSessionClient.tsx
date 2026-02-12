@@ -285,7 +285,8 @@ export function VoiceSessionClient({
 
     const setup = async () => {
       try {
-        const outCtx = await audioContext({ id: "voice-panana-out" });
+        // 서버 PCM 24kHz와 동일한 context → 리샘플링 노이즈 완화(iOS 등)
+        const outCtx = await audioContext({ id: "voice-panana-out", sampleRate: 24000 });
         const streamer = new AudioStreamer(outCtx);
         await streamer.addWorklet("vumeter-out", VolMeterWorklet, (d: unknown) => {
           const ev = d as MessageEvent;
@@ -362,7 +363,8 @@ export function VoiceSessionClient({
     // iOS 전용: 사용자 클릭 제스처 내에서 오디오/마이크 초기화
     if (isIOSDevice() && (!recorderRef.current || !streamerRef.current)) {
       try {
-        const outCtx = new AudioContext();
+        // 재생 샘플레이트(24k)와 동일한 context → iOS Safari 리샘플링 노이즈/크랙 완화
+        const outCtx = new AudioContext({ sampleRate: 24000 });
         await outCtx.resume();
 
         const streamer = new AudioStreamer(outCtx);
