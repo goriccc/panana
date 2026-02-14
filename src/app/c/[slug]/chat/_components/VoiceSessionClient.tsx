@@ -78,6 +78,8 @@ export function VoiceSessionClient({
   const [reconnectGaveUp, setReconnectGaveUp] = useState(false);
   const [inVolume, setInVolume] = useState(0);
   const [outVolume, setOutVolume] = useState(0);
+  /** 마이크 민감도 0.5(낮음) ~ 2(높음). 음성 시작 후에도 변경 가능. */
+  const [micSensitivity, setMicSensitivity] = useState(1);
   const wsRef = useRef<WebSocket | null>(null);
   const recorderRef = useRef<AudioRecorder | null>(null);
   const streamerRef = useRef<AudioStreamer | null>(null);
@@ -187,7 +189,7 @@ export function VoiceSessionClient({
       }, 100);
     };
 
-    ws.onmessage = (event: MessageEvent) => {
+    ws.onmessage = async (event: MessageEvent) => {
       try {
         const msg = JSON.parse(String(event.data || "{}"));
         if (msg.type === "ready") {
@@ -236,7 +238,21 @@ export function VoiceSessionClient({
           if (!raw) return;
 
           if (role === "user") {
-            userBufferRef.current += (userBufferRef.current ? " " : "") + raw;
+            let toShow = raw;
+            try {
+              const res = await fetch("/api/translate-to-korean", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text: raw }),
+              });
+              const data = await res.json().catch(() => ({}));
+              if (data?.ok && typeof data.text === "string" && data.text.trim()) {
+                toShow = data.text.trim();
+              }
+            } catch {
+              // 실패 시 원문 표시
+            }
+            userBufferRef.current += (userBufferRef.current ? " " : "") + toShow;
             if (userDebounceRef.current) clearTimeout(userDebounceRef.current);
             userDebounceRef.current = setTimeout(() => {
               flushUser();
@@ -477,8 +493,9 @@ export function VoiceSessionClient({
       if (iosMicStreamPromiseRef.current) iosMicStreamPromiseRef.current = null;
       await recorderRef.current.start(stream);
     }
+    recorderRef.current?.setGain(micSensitivity);
     setStarted(true);
-  }, [clearReconnectTimer, connect, ensurePlaybackResumed]);
+  }, [clearReconnectTimer, connect, ensurePlaybackResumed, micSensitivity]);
 
   const stopVoice = useCallback(() => {
     userStoppedRef.current = true;
@@ -537,6 +554,26 @@ export function VoiceSessionClient({
       <div className="flex flex-1 flex-col items-center gap-1">
         {error && (
           <span className="truncate text-[11px] text-red-300">{error}</span>
+        )}
+        {started && (
+          <div className="flex w-full max-w-[200px] items-center gap-2">
+            <span className="whitespace-nowrap text-[11px] text-white/70">마이크 민감도</span>
+            <input
+              type="range"
+              min={0.5}
+              max={2}
+              step={0.1}
+              value={micSensitivity}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value);
+                setMicSensitivity(v);
+                recorderRef.current?.setGain(v);
+              }}
+              className="h-1.5 flex-1 accent-panana-pink"
+              aria-label="마이크 민감도"
+            />
+            <span className="w-7 text-right text-[11px] text-white/80">{micSensitivity.toFixed(1)}</span>
+          </div>
         )}
         <div className="flex items-center gap-2">
           {!started ? (

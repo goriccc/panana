@@ -22,6 +22,7 @@ export class AudioRecorder extends EventEmitter {
   stream: MediaStream | undefined;
   audioContext: AudioContext | undefined;
   source: MediaStreamAudioSourceNode | undefined;
+  gainNode: GainNode | undefined;
   recording = false;
   recordingWorklet: AudioWorkletNode | undefined;
   vuWorklet: AudioWorkletNode | undefined;
@@ -30,6 +31,14 @@ export class AudioRecorder extends EventEmitter {
 
   constructor(public sampleRate = 16000) {
     super();
+  }
+
+  /** 마이크 민감도 (0.5=낮음 ~ 2=높음). 기본 1. 음성 시작 후에도 변경 가능. */
+  setGain(gain: number) {
+    const g = Math.max(0.25, Math.min(3, Number(gain) || 1));
+    if (this.gainNode) {
+      this.gainNode.gain.setValueAtTime(g, this.audioContext?.currentTime ?? 0);
+    }
   }
 
   /**
@@ -79,7 +88,11 @@ export class AudioRecorder extends EventEmitter {
           this.emit("data", arrayBufferString);
         }
       };
-      this.source.connect(this.recordingWorklet);
+
+      this.gainNode = this.audioContext.createGain();
+      this.gainNode.gain.value = 1;
+      this.source.connect(this.gainNode);
+      this.gainNode.connect(this.recordingWorklet);
 
       const vuWorkletName = "vu-meter";
       await this.audioContext.audioWorklet.addModule(createWorkletFromSrc(vuWorkletName, VolMeterWorklet));
@@ -87,8 +100,7 @@ export class AudioRecorder extends EventEmitter {
       this.vuWorklet.port.onmessage = (ev: MessageEvent) => {
         this.emit("volume", (ev.data as any).volume);
       };
-
-      this.source.connect(this.vuWorklet);
+      this.gainNode.connect(this.vuWorklet);
       this.recording = true;
       resolve();
       this.starting = null;
@@ -97,9 +109,11 @@ export class AudioRecorder extends EventEmitter {
 
   stop() {
     const handleStop = () => {
+      this.gainNode?.disconnect();
       this.source?.disconnect();
       this.stream?.getTracks().forEach((track) => track.stop());
       this.stream = undefined;
+      this.gainNode = undefined;
       this.recordingWorklet = undefined;
       this.vuWorklet = undefined;
       const ctx = this.audioContext;

@@ -861,8 +861,19 @@ export async function POST(req: Request) {
       });
     }
 
-    // system prompt에 현재 상태/이벤트를 추가(LLM이 변수/참여자를 인지하도록)
+    // system prompt에 현재 시각(KST)·상태/이벤트를 추가
     if (system) {
+      const nowKst = new Date().toLocaleString("ko-KR", {
+        timeZone: "Asia/Seoul",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
+      const currentTimeBlock = `[현재 시각] ${nowKst} (한국 표준시 KST). 유저가 시간·날짜를 물어보면 이 시각을 기준으로 답한다.`;
       const snapKeys = [
         "affection",
         "risk",
@@ -894,6 +905,7 @@ export async function POST(req: Request) {
         (e) => e.type === "system_message" && String((e as any).text || "").includes("[씬 전환]")
       );
       const extra = [
+        currentTimeBlock,
         snap ? `[상태 변수] ${snap}` : null,
         parts.length ? `[참여자] ${parts.join(", ")}` : null,
         eventsText ? `[시스템 이벤트]\n${eventsText}` : null,
