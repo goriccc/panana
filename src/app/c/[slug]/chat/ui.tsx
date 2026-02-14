@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchMyUserProfile } from "@/lib/pananaApp/userProfiles";
 import { loadRuntime, saveRuntime } from "@/lib/pananaApp/chatRuntime";
 import { recordMyChat } from "@/lib/pananaApp/myChats";
@@ -29,6 +29,8 @@ type Msg = {
   sceneImageUrl?: string;
   sceneImageLoading?: boolean;
   sceneImageError?: string;
+  /** 마지막 활동 시각(epoch ms). 오랜만 복귀 시 안부 오프닝 판단용 */
+  at?: number;
 };
 /** 제3자 개입 시스템 메시지: [시스템] system_message:"..." 형태면 따옴표 안 내용만 반환 */
 function getSystemMessageDisplayText(raw: string): string {
@@ -673,7 +675,7 @@ export function CharacterChatClient({
       const reply = String(data.text || "").trim();
       if (reply) {
         resetTyping();
-        setMessages((prev) => [...prev, { id: `b-${Date.now()}-opening`, from: "bot", text: reply }]);
+        setMessages((prev) => [...prev, { id: `b-${Date.now()}-opening`, from: "bot", text: reply, at: Date.now() }]);
         setHistoryLoading(false);
       }
     } catch (e: any) {
@@ -683,6 +685,99 @@ export function CharacterChatClient({
       setSending(false);
     }
   };
+
+  const RETURNING_OPENER_THROTTLE_MS = 24 * 60 * 60 * 1000;
+  const returningOpenerReqRef = useRef(false);
+
+  const requestReturningOpening = useCallback(
+    async (pid: string, characterSlug: string, messagesForContext: Msg[], lastMessageAt: number) => {
+      if (returningOpenerReqRef.current) return;
+      returningOpenerReqRef.current = true;
+      const history = messagesForContext
+        .filter((m) => m.from !== "system")
+        .slice(-40)
+        .map((m) => ({ role: m.from === "user" ? "user" as const : "assistant" as const, content: m.text }));
+      const hoursAgo = Math.round((Date.now() - lastMessageAt) / (60 * 60 * 1000));
+      const daysAgo = hoursAgo >= 24 ? Math.round(hoursAgo / 24) : 0;
+      const timeLabel = daysAgo > 0 ? `${daysAgo}일만` : `${hoursAgo}시간만`;
+      const returningPrompt = [
+        "대화 시작.",
+        `유저가 ${timeLabel}에 대화방에 들어왔다.`,
+        "[유저 프로필]과 [우리의 지난 서사]와 위 대화를 참고해, 유저가 과거에 언급한 일(면접, 시험, 맞선, 중요한 일정 등)이 지났거나 다가오면 자연스럽게 안부를 물어봐라.",
+        "이미 대화에서 유저가 결과를 말한 주제는 다시 묻지 마라.",
+        "2~4문장, 캐릭터 대사만 출력해라.",
+      ].join(" ");
+      try {
+        const idt = ensurePananaIdentity();
+        const identityNick = String(idt.nickname || "").trim();
+        const resolvedUserName = String(userName || identityNick || idt.handle || "너").trim();
+        const runtimeVariables = {
+          ...(rt.variables || {}),
+          ...(resolvedUserName ? { user_name: resolvedUserName, call_sign: resolvedUserName } : {}),
+          ...(idt.handle ? { user_handle: String(idt.handle), panana_handle: String(idt.handle) } : {}),
+          ...(idt.id ? { panana_id: String(pid) } : {}),
+        };
+        const allowUnsafe = (() => {
+          try {
+            return localStorage.getItem("panana_safety_on") === "1" && adultVerified;
+          } catch {
+            return false;
+          }
+        })();
+        const cfg = llmConfigRef.current;
+        const provider = cfg?.defaultProvider || "anthropic";
+        const model = cfg?.settings?.find((s: any) => s.provider === provider)?.model ?? undefined;
+        const res = await fetch("/api/llm/chat", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            provider,
+            ...(model ? { model } : {}),
+            characterSlug,
+            concise: false,
+            allowUnsafe,
+            runtime: { variables: runtimeVariables, chat: { participants: rt.participants, lastActiveAt: rt.lastActiveAt || undefined, firedAt: rt.firedAt } },
+            messages: [
+              { role: "system", content: `${characterName} 캐릭터로 자연스럽게 대화해.` },
+              ...history.map((m) => ({ role: m.role, content: m.content })),
+              { role: "user", content: returningPrompt },
+            ],
+          }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data?.ok) return;
+        const reply = String(data.text || "").trim();
+        if (reply) {
+          setMessages((prev) => [...prev, { id: `b-${Date.now()}-returning`, from: "bot", text: reply, at: Date.now() }]);
+          try {
+            const key = `panana_returning_opener:${pid}:${characterSlug}`;
+            const raw = localStorage.getItem(key);
+            const obj = raw ? JSON.parse(raw) : {};
+            obj.lastShownAt = Date.now();
+            localStorage.setItem(key, JSON.stringify(obj));
+          } catch {}
+        }
+      } catch {
+        // 실패 시 무시
+      } finally {
+        returningOpenerReqRef.current = false;
+      }
+    },
+    [characterName, userName, rt, adultVerified]
+  );
+
+  function tryRunReturningOpening(pid: string, characterSlug: string, rows: Msg[], lastAt: number) {
+    const now = Date.now();
+    if (now - lastAt < RETURNING_OPENER_THROTTLE_MS) return;
+    try {
+      const key = `panana_returning_opener:${pid}:${characterSlug}`;
+      const raw = localStorage.getItem(key);
+      const obj = raw ? JSON.parse(raw) : {};
+      const lastShownAt = Number(obj?.lastShownAt) || 0;
+      if (lastShownAt > 0 && now - lastShownAt < RETURNING_OPENER_THROTTLE_MS) return;
+      void requestReturningOpening(pid, characterSlug, rows, lastAt);
+    } catch {}
+  }
 
   const getPananaId = () => {
     const idt = ensurePananaIdentity();
@@ -711,7 +806,7 @@ export function CharacterChatClient({
             id: m.id,
             from: m.from,
             text: m.text,
-            at: Date.now(),
+            at: m.at ?? Date.now(),
             sceneImageUrl: m.sceneImageUrl,
           })),
         }),
@@ -760,6 +855,7 @@ export function CharacterChatClient({
         from: m.from as any,
         text: m.text,
         sceneImageUrl: m.sceneImageUrl,
+        ...(m.at ? { at: m.at } : {}),
       }));
       savedMsgIdsRef.current = new Set(rows.map((m) => m.id));
       setMessages(rows);
@@ -819,11 +915,16 @@ export function CharacterChatClient({
               from: (m?.from === "bot" || m?.from === "user" || m?.from === "system" ? m.from : "system") as Msg["from"],
               text: String(m?.text || ""),
               sceneImageUrl: m?.sceneImageUrl ? String(m.sceneImageUrl).trim() : undefined,
+              ...(m?.at != null ? { at: Number(m.at) } : {}),
             }))
             .filter((m: any) => m.id && m.text);
           if (rows.length) {
             savedMsgIdsRef.current = new Set(rows.map((m: any) => m.id));
             setMessages(rows);
+            const lastAt = rows[rows.length - 1]?.at;
+            if (typeof lastAt === "number" && lastAt > 0 && alive) {
+              tryRunReturningOpening(pid, characterSlug, rows, lastAt);
+            }
           }
         } else if (!warnedDbRef.current) {
           const errText = String(data?.error || "").trim();
@@ -870,7 +971,7 @@ export function CharacterChatClient({
           id: m.id,
           from: m.from,
           text: m.text,
-          at: Date.now(),
+          at: m.at ?? Date.now(),
           sceneImageUrl: m.sceneImageUrl,
         })),
         threadId: currentThreadId,
@@ -1014,7 +1115,7 @@ export function CharacterChatClient({
 
       const reply = String(data.text || "").trim() || "…";
       resetTyping();
-      setMessages((prev) => [...prev, { id: `b-${Date.now()}`, from: "bot", text: reply }]);
+      setMessages((prev) => [...prev, { id: `b-${Date.now()}`, from: "bot", text: reply, at: Date.now() }]);
 
       const next: ChatRuntimeState | null =
         data?.runtime?.chat
@@ -1047,7 +1148,7 @@ export function CharacterChatClient({
     forceScrollRef.current = true;
     hasSentRef.current = true;
     isAtBottomRef.current = true;
-    setMessages((prev) => [...prev, { id: `u-${Date.now()}`, from: "user", text }]);
+    setMessages((prev) => [...prev, { id: `u-${Date.now()}`, from: "user", text, at: Date.now() }]);
     setValue("");
     setScriptMode(false);
 
@@ -1367,10 +1468,10 @@ export function CharacterChatClient({
               }}
               onVoiceModelReady={setCurrentVoiceModelLabel}
               onUserTranscript={(text) => {
-                setMessages((prev) => [...prev, { id: `u-voice-${Date.now()}`, from: "user", text }]);
+                setMessages((prev) => [...prev, { id: `u-voice-${Date.now()}`, from: "user", text, at: Date.now() }]);
               }}
               onAssistantTranscript={(text) => {
-                setMessages((prev) => [...prev, { id: `b-voice-${Date.now()}`, from: "bot", text }]);
+                setMessages((prev) => [...prev, { id: `b-voice-${Date.now()}`, from: "bot", text, at: Date.now() }]);
               }}
               characterAvatarUrl={characterAvatarUrl}
               userAvatarUrl={userAvatarUrl}
