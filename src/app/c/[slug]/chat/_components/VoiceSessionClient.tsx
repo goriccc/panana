@@ -410,10 +410,10 @@ export function VoiceSessionClient({
     }
 
     // iOS 전용: 사용자 클릭 제스처 내에서 오디오/마이크 초기화
+    // audioContext()는 내부에서 a.play() 실패 시 다음 탭을 기다려서, 마이크 팝업 수락 직후에 블로킹됨 → new AudioContext() 직접 사용
     if (isIOSDevice() && (!recorderRef.current || !streamerRef.current)) {
       try {
-        // 공통 unlock(무음 재생) 후 24kHz 컨텍스트 사용. iOS 17 무음 버그는 첫 오디오 수신 시 suspend/resume 워크어라운드로 보완
-        const outCtx = await audioContext({ id: "voice-panana-out-ios", sampleRate: 24000 });
+        const outCtx = new AudioContext({ sampleRate: 24000 });
         await outCtx.resume();
 
         // iOS: BufferSourceNode 다수 재생 시 지글거림 → 2초 단위로 묶어 재생 횟수 감소 (iPhone 8 등)
