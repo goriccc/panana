@@ -219,6 +219,24 @@ async function fetchProfileNote(pananaId: string): Promise<string | null> {
   }
 }
 
+async function loadFallbackProvider(): Promise<"anthropic" | "gemini" | "deepseek" | null> {
+  const supabase = getSupabaseServer();
+  const { data, error } = await supabase
+    .from("panana_public_site_settings_v")
+    .select("llm_fallback_provider")
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return null;
+  const p = (data as any)?.llm_fallback_provider;
+  if (p === "anthropic" || p === "gemini" || p === "deepseek") return p;
+  return null;
+}
+
+function isAnthropicContentPolicyError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err ?? "");
+  return /content\s*filtering|output\s*blocked|content\s*policy/i.test(msg);
+}
+
 async function loadSettings(provider: "anthropic" | "gemini" | "deepseek") {
   const supabase = getSupabaseServer();
   const { data, error } = await supabase
@@ -261,6 +279,22 @@ function selectGeminiModel(
     ?.content?.length || 0;
   if (totalChars > 12000 || msgCount > 10 || lastAssistant > 400) return "gemini-2.5-pro";
   return "gemini-2.5-flash";
+}
+
+/** 문장·맥락에 따라 Claude Haiku(짧거나 단순) vs Sonnet(그 외) 자동 선택 */
+function selectAnthropicModel(
+  messages: Array<{ role: string; content: string }>,
+  system: string
+): string {
+  const totalChars =
+    (system?.length || 0) + (messages || []).reduce((sum, m) => sum + (m?.content?.length || 0), 0);
+  const msgCount = (messages || []).length;
+  const lastAssistant = [...(messages || [])]
+    .reverse()
+    .find((m) => m.role === "assistant")
+    ?.content?.length || 0;
+  if (totalChars > 12000 || msgCount > 10 || lastAssistant > 400) return "claude-sonnet-4-5";
+  return "claude-haiku-4-5";
 }
 
 function toGeminiApiModel(displayOrApi: string): string {
@@ -642,10 +676,15 @@ export async function POST(req: Request) {
       body.model ||
       settings?.model ||
       (body.provider === "anthropic"
-        ? "Claude 4.5Sonnet"
+        ? "claude-sonnet-4-5"
         : body.provider === "gemini"
-          ? "Gemini 2.5Pro"
+          ? "gemini-2.5-pro"
           : "DeepSeek V3");
+    // Anthropic deprecated/legacy Sonnet IDs → 현재 지원 모델 (404 방지)
+    if (body.provider === "anthropic" && /claude-3-5-sonnet-(20241022|latest)/i.test(model)) {
+      model = "claude-sonnet-4-5";
+    }
+    // "auto"는 아래에서 system 확정 후 selectAnthropicModel로 치환됨
     const temperature = body.temperature ?? settings?.temperature ?? 0.7;
     const maxTokens = body.max_tokens ?? settings?.max_tokens ?? 1024;
     const topP = body.top_p ?? settings?.top_p ?? 1.0;
@@ -861,26 +900,67 @@ export async function POST(req: Request) {
 
     let out: { text: string; raw?: any; meta?: any };
 
-    // Gemini: 대화 복잡도에 따라 Flash(가벼운 대화) vs Pro(복잡·정교한 서사) 자동 선택. body.model 있으면 그대로 사용.
+    // Gemini: model이 "auto"이거나 없으면 대화 복잡도에 따라 Flash vs Pro 자동 선택. 그 외에는 지정 모델 사용.
     if (body.provider === "gemini") {
-      model = body.model
-        ? toGeminiApiModel(body.model)
-        : selectGeminiModel(
-            nonSystemInterpolated.map((m) => ({ role: m.role, content: m.content })),
-            system || ""
-          );
+      model =
+        body.model && body.model !== "auto"
+          ? toGeminiApiModel(body.model)
+          : selectGeminiModel(
+              nonSystemInterpolated.map((m) => ({ role: m.role, content: m.content })),
+              system || ""
+            );
+    }
+
+    // Anthropic: model이 "auto"이면 문장·맥락에 따라 Haiku(짧/단순) vs Sonnet(그 외) 자동 선택
+    if (body.provider === "anthropic" && model === "auto") {
+      model = selectAnthropicModel(
+        nonSystemInterpolated.map((m) => ({ role: m.role, content: m.content })),
+        system || ""
+      );
     }
 
     if (body.provider === "anthropic") {
-      out = await callAnthropic({
-        apiKey,
-        model,
-        temperature,
-        max_tokens: maxTokens,
-        top_p: topP,
-        system,
-        messages: nonSystemInterpolated.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
-      });
+      try {
+        out = await callAnthropic({
+          apiKey,
+          model,
+          temperature,
+          max_tokens: maxTokens,
+          top_p: topP,
+          system,
+          messages: nonSystemInterpolated.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+        });
+      } catch (anthropicErr) {
+        if (allowUnsafe && isAnthropicContentPolicyError(anthropicErr)) {
+          const fallback = await loadFallbackProvider();
+          if (fallback === "gemini") {
+            const geminiKey = getEnvKey("gemini");
+            const geminiSettings = await loadSettings("gemini").catch(() => null);
+            if (geminiKey) {
+              const fallbackModel = selectGeminiModel(
+                nonSystemInterpolated.map((m) => ({ role: m.role, content: m.content })),
+                system || ""
+              );
+              out = await callGemini({
+                apiKey: geminiKey,
+                model: fallbackModel,
+                temperature: geminiSettings?.temperature ?? 0.7,
+                max_tokens: geminiSettings?.max_tokens ?? maxTokens,
+                top_p: geminiSettings?.top_p ?? topP,
+                system,
+                messages: nonSystemInterpolated.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+                allowUnsafe: true,
+              });
+            } else {
+              throw anthropicErr;
+            }
+          } else {
+            throw anthropicErr;
+          }
+        } else {
+          throw anthropicErr;
+        }
+      }
     } else if (body.provider === "gemini") {
       out = await callGemini({
         apiKey,

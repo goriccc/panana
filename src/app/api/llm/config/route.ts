@@ -15,19 +15,29 @@ export async function GET(req: Request) {
   const scope = searchParams.get("scope") || "global";
   const supabase = getSupabaseServer();
 
-  const { data, error } = await supabase
-    .from("panana_llm_settings")
-    .select("scope, provider, model, temperature, max_tokens, top_p, force_parenthesis, nsfw_filter")
-    .eq("scope", scope)
-    .order("provider", { ascending: true });
-  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  const [llmRes, siteRes] = await Promise.all([
+    supabase
+      .from("panana_llm_settings")
+      .select("scope, provider, model, temperature, max_tokens, top_p, force_parenthesis, nsfw_filter")
+      .eq("scope", scope)
+      .order("provider", { ascending: true }),
+    supabase.from("panana_public_site_settings_v").select("llm_default_provider, llm_fallback_provider, llm_fallback_model").limit(1).maybeSingle(),
+  ]);
+
+  if (llmRes.error) return NextResponse.json({ ok: false, error: llmRes.error.message }, { status: 500 });
+
+  const site = siteRes.data;
+  const defaultProvider = (site as any)?.llm_default_provider || "anthropic";
+  const fallbackProvider = (site as any)?.llm_fallback_provider || "gemini";
+  const fallbackModel = (site as any)?.llm_fallback_model || "gemini-2.5-flash";
 
   return NextResponse.json({
     ok: true,
     scope,
-    // 알파 테스트는 프론트에서 provider를 직접 선택하므로, defaultProvider는 고정값만 제공
-    defaultProvider: "anthropic",
-    settings: (data || []).map((s: any) => ({
+    defaultProvider,
+    fallbackProvider,
+    fallbackModel,
+    settings: (llmRes.data || []).map((s: any) => ({
       provider: s.provider,
       model: s.model,
       temperature: s.temperature,

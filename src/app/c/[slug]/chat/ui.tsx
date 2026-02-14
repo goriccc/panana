@@ -369,6 +369,7 @@ export function CharacterChatClient({
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [composerHeight, setComposerHeight] = useState(64);
   const [voiceModalOpen, setVoiceModalOpen] = useState(false);
+  const [currentModelLabel, setCurrentModelLabel] = useState<string | null>(null);
   const { data: session } = useSession();
   const userAvatarUrl = String((session as any)?.profileImageUrl || (session as any)?.user?.image || "").trim() || undefined;
   const composerRef = useRef<HTMLDivElement | null>(null);
@@ -377,6 +378,28 @@ export function CharacterChatClient({
   const lastKeyboardHeightRef = useRef(0);
   const forceScrollRef = useRef(false);
   const isInputFocusedRef = useRef(false);
+  const llmConfigRef = useRef<{
+    defaultProvider: string;
+    fallbackProvider: string;
+    fallbackModel: string;
+    settings: Array<{ provider: string; model: string }>;
+  } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/llm/config")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.ok && d?.settings) {
+          llmConfigRef.current = {
+            defaultProvider: d.defaultProvider || "anthropic",
+            fallbackProvider: d.fallbackProvider || "gemini",
+            fallbackModel: d.fallbackModel || "gemini-2.5-flash",
+            settings: d.settings || [],
+          };
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const openingPrompt = useMemo(() => {
     return [
@@ -604,21 +627,26 @@ export function CharacterChatClient({
         ...(idt.id ? { panana_id: String(idt.id) } : {}),
       };
       const sceneIdFromRuntime = String((runtimeVariables as any).scene_id || (runtimeVariables as any).sceneId || "").trim();
+      const allowUnsafe = (() => {
+        try {
+          return localStorage.getItem("panana_safety_on") === "1" && adultVerified;
+        } catch {
+          return false;
+        }
+      })();
+      const cfg = llmConfigRef.current;
+      const provider = cfg?.defaultProvider || "anthropic";
+      const model = cfg?.settings?.find((s: any) => s.provider === provider)?.model ?? undefined;
       const res = await fetch("/api/llm/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          provider: "gemini",
+          provider,
+          ...(model ? { model } : {}),
           characterSlug,
           sceneId: sceneIdFromRuntime || undefined,
           concise: false,
-          allowUnsafe: (() => {
-            try {
-              return localStorage.getItem("panana_safety_on") === "1" && adultVerified;
-            } catch {
-              return false;
-            }
-          })(),
+          allowUnsafe,
           runtime: {
             variables: runtimeVariables,
             chat: {
@@ -636,6 +664,11 @@ export function CharacterChatClient({
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) throw new Error(data?.error || `LLM error (${res.status})`);
       if (hasSentRef.current) return;
+      if (data?.provider != null && data?.model != null) {
+        const p = String(data.provider).toLowerCase();
+        const providerLabel = p === "anthropic" ? "Claude" : p === "gemini" ? "Gemini" : p === "deepseek" ? "DeepSeek" : data.provider;
+        setCurrentModelLabel(`${providerLabel} · ${String(data.model)}`);
+      }
       const reply = String(data.text || "").trim();
       if (reply) {
         resetTyping();
@@ -903,22 +936,27 @@ export function CharacterChatClient({
         ...(idt.id ? { panana_id: String(idt.id) } : {}),
       };
       const sceneIdFromRuntime = String((runtimeVariables as any).scene_id || (runtimeVariables as any).sceneId || "").trim();
+      const allowUnsafe = (() => {
+        try {
+          return localStorage.getItem("panana_safety_on") === "1" && adultVerified;
+        } catch {
+          return false;
+        }
+      })();
+      const cfg = llmConfigRef.current;
+      const provider = cfg?.defaultProvider || "anthropic";
+      const model = cfg?.settings?.find((s: any) => s.provider === provider)?.model ?? undefined;
       const res = await fetch("/api/llm/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          provider: "gemini",
+          provider,
+          ...(model ? { model } : {}),
           characterSlug,
           sceneId: sceneIdFromRuntime || undefined,
           concise: true,
           userScript: userScript || undefined,
-          allowUnsafe: (() => {
-            try {
-              return localStorage.getItem("panana_safety_on") === "1" && adultVerified;
-            } catch {
-              return false;
-            }
-          })(),
+          allowUnsafe,
           runtime: {
             variables: runtimeVariables,
             chat: {
@@ -939,6 +977,11 @@ export function CharacterChatClient({
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) {
         throw new Error(data?.error || `LLM error (${res.status})`);
+      }
+      if (data?.provider != null && data?.model != null) {
+        const p = String(data.provider).toLowerCase();
+        const providerLabel = p === "anthropic" ? "Claude" : p === "gemini" ? "Gemini" : p === "deepseek" ? "DeepSeek" : data.provider;
+        setCurrentModelLabel(`${providerLabel} · ${String(data.model)}`);
       }
 
       const nextLabels =
@@ -1095,6 +1138,11 @@ export function CharacterChatClient({
                 </span>
               ) : null;
             })()}
+            {currentModelLabel ? (
+              <span className="text-[11px] text-white/40 mt-0.5" aria-hidden>
+                {currentModelLabel}
+              </span>
+            ) : null}
           </div>
           <button
             type="button"

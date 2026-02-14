@@ -7,6 +7,7 @@ import { audioContext, base64ToArrayBuffer } from "@/lib/voice/genai-live/utils"
 import VolMeterWorklet from "@/lib/voice/genai-live/worklets/vol-meter";
 
 const LIVE_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025";
+const MAX_RECONNECT_ATTEMPTS = 5;
 
 function isIOSDevice(): boolean {
   if (typeof navigator === "undefined") return false;
@@ -71,6 +72,7 @@ export function VoiceSessionClient({
 }) {
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reconnectGaveUp, setReconnectGaveUp] = useState(false);
   const [inVolume, setInVolume] = useState(0);
   const [outVolume, setOutVolume] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
@@ -91,6 +93,8 @@ export function VoiceSessionClient({
   const userDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** iOS: 사용자 탭 직후(await 전)에 마이크 권한 요청을 시작해 한 번만 컨펌받고 저장되도록 함 */
   const iosMicStreamPromiseRef = useRef<Promise<MediaStream> | null>(null);
+  /** iOS 17 등: 첫 오디오 수신 시 suspend→resume 워크어라운드 1회만 수행 */
+  const iosContextWorkaroundDoneRef = useRef(false);
 
   const flushUser = useCallback(() => {
     const buf = userBufferRef.current.trim();
@@ -132,6 +136,7 @@ export function VoiceSessionClient({
 
   const connect = useCallback(async () => {
     setError(null);
+    setReconnectGaveUp(false);
     const wsUrl = resolveWsUrl();
     if (!wsUrl) {
       setError("NEXT_PUBLIC_VERTEX_LIVE_PROXY_URL이 설정되지 않았어요.");
@@ -181,15 +186,36 @@ export function VoiceSessionClient({
       try {
         const msg = JSON.parse(String(event.data || "{}"));
         if (msg.type === "ready") {
+          reconnectAttemptRef.current = 0;
+          setReconnectGaveUp(false);
           setConnected(true);
           return;
         }
         if (msg.type === "audio" && msg.data) {
           const buf = base64ToArrayBuffer(msg.data);
           const pcm = new Uint8Array(buf);
-          ensurePlaybackResumed().then(() => {
-            streamerRef.current?.addPCM16(pcm);
-          });
+          const streamer = streamerRef.current;
+          const doPlay = async () => {
+            if (!streamer) return;
+            // iOS 17: AudioContext가 running인데 소리 안 나는 WebKit 버그 대응 — 첫 오디오 시 1회 suspend→resume
+            if (isIOSDevice() && !iosContextWorkaroundDoneRef.current) {
+              iosContextWorkaroundDoneRef.current = true;
+              const ctx = streamer.context;
+              try {
+                if (ctx.state === "running") {
+                  await ctx.suspend();
+                  await ctx.resume();
+                } else {
+                  await ctx.resume();
+                }
+              } catch {
+                // ignore
+              }
+            }
+            await ensurePlaybackResumed();
+            streamer.addPCM16(pcm);
+          };
+          void doPlay();
           return;
         }
         if (msg.type === "error") {
@@ -246,11 +272,19 @@ export function VoiceSessionClient({
         wsRef.current = null;
       }
 
-      // 사용자가 명시적으로 끊지 않았고(started 유지), 연결이 닫히면 자동 재연결
+      // 사용자가 명시적으로 끊지 않았고(started 유지), 연결이 닫히면 자동 재연결 (최대 MAX_RECONNECT_ATTEMPTS회)
       if (!userStoppedRef.current && startedRef.current) {
         clearReconnectTimer();
-        const retryInMs = Math.min(1000 * 2 ** reconnectAttemptRef.current, 5000);
-        reconnectAttemptRef.current += 1;
+        const attempt = reconnectAttemptRef.current + 1;
+        reconnectAttemptRef.current = attempt;
+
+        if (attempt > MAX_RECONNECT_ATTEMPTS) {
+          setReconnectGaveUp(true);
+          setError("연결을 유지할 수 없어요. 아래 '다시 연결'로 재시도해 보세요.");
+          return;
+        }
+
+        setReconnectGaveUp(false);
         setError("연결이 잠시 끊겼어요. 자동 재연결 중...");
 
         reconnectTimerRef.current = setTimeout(async () => {
@@ -259,14 +293,20 @@ export function VoiceSessionClient({
           // fetch/초기화 단계에서 실패해 소켓이 안 만들어진 경우에도 재시도 유지
           if (!wsRef.current && !userStoppedRef.current && startedRef.current) {
             clearReconnectTimer();
-            const nextRetryInMs = Math.min(1000 * 2 ** reconnectAttemptRef.current, 5000);
-            reconnectAttemptRef.current += 1;
+            const nextAttempt = reconnectAttemptRef.current + 1;
+            reconnectAttemptRef.current = nextAttempt;
+            if (nextAttempt > MAX_RECONNECT_ATTEMPTS) {
+              setReconnectGaveUp(true);
+              setError("연결을 유지할 수 없어요. 아래 '다시 연결'로 재시도해 보세요.");
+              return;
+            }
+            const nextRetryInMs = Math.min(1000 * 2 ** nextAttempt, 5000);
             reconnectTimerRef.current = setTimeout(async () => {
               if (userStoppedRef.current || !startedRef.current) return;
               await connect();
             }, nextRetryInMs);
           }
-        }, retryInMs);
+        }, Math.min(1000 * 2 ** (attempt - 1), 5000));
       }
     };
   }, [characterSlug, callSign, clearReconnectTimer, ensurePlaybackResumed, flushAssistant, flushUser]);
@@ -372,12 +412,12 @@ export function VoiceSessionClient({
     // iOS 전용: 사용자 클릭 제스처 내에서 오디오/마이크 초기화
     if (isIOSDevice() && (!recorderRef.current || !streamerRef.current)) {
       try {
-        // iOS 26: sampleRate 지정 시 일부 기기에서 무음 → 우선 기본 샘플레이트 사용 후 재생 확인
-        const outCtx = new AudioContext();
+        // 공통 unlock(무음 재생) 후 24kHz 컨텍스트 사용. iOS 17 무음 버그는 첫 오디오 수신 시 suspend/resume 워크어라운드로 보완
+        const outCtx = await audioContext({ id: "voice-panana-out-ios", sampleRate: 24000 });
         await outCtx.resume();
 
-        // iOS 16: AudioBufferSourceNode 다수 재생 시 지글거림 → 1초 단위로 묶어 재생 횟수 감소
-        const streamer = new AudioStreamer(outCtx, { mergeChunkSamples: 24000 });
+        // iOS: BufferSourceNode 다수 재생 시 지글거림 → 2초 단위로 묶어 재생 횟수 감소 (iPhone 8 등)
+        const streamer = new AudioStreamer(outCtx, { mergeChunkSamples: 48000 });
         await streamer.addWorklet("vumeter-out", VolMeterWorklet, (d: unknown) => {
           const ev = d as MessageEvent;
           const vol = (ev?.data as { volume?: number })?.volume;
@@ -403,6 +443,7 @@ export function VoiceSessionClient({
     if (!recorderRef.current || !streamerRef.current) return;
     userStoppedRef.current = false;
     reconnectAttemptRef.current = 0;
+    setReconnectGaveUp(false);
     clearReconnectTimer();
     setError(null);
     void ensurePlaybackResumed();
@@ -417,7 +458,9 @@ export function VoiceSessionClient({
   const stopVoice = useCallback(() => {
     userStoppedRef.current = true;
     reconnectAttemptRef.current = 0;
+    iosContextWorkaroundDoneRef.current = false;
     clearReconnectTimer();
+    setReconnectGaveUp(false);
     flushAssistant();
     flushUser();
     recorderRef.current?.stop();
@@ -426,6 +469,14 @@ export function VoiceSessionClient({
     setStarted(false);
     initSentRef.current = false;
   }, [clearReconnectTimer, flushAssistant, flushUser]);
+
+  const retryConnect = useCallback(() => {
+    clearReconnectTimer();
+    reconnectAttemptRef.current = 0;
+    setReconnectGaveUp(false);
+    setError(null);
+    void connect();
+  }, [clearReconnectTimer, connect]);
 
   return (
     <div className="flex items-center justify-between gap-2 rounded-xl border border-panana-pink/30 bg-panana-pink/10 px-4 py-3">
@@ -470,13 +521,25 @@ export function VoiceSessionClient({
               음성 시작
             </button>
           ) : (
-            <button
-              type="button"
-              onClick={stopVoice}
-              className="rounded-lg bg-red-500/80 px-4 py-2 text-[13px] font-bold text-white transition hover:bg-red-500"
-            >
-              끊기
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={stopVoice}
+                className="rounded-lg bg-red-500/80 px-4 py-2 text-[13px] font-bold text-white transition hover:bg-red-500"
+              >
+                끊기
+              </button>
+              {reconnectGaveUp && (
+                <button
+                  type="button"
+                  onClick={retryConnect}
+                  style={{ touchAction: "manipulation" }}
+                  className="rounded-lg bg-panana-pink px-4 py-2 text-[13px] font-bold text-[#0B0C10] transition hover:bg-panana-pink/90"
+                >
+                  다시 연결
+                </button>
+              )}
+            </>
           )}
           <button
             type="button"

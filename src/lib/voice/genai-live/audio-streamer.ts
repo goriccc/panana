@@ -149,6 +149,8 @@ export class AudioStreamer {
       source.buffer = audioBuffer;
       source.connect(this.gainNode);
 
+      // 볼륨 미터 등: 소스만 worklet에 연결. worklet은 destination에 연결하지 않음
+      // (iOS 17 등에서 worklet→destination 이중 출력 시 실제 재생이 안 나오는 현상 방지)
       const worklets = registeredWorklets.get(this.context);
       if (worklets) {
         Object.entries(worklets).forEach(([_, graph]) => {
@@ -158,7 +160,6 @@ export class AudioStreamer {
             node.port.onmessage = function (ev: MessageEvent) {
               handlers.forEach((handler) => handler.call(node.port as any, ev));
             };
-            node.connect(this.context.destination);
           }
         });
       }
