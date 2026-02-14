@@ -159,9 +159,8 @@ export function VoiceSessionClient({
     const config = {
       responseModalities: ["AUDIO" as const],
       proactivity: { proactiveAudio: true },
-      // 전사 설정은 proxy 내부에서 Vertex 스펙에 맞게 세팅되도록 두고,
-      // 여기서는 추가 필드를 보내지 않는다 (1007 Invalid JSON 방지).
       speechConfig: {
+        languageCode: "ko-KR",
         voiceConfig: { prebuiltVoiceConfig: { voiceName } },
       },
       systemInstruction: {
