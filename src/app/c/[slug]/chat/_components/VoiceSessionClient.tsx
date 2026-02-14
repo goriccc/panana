@@ -238,6 +238,7 @@ export function VoiceSessionClient({
           if (!raw) return;
 
           if (role === "user") {
+            // 발음대로 한글 표기(번역 아님). API 실패 시 원문 표시
             let toShow = raw;
             try {
               const res = await fetch("/api/translate-to-korean", {

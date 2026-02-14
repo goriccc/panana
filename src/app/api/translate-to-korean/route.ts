@@ -40,20 +40,20 @@ export async function POST(req: Request) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       return NextResponse.json(
-        { ok: false, error: (data?.error?.message || res.statusText) || "Translation failed" },
+        { ok: false, error: (data?.error?.message || res.statusText) || "한글 표기 변환 실패" },
         { status: res.status >= 500 ? 502 : 400 }
       );
     }
 
     const parts = data?.candidates?.[0]?.content?.parts;
-    const translated =
+    const koreanText =
       Array.isArray(parts) ? parts.map((p: any) => p?.text).filter(Boolean).join("\n").trim() : "";
-    const out = translated || text;
+    const out = koreanText || text;
 
     return NextResponse.json({ ok: true, text: out });
   } catch (e) {
     return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : "Translation failed" },
+      { ok: false, error: e instanceof Error ? e.message : "한글 표기 변환 실패" },
       { status: 500 }
     );
   }

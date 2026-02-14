@@ -4,6 +4,12 @@ import { createClient } from "@supabase/supabase-js";
 import { filterLorebookRows } from "@/lib/studio/unlockEngine";
 import { buildTemplateVars, interpolateTemplate } from "@/lib/studio/templateRuntime";
 import { applyTriggerPayloads, type ChatRuntimeEvent, type ChatRuntimeState } from "@/lib/studio/chatRuntimeEngine";
+import {
+  loadMemory,
+  updateMemory,
+  takeLastNTurns,
+  RECENT_TURNS_FOR_LLM,
+} from "@/lib/pananaApp/hybridMemory";
 
 export const runtime = "nodejs";
 
@@ -94,6 +100,42 @@ function getSupabaseAdminIfPossible() {
 
 function isUuid(v: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(v || ""));
+}
+
+/** Gemini 컨텍스트 캐시 이름 보관 (캐시 재사용으로 비용·지연 절감). TTL 55분. */
+const geminiCacheStore = new Map<
+  string,
+  { name: string; hash: string; expiresAt: number }
+>();
+const GEMINI_CACHE_TTL_MS = 55 * 60 * 1000;
+
+function simpleHash(s: string): string {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+  return String(h >>> 0);
+}
+
+async function createGeminiContextCache(
+  apiKey: string,
+  model: string,
+  systemStable: string,
+  ttlSeconds = 3600
+): Promise<string | null> {
+  const modelName = model.startsWith("models/") ? model : `models/${model}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/cachedContents?key=${encodeURIComponent(apiKey)}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model: modelName,
+      systemInstruction: { parts: [{ text: systemStable }] },
+      ttl: `${ttlSeconds}s`,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return null;
+  const name = data?.name ? String(data.name) : null;
+  return name || null;
 }
 
 async function loadChallengeById(challengeId: string): Promise<{
@@ -312,6 +354,9 @@ function toGeminiApiModel(displayOrApi: string): string {
   return v.startsWith("gemini-") ? v : "gemini-2.5-flash";
 }
 
+/** Anthropic 프롬프트 캐싱: 고정 영역(캐릭터+프로필+요약) 캐시, 변동 영역(시각/상태/이벤트)은 매번 전송 → 비용·지연 절감 */
+const ANTHROPIC_PROMPT_CACHING_BETA = "prompt-caching-2024-07-31";
+
 async function callAnthropic(args: {
   apiKey: string;
   model: string;
@@ -320,21 +365,36 @@ async function callAnthropic(args: {
   top_p?: number;
   messages: { role: "user" | "assistant"; content: string }[];
   system?: string;
+  /** 캐싱 사용 시: 캐시할 고정 시스템 프롬프트(캐릭터·유저 프로필·지난 서사 등) */
+  systemCacheable?: string;
+  /** 캐싱 사용 시: 매 턴 바뀌는 부분(현재 시각·상태 변수·이벤트). systemCacheable과 둘 다 있으면 캐싱 적용 */
+  systemVariable?: string;
 }) {
-  // 일부 Anthropic 모델은 temperature와 top_p를 동시에 받지 못한다.
-  // 기본 정책: temperature를 우선하고 top_p는 보내지 않는다(호환성 최우선).
+  const usePromptCaching =
+    !!args.systemCacheable &&
+    args.systemCacheable.length > 0 &&
+    !!args.systemVariable;
+
+  const systemPayload = usePromptCaching
+    ? [
+        { type: "text" as const, text: args.systemCacheable!, cache_control: { type: "ephemeral" as const } },
+        { type: "text" as const, text: args.systemVariable! },
+      ]
+    : args.system;
+
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "x-api-key": args.apiKey,
       "anthropic-version": "2023-06-01",
+      ...(usePromptCaching ? { "anthropic-beta": ANTHROPIC_PROMPT_CACHING_BETA } : {}),
     },
     body: JSON.stringify({
       model: args.model,
       temperature: args.temperature,
       max_tokens: args.max_tokens,
-      system: args.system,
+      system: systemPayload,
       messages: args.messages,
     }),
   });
@@ -356,6 +416,10 @@ async function callGemini(args: {
   system?: string;
   messages: Array<{ role: "user" | "assistant"; content: string }>;
   allowUnsafe?: boolean;
+  /** 컨텍스트 캐싱: 캐시된 시스템 대신 사용할 캐시 이름 (cachedContents/xxx) */
+  cachedContentName?: string | null;
+  /** 캐싱 사용 시: 매 턴 바뀌는 시스템 블록(현재 시각·상태·이벤트). contents 맨 앞에 user 메시지로 넣음 */
+  systemVariable?: string;
 }) {
   let maxOut = Number.isFinite(args.max_tokens) ? Math.max(16, Math.floor(args.max_tokens)) : 1024;
   if (/gemini-2\.5-pro/i.test(args.model)) {
@@ -364,14 +428,18 @@ async function callGemini(args: {
   const maxSystemChars = 16000;
   const system = args.system ? (args.system.length > maxSystemChars ? args.system.slice(-maxSystemChars) : args.system) : "";
   const toGeminiRole = (r: "user" | "assistant") => (r === "assistant" ? "model" : "user");
-  const contents = (args.messages || [])
+  const messagesTrimmed = (args.messages || [])
     .filter((m) => String(m?.content || "").trim().length > 0)
-    .slice(-16)
-    .map((m) => ({
-      role: toGeminiRole(m.role),
-      parts: [{ text: String(m.content) }],
-    }));
-  // Gemini REST: models/{model}:generateContent
+    .slice(-16);
+  const contentsBase = messagesTrimmed.map((m) => ({
+    role: toGeminiRole(m.role),
+    parts: [{ text: String(m.content) }],
+  }));
+  const useCache = !!args.cachedContentName && args.cachedContentName.length > 0;
+  const contents = useCache && args.systemVariable?.trim()
+    ? [{ role: "user" as const, parts: [{ text: args.systemVariable.trim() }] }, ...contentsBase]
+    : contentsBase;
+
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(args.model)}:generateContent?key=${encodeURIComponent(
     args.apiKey
   )}`;
@@ -379,7 +447,8 @@ async function callGemini(args: {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      ...(system
+      ...(useCache ? { cachedContent: args.cachedContentName } : {}),
+      ...(!useCache && system
         ? {
             systemInstruction: {
               parts: [{ text: system }],
@@ -429,7 +498,7 @@ async function callGemini(args: {
   return {
     text: text || "",
     raw: data,
-    meta: { usedMaxOutputTokens: maxOut, systemChars: system.length, messagesCount: contents.length },
+    meta: { usedMaxOutputTokens: maxOut, systemChars: system.length, messagesCount: contents.length, usedContextCache: useCache },
   };
 }
 
@@ -796,6 +865,17 @@ export async function POST(req: Request) {
         const block = `\n\n[유저가 알려준 자신에 대한 정보]\n${profileNote}`;
         system = system ? `${system}${block}` : block.trim();
       }
+      // 하이브리드 메모리: [유저 프로필] + [지난 서사] (장기 기억) 주입
+      if (body.characterSlug && isUuid(pananaIdFromRuntime)) {
+        const sbAdminMem = getSupabaseAdminIfPossible();
+        if (sbAdminMem) {
+          const mem = await loadMemory(sbAdminMem, pananaIdFromRuntime, body.characterSlug);
+          if (mem && (mem.profileBlock || mem.summariesBlock)) {
+            const blocks = [mem.profileBlock, mem.summariesBlock].filter(Boolean).join("\n\n");
+            if (blocks) system = system ? `${blocks}\n\n---\n\n${system}` : blocks;
+          }
+        }
+      }
     }
 
     const nonSystem = body.messages.filter((m) => m.role !== "system");
@@ -837,6 +917,21 @@ export async function POST(req: Request) {
     const tvars = buildTemplateVars({ runtimeVariables: runtimeVariablesMerged || null });
     if (system) system = interpolateTemplate(system, tvars);
     let nonSystemInterpolated = nonSystem.map((m) => ({ ...m, content: interpolateTemplate(m.content, tvars) }));
+    // 하이브리드 메모리: [유저 프로필]/[지난 서사]가 있으면 최근 N턴만 LLM에 전달 (토큰 절약 + 호흡 유지)
+    const hasMemory =
+      !!(
+        pananaIdFromRuntime &&
+        body.characterSlug &&
+        isUuid(pananaIdFromRuntime) &&
+        (system?.includes("[유저 프로필]") || system?.includes("[우리의 지난 서사]"))
+      );
+    if (hasMemory) {
+      const asMemory = nonSystemInterpolated.map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      }));
+      nonSystemInterpolated = takeLastNTurns(asMemory, RECENT_TURNS_FOR_LLM);
+    }
     // 유저 지문(( ) 괄호 입력): 마지막 user 메시지 앞에 주입
     const userScript = body.challengeId ? "" : String((body as any).userScript || "").trim();
     if (userScript) {
@@ -861,7 +956,9 @@ export async function POST(req: Request) {
       });
     }
 
-    // system prompt에 현재 시각(KST)·상태/이벤트를 추가
+    // system prompt에 현재 시각(KST)·상태/이벤트를 추가 (변동 영역 = 캐싱 제외)
+    let systemStableForCache: string | undefined;
+    let systemVariablePart: string | undefined;
     if (system) {
       const nowKst = new Date().toLocaleString("ko-KR", {
         timeZone: "Asia/Seoul",
@@ -915,7 +1012,11 @@ export async function POST(req: Request) {
       ]
         .filter(Boolean)
         .join("\n");
-      if (extra) system = `${system}\n\n${extra}`;
+      if (extra) {
+        systemStableForCache = system;
+        systemVariablePart = extra;
+        system = `${system}\n\n${extra}`;
+      }
     }
 
     let out: { text: string; raw?: any; meta?: any };
@@ -948,6 +1049,11 @@ export async function POST(req: Request) {
           max_tokens: maxTokens,
           top_p: topP,
           system,
+          ...(systemStableForCache != null &&
+          systemVariablePart != null &&
+          systemStableForCache.length > 0
+            ? { systemCacheable: systemStableForCache, systemVariable: systemVariablePart }
+            : {}),
           messages: nonSystemInterpolated.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
         });
       } catch (anthropicErr) {
@@ -982,6 +1088,33 @@ export async function POST(req: Request) {
         }
       }
     } else if (body.provider === "gemini") {
+      let geminiCachedName: string | null = null;
+      if (
+        systemStableForCache != null &&
+        systemVariablePart != null &&
+        systemStableForCache.length > 0 &&
+        pananaIdFromRuntime &&
+        body.characterSlug &&
+        isUuid(pananaIdFromRuntime)
+      ) {
+        const cacheKey = `${pananaIdFromRuntime}:${body.characterSlug}`;
+        const hash = simpleHash(systemStableForCache);
+        const entry = geminiCacheStore.get(cacheKey);
+        const now = Date.now();
+        if (entry && entry.hash === hash && entry.expiresAt > now) {
+          geminiCachedName = entry.name;
+        } else {
+          const name = await createGeminiContextCache(apiKey, model, systemStableForCache, 3600);
+          if (name) {
+            geminiCachedName = name;
+            geminiCacheStore.set(cacheKey, {
+              name,
+              hash,
+              expiresAt: now + GEMINI_CACHE_TTL_MS,
+            });
+          }
+        }
+      }
       out = await callGemini({
         apiKey,
         model,
@@ -991,6 +1124,12 @@ export async function POST(req: Request) {
         system,
         messages: nonSystemInterpolated.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
         allowUnsafe,
+        ...(geminiCachedName
+          ? {
+              cachedContentName: geminiCachedName,
+              systemVariable: systemVariablePart ?? "",
+            }
+          : {}),
       });
     } else {
       out = await callDeepSeek({
@@ -1025,6 +1164,22 @@ export async function POST(req: Request) {
         challengeGoal: challengeMeta!.challengeGoal || "",
         recentHistory,
       });
+    }
+
+    // 하이브리드 메모리: 응답 후 요약(20턴마다)·프로필 추출 업데이트 (비동기 실패해도 응답은 반환)
+    if (pananaIdFromRuntime && body.characterSlug && isUuid(pananaIdFromRuntime)) {
+      const sbAdminUp = getSupabaseAdminIfPossible();
+      const geminiKey = getEnvKey("gemini");
+      if (sbAdminUp && geminiKey) {
+        const fullForMemory = [
+          ...nonSystemInterpolated.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+          { role: "assistant" as const, content: text },
+        ];
+        const totalUserTurnsInThread = typeof (body.runtime as any)?.variables?.total_user_turns_in_thread === "number"
+          ? (body.runtime as any).variables.total_user_turns_in_thread
+          : undefined;
+        void updateMemory(sbAdminUp, pananaIdFromRuntime, body.characterSlug, fullForMemory, geminiKey, totalUserTurnsInThread).catch(() => {});
+      }
     }
 
     if (!text) {

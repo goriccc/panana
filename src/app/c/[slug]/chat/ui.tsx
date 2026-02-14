@@ -930,11 +930,13 @@ export function CharacterChatClient({
       const idt = ensurePananaIdentity();
       const identityNick = String(idt.nickname || "").trim();
       const resolvedUserName = String(userName || identityNick || idt.handle || "너").trim();
+      const totalUserTurnsInThread = history.filter((m) => m.from === "user").length;
       const runtimeVariables = {
         ...(rt.variables || {}),
         ...(resolvedUserName ? { user_name: resolvedUserName, call_sign: resolvedUserName } : {}),
         ...(idt.handle ? { user_handle: String(idt.handle), panana_handle: String(idt.handle) } : {}),
         ...(idt.id ? { panana_id: String(idt.id) } : {}),
+        ...(typeof totalUserTurnsInThread === "number" ? { total_user_turns_in_thread: totalUserTurnsInThread } : {}),
       };
       const sceneIdFromRuntime = String((runtimeVariables as any).scene_id || (runtimeVariables as any).sceneId || "").trim();
       const allowUnsafe = (() => {
@@ -969,7 +971,7 @@ export function CharacterChatClient({
           messages: [
             { role: "system", content: `${characterName} 캐릭터로 자연스럽게 대화해.` },
             ...history
-              .slice(-12)
+              .slice(-40)
               .map((m) => ({ role: m.from === "user" ? "user" : "assistant", content: m.text })),
           ],
         }),
