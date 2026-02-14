@@ -96,19 +96,32 @@ function isUuid(v: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(v || ""));
 }
 
-async function loadChallengeById(challengeId: string): Promise<{ successKeywords: string[]; partialMatch: boolean } | null> {
+async function loadChallengeById(challengeId: string): Promise<{
+  successKeywords: string[];
+  partialMatch: boolean;
+  challengeGoal: string;
+} | null> {
   const sb = getSupabaseAdminIfPossible();
   if (!sb || !isUuid(challengeId)) return null;
   const { data, error } = await sb
     .from("panana_challenges")
-    .select("success_keywords, partial_match")
+    .select("success_keywords, partial_match, challenge_goal")
     .eq("id", challengeId)
     .eq("active", true)
     .maybeSingle();
   if (error || !data) return null;
-  const keywords = Array.isArray((data as any).success_keywords) ? (data as any).success_keywords : [];
+  const raw = (data as any).success_keywords;
+  let keywords: string[] = Array.isArray(raw) ? raw : [];
+  if (keywords.length === 0 && typeof raw === "string" && raw.trim()) {
+    keywords = raw.split(/[,;\n]/g).map((x: string) => x.trim()).filter(Boolean);
+  }
   const partialMatch = Boolean((data as any).partial_match);
-  return { successKeywords: keywords.filter((k: string) => String(k || "").trim()), partialMatch };
+  const challengeGoal = String((data as any).challenge_goal || "").trim();
+  return {
+    successKeywords: keywords.map((k: string) => String(k || "").trim()).filter(Boolean),
+    partialMatch,
+    challengeGoal,
+  };
 }
 
 function removeParenthesisBlocks(s: string): string {
@@ -126,61 +139,56 @@ function checkChallengeSuccess(text: string, keywords: string[], partialMatch: b
     const kw = String(k || "").trim();
     if (!kw) continue;
     const kwLower = kw.toLowerCase();
-    // partialMatch=true: 부분 포함 검사, partialMatch=false: 단어 경계 기준 포함 검사
-    // (기존 exact match(t===kw)는 AI 응답 전체와 키워드 비교라 사실상 항상 실패하므로 폐기)
     if (partialMatch) {
       if (t.includes(kwLower)) return true;
     } else {
-      // 단어 경계(공백·마침표·쉼표·줄바꿈 등) 기준으로 키워드가 독립적으로 포함되었는지 확인
       const escaped = kwLower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const re = new RegExp(`(?:^|[\\s.,!?~…·。，！？\\n])${escaped}(?:[\\s.,!?~…·。，！？\\n]|$)`);
       if (re.test(t)) return true;
-      // fallback: 문장 부호 없이 바로 붙어있는 경우도 허용 (한국어 특성: "사랑해요." → "사랑해요" 포함)
       if (t.includes(kwLower)) return true;
     }
   }
   return false;
 }
 
-/** LLM 판사: 키워드가 있어도 문맥상 캐릭터가 진심으로 수락했는지 판단. (예: "사랑은 다른 문제죠" → 거절) */
+/** LLM 판사: 성공 키워드가 도전 목표 달성·긍정 맥락에서 사용되었는지 판단. (고백/미션클리어/기타 도전 공통) */
 async function judgeChallengeAcceptance(args: {
   aiResponse: string;
   lastUserMessage: string;
   keywords: string[];
+  challengeGoal: string;
   recentHistory?: Array<{ role: string; content: string }>;
 }): Promise<boolean> {
-  const apiKey = getEnvKey("gemini");
+  const apiKey = getEnvKey("anthropic");
   if (!apiKey) return false;
-  // 최근 대화 맥락 구성 (최대 6턴)
   const historyLines = (args.recentHistory || [])
     .slice(-6)
     .map((m) => `${m.role === "user" ? "유저" : "캐릭터"}: ${String(m.content || "").slice(0, 150)}`)
     .join("\n");
-  const prompt = `[도전 모드 성공 판정]
-캐릭터의 최신 응답에 성공 키워드가 포함되어 있다. 이 키워드가 긍정적·진심 어린 맥락에서 사용되었는지 판단하라.
+  const goalText = args.challengeGoal ? `도전 목표: ${args.challengeGoal}\n\n` : "";
+  const prompt = `[도전 모드 성공 판정 - 유저 경쟁용, 도전 유형 무관 공통 규칙]
+캐릭터 최신 응답에 성공 키워드가 포함되어 있다. "도전 목표 달성" 또는 "성공 키워드를 긍정·수락·달성 맥락에서 사용"했으면 예, 부정·반어·거절 맥락이면 아니오.
 
-${historyLines ? `[최근 대화 흐름]\n${historyLines}\n\n` : ""}- 캐릭터 최신 응답: "${String(args.aiResponse || "").slice(0, 500)}"
-- 성공 키워드: ${(args.keywords || []).slice(0, 6).join(", ")}
+${goalText}${historyLines ? `[최근 대화]\n${historyLines}\n\n` : ""}캐릭터 최신 응답: "${String(args.aiResponse || "").slice(0, 500)}"
+성공 키워드: ${(args.keywords || []).slice(0, 8).join(", ")}
 
-판정 기준:
-- 캐릭터가 성공 키워드를 부정·회피·반어적으로 사용("사랑은 다른 문제", "아직 아닌 것 같아", "사랑이 뭔지 모르겠어" 등)했으면 → 아니오
-- 캐릭터가 성공 키워드를 긍정적·호의적·진심 어린 맥락에서 사용("사랑해요", "좋아해요", "받아줄게", "저도요" 등)했으면 → 예
-- 유저가 말해달라고 요청/지시했더라도, 캐릭터의 응답 자체가 진심이면 → 예
-
-예 또는 아니오로만 답하시오.`;
+판정 기준 (어떤 도전이든 동일):
+- 캐릭터가 목표를 달성했거나 성공 키워드를 긍정적으로 사용(수락·동의·달성·승리·클리어 등)했으면 → 예
+- 캐릭터가 키워드를 부정·반어·회피로 사용(거절·반박·"아니야"·"그건 아님" 등)했으면 → 아니오
+- 애매하면 예. 한 줄로 "예" 또는 "아니오"만 답하시오.`;
   try {
-    const out = await callGemini({
+    const out = await callAnthropic({
       apiKey,
-      model: "gemini-2.5-flash",
+      model: "claude-haiku-4-5",
       temperature: 0,
-      max_tokens: 8,
-      top_p: 1,
+      max_tokens: 16,
       messages: [{ role: "user", content: prompt }],
     });
     const raw = String(out.text || "").trim();
-    const firstLine = raw.split(/\r?\n/)[0]?.trim() || raw;
-    // 맨 앞만 보지 않고 첫 줄 안에서 긍정 표현 인정 (판사가 "판정: 예", "네, 예" 등으로 답해도 성공)
-    return /\b(예|yes|네)\b/i.test(firstLine) && !/\b(아니오|no)\b/i.test(firstLine);
+    const firstLine = (raw.split(/\r?\n/)[0]?.trim() || raw).slice(0, 50);
+    const positive = /(예|네|yes|성공|긍정|o\b|y\b|accept|true)/i.test(firstLine);
+    const negative = /(아니오|no\s*$|거절|reject|false)/i.test(firstLine) || /\bno\b/i.test(firstLine);
+    return positive && !negative;
   } catch {
     return false;
   }
@@ -768,7 +776,7 @@ export async function POST(req: Request) {
       system = system ? `${system}\n\n${rule}` : rule;
     }
 
-    let challengeMeta: { successKeywords: string[]; partialMatch: boolean } | null = null;
+    let challengeMeta: { successKeywords: string[]; partialMatch: boolean; challengeGoal: string } | null = null;
     if (body.challengeId) {
       challengeMeta = await loadChallengeById(body.challengeId);
       // 지문(괄호) 금지 규칙 제거: LLM은 자유롭게 지문 포함 출력, 후처리(removeParenthesisBlocks)로 괄호 제거
@@ -993,16 +1001,19 @@ export async function POST(req: Request) {
       challengeMeta.successKeywords.length > 0 &&
       userTurns >= minTurnsForSuccess &&
       checkChallengeSuccess(text, challengeMeta.successKeywords, challengeMeta.partialMatch);
-    const lastUserMsg = [...nonSystem].reverse().find((m) => m.role === "user")?.content || "";
-    const recentHistory = nonSystem.slice(-6).map((m) => ({ role: m.role, content: m.content }));
-    const challengeSuccess =
-      keywordMatch &&
-      (await judgeChallengeAcceptance({
+
+    let challengeSuccess = false;
+    if (keywordMatch) {
+      const lastUserMsg = [...nonSystem].reverse().find((m) => m.role === "user")?.content || "";
+      const recentHistory = nonSystem.slice(-6).map((m) => ({ role: m.role, content: m.content }));
+      challengeSuccess = await judgeChallengeAcceptance({
         aiResponse: text,
         lastUserMessage: lastUserMsg,
         keywords: challengeMeta!.successKeywords,
+        challengeGoal: challengeMeta!.challengeGoal || "",
         recentHistory,
-      }));
+      });
+    }
 
     if (!text) {
       if (body.provider === "gemini") {

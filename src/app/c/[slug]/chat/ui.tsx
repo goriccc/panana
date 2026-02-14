@@ -370,6 +370,7 @@ export function CharacterChatClient({
   const [composerHeight, setComposerHeight] = useState(64);
   const [voiceModalOpen, setVoiceModalOpen] = useState(false);
   const [currentModelLabel, setCurrentModelLabel] = useState<string | null>(null);
+  const [currentVoiceModelLabel, setCurrentVoiceModelLabel] = useState<string | null>(null);
   const { data: session } = useSession();
   const userAvatarUrl = String((session as any)?.profileImageUrl || (session as any)?.user?.image || "").trim() || undefined;
   const composerRef = useRef<HTMLDivElement | null>(null);
@@ -1143,6 +1144,11 @@ export function CharacterChatClient({
                 {currentModelLabel}
               </span>
             ) : null}
+            {currentVoiceModelLabel ? (
+              <span className="text-[11px] text-white/40 mt-0.5" aria-hidden>
+                음성 {currentVoiceModelLabel}
+              </span>
+            ) : null}
           </div>
           <button
             type="button"
@@ -1353,7 +1359,11 @@ export function CharacterChatClient({
               characterSlug={characterSlug}
               characterName={characterName}
               callSign={userName}
-              onClose={() => setVoiceModalOpen(false)}
+              onClose={() => {
+                setVoiceModalOpen(false);
+                setCurrentVoiceModelLabel(null);
+              }}
+              onVoiceModelReady={setCurrentVoiceModelLabel}
               onUserTranscript={(text) => {
                 setMessages((prev) => [...prev, { id: `u-voice-${Date.now()}`, from: "user", text }]);
               }}

@@ -58,6 +58,7 @@ export function VoiceSessionClient({
   onClose,
   onUserTranscript,
   onAssistantTranscript,
+  onVoiceModelReady,
   characterAvatarUrl,
   userAvatarUrl,
 }: {
@@ -67,6 +68,8 @@ export function VoiceSessionClient({
   onClose: () => void;
   onUserTranscript?: (text: string) => void;
   onAssistantTranscript?: (text: string) => void;
+  /** 음성 세션 연결 시 사용 중인 음성 모델 라벨(캐릭터명 밑 표시용) */
+  onVoiceModelReady?: (modelLabel: string) => void;
   characterAvatarUrl?: string;
   userAvatarUrl?: string;
 }) {
@@ -95,6 +98,8 @@ export function VoiceSessionClient({
   const iosMicStreamPromiseRef = useRef<Promise<MediaStream> | null>(null);
   /** iOS 17 등: 첫 오디오 수신 시 suspend→resume 워크어라운드 1회만 수행 */
   const iosContextWorkaroundDoneRef = useRef(false);
+  /** iOS: 사용자 제스처와 같은 틱에 생성한 녹음용 AudioContext (Safari 요구사항) */
+  const iosRecorderContextRef = useRef<AudioContext | null>(null);
 
   const flushUser = useCallback(() => {
     const buf = userBufferRef.current.trim();
@@ -155,6 +160,7 @@ export function VoiceSessionClient({
     const { systemPrompt, voiceConfig } = data;
     const model = voiceConfig?.base_model || LIVE_MODEL;
     const voiceName = voiceConfig?.voice_name || "Aoede";
+    onVoiceModelReady?.(`Gemini · ${model}`);
 
     const config = {
       responseModalities: ["AUDIO" as const],
@@ -396,7 +402,11 @@ export function VoiceSessionClient({
   }, [ensurePlaybackResumed]);
 
   const startVoice = useCallback(async () => {
-    // iOS: 탭 직후 같은 턴에서 마이크 권한 요청을 시작 → 한 번 허용하면 저장되어 이후엔 팝업 안 뜸
+    if (isIOSDevice()) {
+      if (!iosRecorderContextRef.current) {
+        iosRecorderContextRef.current = new AudioContext({ sampleRate: 16000 });
+      }
+    }
     if (isIOSDevice() && typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia && !iosMicStreamPromiseRef.current) {
       iosMicStreamPromiseRef.current = navigator.mediaDevices.getUserMedia({ audio: true });
     }
@@ -409,13 +419,12 @@ export function VoiceSessionClient({
     }
 
     // iOS 전용: 사용자 클릭 제스처 내에서 오디오/마이크 초기화
-    // audioContext()는 내부에서 a.play() 실패 시 다음 탭을 기다려서, 마이크 팝업 수락 직후에 블로킹됨 → new AudioContext() 직접 사용
+    // 리서치: iOS Safari는 getUserMedia + AudioContext + createMediaStreamSource를 같은 제스처에서 해야 함.
     if (isIOSDevice() && (!recorderRef.current || !streamerRef.current)) {
       try {
         const outCtx = new AudioContext({ sampleRate: 24000 });
         await outCtx.resume();
 
-        // iOS: BufferSourceNode 다수 재생 시 지글거림 → 2초 단위로 묶어 재생 횟수 감소 (iPhone 8 등)
         const streamer = new AudioStreamer(outCtx, { mergeChunkSamples: 48000 });
         await streamer.addWorklet("vumeter-out", VolMeterWorklet, (d: unknown) => {
           const ev = d as MessageEvent;
@@ -446,11 +455,28 @@ export function VoiceSessionClient({
     clearReconnectTimer();
     setError(null);
     void ensurePlaybackResumed();
+
+    // iOS 16/17+: Safari는 제스처 직후에 스트림 확보 → 동일 제스처에서 만든 context로 즉시 소비해야 함.
+    if (isIOSDevice() && iosMicStreamPromiseRef.current) {
+      try {
+        const stream = await iosMicStreamPromiseRef.current;
+        iosMicStreamPromiseRef.current = null;
+        const recCtx = iosRecorderContextRef.current;
+        await recorderRef.current.start(stream, recCtx ?? undefined);
+        iosRecorderContextRef.current = null;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "마이크를 사용할 수 없어요.");
+        return;
+      }
+    }
+
     await connect();
 
-    const stream = iosMicStreamPromiseRef.current ? await iosMicStreamPromiseRef.current : undefined;
-    if (iosMicStreamPromiseRef.current) iosMicStreamPromiseRef.current = null;
-    await recorderRef.current.start(stream);
+    if (!isIOSDevice()) {
+      const stream = iosMicStreamPromiseRef.current ? await iosMicStreamPromiseRef.current : undefined;
+      if (iosMicStreamPromiseRef.current) iosMicStreamPromiseRef.current = null;
+      await recorderRef.current.start(stream);
+    }
     setStarted(true);
   }, [clearReconnectTimer, connect, ensurePlaybackResumed]);
 
@@ -458,6 +484,10 @@ export function VoiceSessionClient({
     userStoppedRef.current = true;
     reconnectAttemptRef.current = 0;
     iosContextWorkaroundDoneRef.current = false;
+    if (iosRecorderContextRef.current) {
+      iosRecorderContextRef.current.close().catch(() => {});
+      iosRecorderContextRef.current = null;
+    }
     clearReconnectTimer();
     setReconnectGaveUp(false);
     flushAssistant();

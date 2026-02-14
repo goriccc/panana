@@ -32,10 +32,25 @@ export class AudioRecorder extends EventEmitter {
     super();
   }
 
-  /** @param existingStream 사용자 제스처 직후 이미 취득한 스트림(예: iOS 마이크 권한 한 번만 팝업) */
-  async start(existingStream?: MediaStream) {
+  /**
+   * @param existingStream 사용자 제스처 직후 취득한 스트림 (iOS 17+ 마이크 즉시 소비용)
+   * @param existingContext iOS: 제스처 직후 동기 생성한 녹음용 AudioContext (같은 틱에 소비 보장)
+   */
+  async start(existingStream?: MediaStream, existingContext?: AudioContext) {
     if (existingStream) {
       this.stream = existingStream;
+      const audioTrack = this.stream.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = true;
+        if (audioTrack.readyState !== "live") {
+          const e = new Error("마이크 트랙이 활성 상태가 아니에요. (iOS: 한 번 끊기 후 다시 시도해 보세요.)");
+          (e as any).trackState = audioTrack.readyState;
+          throw e;
+        }
+      }
+      const ctx = existingContext ?? new AudioContext({ sampleRate: this.sampleRate });
+      this.audioContext = ctx;
+      this.source = this.audioContext.createMediaStreamSource(this.stream);
     } else if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error("Could not request user media");
     }
@@ -43,9 +58,14 @@ export class AudioRecorder extends EventEmitter {
     this.starting = new Promise(async (resolve) => {
       if (!this.stream) {
         this.stream = await navigator.mediaDevices!.getUserMedia({ audio: true });
+        const audioTrack = this.stream.getAudioTracks()[0];
+        if (audioTrack) audioTrack.enabled = true;
       }
-      this.audioContext = await audioContext({ sampleRate: this.sampleRate });
-      this.source = this.audioContext.createMediaStreamSource(this.stream);
+      if (!this.audioContext || !this.source) {
+        this.audioContext = await audioContext({ sampleRate: this.sampleRate });
+        this.source = this.audioContext.createMediaStreamSource(this.stream!);
+      }
+      await this.audioContext.resume();
 
       const workletName = "audio-recorder-worklet";
       const src = createWorkletFromSrc(workletName, AudioRecordingWorklet);
@@ -82,6 +102,12 @@ export class AudioRecorder extends EventEmitter {
       this.stream = undefined;
       this.recordingWorklet = undefined;
       this.vuWorklet = undefined;
+      const ctx = this.audioContext;
+      this.audioContext = undefined;
+      if (ctx && ctx.state !== "closed") {
+        ctx.close().catch(() => {});
+      }
+      this.source = undefined;
     };
     if (this.starting) {
       this.starting.then(handleStop);
