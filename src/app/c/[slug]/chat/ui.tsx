@@ -1536,7 +1536,7 @@ export function CharacterChatClient({
               ref={inputRef}
               type="text"
               inputMode="text"
-              autoComplete="one-time-code"
+              autoComplete="new-password"
               autoCorrect="off"
               autoCapitalize="off"
               spellCheck={false}

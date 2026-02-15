@@ -784,7 +784,7 @@ export function ChallengeClient({
                 ref={challengeInputRef}
                 type="text"
                 inputMode="text"
-                autoComplete="one-time-code"
+                autoComplete="new-password"
                 autoCorrect="off"
                 autoCapitalize="off"
                 spellCheck={false}
