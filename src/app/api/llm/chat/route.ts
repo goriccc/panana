@@ -1050,6 +1050,8 @@ export async function POST(req: Request) {
     }
 
     let out: { text: string; raw?: any; meta?: any };
+    let outProvider: "anthropic" | "gemini" | "deepseek" = body.provider;
+    let outModel = model;
 
     // Gemini: model이 "auto"이거나 없으면 대화 복잡도에 따라 Flash vs Pro 자동 선택. 그 외에는 지정 모델 사용.
     if (body.provider === "gemini") {
@@ -1107,6 +1109,8 @@ export async function POST(req: Request) {
                 messages: nonSystemInterpolated.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
                 allowUnsafe: true,
               });
+              outProvider = "gemini";
+              outModel = fallbackModel;
             } else {
               throw anthropicErr;
             }
@@ -1201,6 +1205,8 @@ export async function POST(req: Request) {
           const retryText = sanitizeAssistantText(String(retryOut.text || ""), tvars);
           if (retryText && !isRefusalLike(retryText)) {
             text = retryText;
+            outProvider = "gemini";
+            outModel = fallbackModel;
           }
         }
       } else if (!allowUnsafe) {
@@ -1305,8 +1311,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      provider: body.provider,
-      model,
+      provider: outProvider,
+      model: outModel,
       text,
       ...(body.challengeId ? { challengeSuccess } : {}),
       runtime: {
