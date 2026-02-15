@@ -54,6 +54,17 @@ export async function POST(req: Request) {
     const publicUrl = data?.publicUrl ? String(data.publicUrl) : "";
     if (!publicUrl) throw new Error("publicUrl 생성 실패");
 
+    // panana_users.profile_image_url에 저장 → 도전 랭킹 등에서 표시
+    const { data: mapped } = await sb
+      .from("panana_user_identities")
+      .select("user_id")
+      .eq("provider", provider)
+      .eq("provider_account_id", pid)
+      .maybeSingle();
+    if (mapped?.user_id) {
+      await sb.from("panana_users").update({ profile_image_url: publicUrl }).eq("id", mapped.user_id);
+    }
+
     return NextResponse.json({ ok: true, publicUrl });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || "업로드에 실패했어요." }, { status: 400 });
