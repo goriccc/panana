@@ -1184,13 +1184,16 @@ export async function POST(req: Request) {
 
     if (!text) {
       if (body.provider === "gemini") {
-        // 1회 자동 재시도: 시스템/대화 축약 + 텍스트 출력 강제 규칙 추가
-        const retryCore = String(system || "").slice(0, 6000);
+        // 1회 자동 재시도: 시스템/대화 축약 + 텍스트 출력 강제 규칙 추가. 도전 모드는 턴 수 많을 때 빈 응답 많아서 재시도 시 더 짧게
+        const isChallenge = !!body.challengeId;
+        const retrySystemMax = isChallenge ? 4000 : 6000;
+        const retryCore = String(system || "").slice(0, retrySystemMax);
         const retrySystem = `${retryCore}\n\n[출력 규칙] 반드시 한국어 일반 텍스트로만 답하고, JSON/함수호출/도구출력은 금지한다.`;
+        const retryMsgLimit = isChallenge ? 12 : 8;
         const retryMessages = nonSystem
-          .filter((m) => m.role !== "system")
-          .slice(-8)
-          .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+          .filter((m) => m.role !== "system" && String(m.content || "").trim().length > 0)
+          .slice(-retryMsgLimit)
+          .map((m) => ({ role: m.role as "user" | "assistant", content: String(m.content || "").trim() }));
         const retryOut = await callGemini({
           apiKey,
           model,

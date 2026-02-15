@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SurfaceCard } from "@/components/SurfaceCard";
+import { fetchAdultStatus } from "@/lib/pananaApp/adultVerification";
 import { ensurePananaIdentity } from "@/lib/pananaApp/identity";
 
 function getPananaId(): string {
@@ -83,6 +84,8 @@ export function ChallengeClient({
   const [sending, setSending] = useState(false);
   const [showTyping, setShowTyping] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [currentModelLabel, setCurrentModelLabel] = useState<string | null>(null);
+  const [adultVerified, setAdultVerified] = useState(false);
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [timerMs, setTimerMs] = useState(0);
@@ -93,6 +96,40 @@ export function ChallengeClient({
   const sessionStartedAtRef = useRef<number | null>(null);
   const messagesRef = useRef<Msg[]>([]);
   messagesRef.current = messages;
+  const llmConfigRef = useRef<{
+    defaultProvider: string;
+    fallbackProvider: string;
+    fallbackModel: string;
+    settings: Array<{ provider: string; model: string }>;
+  } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/llm/config")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.ok && d?.settings) {
+          llmConfigRef.current = {
+            defaultProvider: d.defaultProvider || "anthropic",
+            fallbackProvider: d.fallbackProvider || "gemini",
+            fallbackModel: d.fallbackModel || "gemini-2.5-flash",
+            settings: d.settings || [],
+          };
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const status = await fetchAdultStatus();
+      if (!alive) return;
+      setAdultVerified(Boolean(status?.adultVerified));
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const loadRanking = useCallback(async () => {
     const hasInitial = ranking.length > 0;
@@ -144,6 +181,7 @@ export function ChallengeClient({
   const isInputFocusedRef = useRef(false);
   const isAtBottomRef = useRef(true);
 
+  // 일반 대화창과 동일: 메시지/타이핑 변경 시 scrollTop = scrollHeight로 맨 아래 스크롤
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -275,20 +313,41 @@ export function ChallengeClient({
     const userNick = String(idt.nickname || idt.handle || "").trim();
     // 최신 메시지(ref) + 새 유저 메시지로 history 구성 (스테일 클로저 방지)
     const nextMessages = [...messagesRef.current, userMsg];
-    const history = nextMessages.map((m) => ({
-      role: (m.from === "bot" ? "assistant" : "user") as "user" | "assistant",
-      content: m.text,
-    }));
+    // API Zod: content.min(1) 이므로 빈/공백만 있는 메시지는 제외 (7~8턴 400 방지)
+    const history = nextMessages
+      .filter((m) => String(m.text ?? "").trim().length > 0)
+      .map((m) => ({
+        role: (m.from === "bot" ? "assistant" : "user") as "user" | "assistant",
+        content: String(m.text ?? "").trim(),
+      }));
+    if (history.length === 0) {
+      setSending(false);
+      setShowTyping(false);
+      return;
+    }
+    const allowUnsafe = (() => {
+      try {
+        return localStorage.getItem("panana_safety_on") === "1" && adultVerified;
+      } catch {
+        return false;
+      }
+    })();
+    const cfg = llmConfigRef.current;
+    const provider = cfg?.defaultProvider || "anthropic";
+    const model = cfg?.settings?.find((s: any) => s.provider === provider)?.model ?? undefined;
+
     try {
       const res = await fetch("/api/llm/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          provider: "gemini",
+          provider,
+          ...(model ? { model } : {}),
           messages: history,
           characterSlug: challenge.characterSlug,
           challengeId: challenge.id,
           concise: true,
+          allowUnsafe,
           runtime: {
             variables: {
               panana_id: pid,
@@ -299,6 +358,11 @@ export function ChallengeClient({
       });
       const data = await res.json();
       setShowTyping(false);
+      if (data?.provider != null && data?.model != null) {
+        const p = String(data.provider).toLowerCase();
+        const providerLabel = p === "anthropic" ? "Claude" : p === "gemini" ? "Gemini" : p === "deepseek" ? "DeepSeek" : data.provider;
+        setCurrentModelLabel(`${providerLabel} · ${String(data.model)}`);
+      }
       if (data?.ok && data.text) {
         const botMsg: Msg = { id: `b-${Date.now()}`, from: "bot", text: data.text };
         setMessages((prev) => [...prev, botMsg]);
@@ -329,20 +393,19 @@ export function ChallengeClient({
     } finally {
       setSending(false);
     }
-  }, [value, sending, messages, challenge, startedAt, startSession, loadRanking]);
+  }, [value, sending, messages, challenge, startedAt, startSession, loadRanking, adultVerified]);
 
   const [showGiveUpConfirm, setShowGiveUpConfirm] = useState(false);
 
-  const giveUp = useCallback(async () => {
-    const pid = pananaIdRef.current || getPananaId();
-    try {
-      await fetch(`/api/challenges/${challenge.id}/give-up`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pananaId: pid }),
-      });
-    } catch {}
+  const giveUp = useCallback(() => {
+    setShowGiveUpConfirm(false);
     router.push("/home?tab=challenge");
+    const pid = pananaIdRef.current || getPananaId();
+    fetch(`/api/challenges/${challenge.id}/give-up`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pananaId: pid }),
+    }).catch(() => {});
   }, [challenge.id, router]);
 
   const confirmGiveUp = useCallback(() => {
@@ -506,23 +569,28 @@ export function ChallengeClient({
     return (
       <div className="flex h-dvh flex-col overflow-hidden bg-[linear-gradient(#07070B,#0B0C10)] text-white">
         <style>{`@keyframes pananaDot{0%,100%{transform:translateY(0);opacity:.55}50%{transform:translateY(-4px);opacity:1}}`}</style>
-        <div className="fixed top-0 left-0 right-0 z-20 flex flex-col bg-[#07070B] shrink-0">
-        <header className="flex justify-center border-b border-white/10 bg-[#07070B]/95 py-3 backdrop-blur-sm">
-          <div className="flex w-full max-w-[420px] flex-col px-4">
-          <div className="flex items-center">
+        <div className="fixed top-0 left-0 right-0 z-20 flex flex-col bg-[#07070B] shrink-0 overflow-visible">
+        <header className="flex shrink-0 justify-center border-b border-white/10 bg-[#07070B]/95 py-3 backdrop-blur-sm">
+          <div className="flex min-h-[52px] w-full max-w-[420px] items-center px-4">
             <button type="button" onClick={confirmGiveUp} className="shrink-0 p-1 text-[#ffa1cc]" aria-label="뒤로">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M19 12H5M12 19l-7-7 7-7" />
               </svg>
             </button>
-            <h1 className="min-w-0 flex-1 truncate text-center text-[16px] font-extrabold text-[#ffa1cc]">{challenge.characterName}</h1>
+            <div className="mx-auto flex min-w-0 flex-1 flex-col items-center justify-center gap-0 px-2">
+              <span className="w-full truncate text-center text-[16px] font-extrabold leading-tight text-[#ffa1cc]">
+                {challenge.characterName}
+              </span>
+              <span className="text-[11px] text-white/40 mt-0.5" aria-hidden>
+                {currentModelLabel ?? "Claude"}
+              </span>
+            </div>
             <div className="w-10 shrink-0" />
           </div>
-        </div>
         </header>
 
-        {/* 도전목표 바 (성공 시 딤 컬러) */}
-        <div className="shrink-0 flex justify-center px-4 py-3">
+        {/* 도전목표 바 */}
+        <div className="shrink-0 flex justify-center px-4 pb-3 pt-2">
           <div
             className={`flex w-full max-w-[420px] items-center gap-2 rounded-xl px-4 py-3 ${
               challengeSuccess ? "bg-white/10" : "bg-panana-pink"
@@ -548,12 +616,12 @@ export function ChallengeClient({
         </div>
         </div>
 
-        <div className="shrink-0 h-[120px]" aria-hidden />
-
+        {/* 고정 헤더+도전목표 박스 바로 아래에서 시작하도록 paddingTop (가림 방지하면서 간격 최소화) */}
         <main
           ref={scrollRef}
           className="chat-scrollbar mx-auto w-full max-w-[420px] flex-1 min-h-0 overflow-y-auto px-5 pb-4 pt-4"
           style={{
+            paddingTop: "150px",
             paddingBottom: challengeSuccess
               ? "320px"
               : `${Math.max(0, keyboardHeight) + Math.max(0, composerHeight) + 12}px`,
@@ -765,10 +833,7 @@ export function ChallengeClient({
                 <div className="mt-6 flex gap-4">
                   <button
                     type="button"
-                    onClick={() => {
-                      setShowGiveUpConfirm(false);
-                      giveUp();
-                    }}
+                    onClick={giveUp}
                     className="flex-1 basis-0 whitespace-nowrap rounded-xl bg-white px-4 py-3 text-center text-[15px] font-semibold text-[#0B0C10]"
                   >
                     포기하기
