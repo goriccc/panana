@@ -375,6 +375,7 @@ export function CharacterChatClient({
   const [err, setErr] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [adultVerified, setAdultVerified] = useState(false);
+  const [showNeedAdultVerifyBanner, setShowNeedAdultVerifyBanner] = useState(false);
   const [adultLoading, setAdultLoading] = useState(true);
   const [userName, setUserName] = useState<string>(() => {
     // 템플릿 변수(user_name/call_sign) 치환이 항상 되도록: 로컬 identity 닉네임을 즉시 기본값으로 사용
@@ -1162,6 +1163,7 @@ export function CharacterChatClient({
       const reply = String(data.text || "").trim() || "…";
       resetTyping();
       setMessages((prev) => [...prev, { id: `b-${Date.now()}`, from: "bot", text: reply, at: Date.now() }]);
+      if (data.needAdultVerify) setShowNeedAdultVerifyBanner(true);
 
       const next: ChatRuntimeState | null =
         data?.runtime?.chat
@@ -1191,6 +1193,7 @@ export function CharacterChatClient({
     const { script: userScript } = parseUserScript(text);
 
     setErr(null);
+    setShowNeedAdultVerifyBanner(false);
     forceScrollRef.current = true;
     hasSentRef.current = true;
     isAtBottomRef.current = true;
@@ -1523,6 +1526,26 @@ export function CharacterChatClient({
               characterAvatarUrl={characterAvatarUrl}
               userAvatarUrl={userAvatarUrl}
             />
+          ) : null}
+          {showNeedAdultVerifyBanner ? (
+            <div className="mb-3 rounded-xl border border-panana-pink/40 bg-white/[0.06] p-3">
+              <p className="text-[12px] font-semibold text-white/80">
+                성인인증이 필요합니다!
+              </p>
+              <button
+                type="button"
+                onClick={() =>
+                  router.push(
+                    `/adult/verify?return=${encodeURIComponent(
+                      backHref.includes("tab=my") ? `/c/${characterSlug}/chat?from=my` : `/c/${characterSlug}/chat`
+                    )}`
+                  )
+                }
+                className="mt-2 w-full rounded-lg bg-panana-pink px-3 py-2 text-[13px] font-bold text-white"
+              >
+                성인 인증하고 계속하기
+              </button>
+            </div>
           ) : null}
           <div className={`relative w-full rounded-full border border-panana-pink/35 bg-white/[0.04] py-2 pl-11 pr-11 ${voiceModalOpen ? "mt-3" : ""}`}>
             <button

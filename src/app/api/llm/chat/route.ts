@@ -287,6 +287,31 @@ function isAnthropicContentPolicyError(err: unknown): boolean {
   return /content\s*filtering|output\s*blocked|content\s*policy/i.test(msg);
 }
 
+/** 캐릭터 이탈/거절 응답인지 감지 (시스템 문구·AI 자칭·역할 거부 등) */
+function isRefusalLike(text: string): boolean {
+  const s = String(text || "").trim();
+  if (s.length < 20) return false;
+  const lower = s.toLowerCase();
+  const refusalMarkers = [
+    "i'm claude",
+    "i am claude",
+    "claude, an ai",
+    "an ai assistant",
+    "made by anthropic",
+    "can't roleplay",
+    "cannot roleplay",
+    "won't roleplay",
+    "sexual or erotic",
+    "저는 ai",
+    "저는 인공지능",
+    "ai라서",
+    "ai 이라서",
+    "ai라 직접",
+    "인공지능이라",
+  ];
+  return refusalMarkers.some((m) => lower.includes(m));
+}
+
 async function loadSettings(provider: "anthropic" | "gemini" | "deepseek") {
   const supabase = getSupabaseServer();
   const { data, error } = await supabase
@@ -878,7 +903,12 @@ export async function POST(req: Request) {
       }
     }
 
-    const nonSystem = body.messages.filter((m) => m.role !== "system");
+    let nonSystem = body.messages.filter((m) => m.role !== "system");
+    // 이전 턴에서 캐릭터 이탈(거절) 응답이 있으면 히스토리에서 제거 → 다음 응답이 캐릭터로 유지되도록
+    const lastMsg = nonSystem[nonSystem.length - 1];
+    if (lastMsg?.role === "assistant" && isRefusalLike(lastMsg.content)) {
+      nonSystem = nonSystem.slice(0, -1);
+    }
     const userTurns = nonSystem.filter((m) => m.role === "user").length;
 
     // ===== Trigger Runtime: rules 평가 → runtime 업데이트 → system events 생성 =====
@@ -1146,6 +1176,58 @@ export async function POST(req: Request) {
     if (challengeMeta) {
       text = removeParenthesisBlocks(text);
     }
+
+    // Claude 캐릭터 이탈/거절 응답 시: 19금 허용이면 Gemini로 재시도, 아니면 성인 인증 유도
+    if (body.provider === "anthropic" && body.characterSlug && isRefusalLike(text)) {
+      const fallback = await loadFallbackProvider();
+      if (allowUnsafe && fallback === "gemini") {
+        const geminiKey = getEnvKey("gemini");
+        const geminiSettings = await loadSettings("gemini").catch(() => null);
+        if (geminiKey) {
+          const fallbackModel = selectGeminiModel(
+            nonSystemInterpolated.map((m) => ({ role: m.role, content: m.content })),
+            system || ""
+          );
+          const retryOut = await callGemini({
+            apiKey: geminiKey,
+            model: fallbackModel,
+            temperature: geminiSettings?.temperature ?? 0.7,
+            max_tokens: geminiSettings?.max_tokens ?? maxTokens,
+            top_p: geminiSettings?.top_p ?? topP,
+            system: system || "",
+            messages: nonSystemInterpolated.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+            allowUnsafe: true,
+          });
+          const retryText = sanitizeAssistantText(String(retryOut.text || ""), tvars);
+          if (retryText && !isRefusalLike(retryText)) {
+            text = retryText;
+          }
+        }
+      } else if (!allowUnsafe) {
+        return NextResponse.json({
+          ok: true,
+          provider: body.provider,
+          model,
+          text,
+          needAdultVerify: true,
+          ...(body.challengeId ? { challengeSuccess: false } : {}),
+          runtime: {
+            ...(body.runtime || {}),
+            variables: runtimeVariablesMerged,
+            chat: nextChatState
+              ? {
+                  participants: nextChatState.participants,
+                  lastActiveAt: nextChatState.lastActiveAt,
+                  firedAt: nextChatState.firedAt,
+                }
+              : (body.runtime as any)?.chat,
+            varLabels,
+          },
+          events: runtimeEvents,
+        });
+      }
+    }
+
     const minTurnsForSuccess = 4;
     const keywordMatch =
       challengeMeta &&
