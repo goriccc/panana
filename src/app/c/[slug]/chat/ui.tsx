@@ -1536,6 +1536,10 @@ export function CharacterChatClient({
               ref={inputRef}
               type="text"
               inputMode="text"
+              autoComplete="one-time-code"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
               value={value}
               onChange={(e) => setValue(e.target.value)}
               onKeyDown={(e) => {

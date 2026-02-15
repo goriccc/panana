@@ -784,6 +784,10 @@ export function ChallengeClient({
                 ref={challengeInputRef}
                 type="text"
                 inputMode="text"
+                autoComplete="one-time-code"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
                 onKeyDown={(e) => {
