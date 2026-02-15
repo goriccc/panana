@@ -874,7 +874,7 @@ export function CharacterChatClient({
       setHistoryLoading(false);
     } else {
       setHistoryLoading(true);
-      void requestOpening();
+      // 일반 오프닝은 DB 로드 후 결정: DB에 과거 대화가 있으면 오랜만 오프닝만, 없으면 일반 오프닝만 (충돌 방지)
     }
 
     // 2) 기본 스레드일 때만 서버에서 pananaId 확정 및 DB 메시지 로드 (백그라운드)
@@ -925,6 +925,9 @@ export function CharacterChatClient({
             if (typeof lastAt === "number" && lastAt > 0 && alive) {
               tryRunReturningOpening(pid, characterSlug, rows, lastAt);
             }
+            if (alive) setHistoryLoading(false);
+          } else {
+            if (alive) void requestOpening();
           }
         } else if (!warnedDbRef.current) {
           const errText = String(data?.error || "").trim();
