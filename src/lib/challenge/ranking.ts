@@ -43,7 +43,7 @@ export async function fetchChallengeRanking(
 
   const { data: rows } = await sb
     .from("panana_challenge_completions")
-    .select("user_id, duration_ms, completed_at, panana_users(nickname)")
+    .select("user_id, duration_ms, completed_at, panana_users(nickname, profile_image_url)")
     .eq("challenge_id", challengeId)
     .gte("completed_at", since)
     .order("duration_ms", { ascending: true })
