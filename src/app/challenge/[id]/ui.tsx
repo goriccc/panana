@@ -174,7 +174,7 @@ export function ChallengeClient({
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLDivElement | null>(null);
-  const challengeInputRef = useRef<HTMLInputElement | null>(null);
+  const challengeInputRef = useRef<HTMLDivElement | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [composerHeight, setComposerHeight] = useState(64);
   const lastKeyboardHeightRef = useRef(0);
@@ -295,6 +295,7 @@ export function ChallengeClient({
     if (!text || sending) return;
 
     setValue("");
+    if (challengeInputRef.current) challengeInputRef.current.innerText = "";
     setErr(null);
     const userMsg: Msg = { id: `u-${Date.now()}`, from: "user", text };
     setMessages((prev) => [...prev, userMsg]);
@@ -780,30 +781,43 @@ export function ChallengeClient({
         >
           <div className="mx-auto w-full max-w-[420px] px-5 py-2.5">
             <div className="relative w-full rounded-full border border-panana-pink/35 bg-white/[0.04] py-2 pl-4 pr-11">
-              <input
+              <div
                 ref={challengeInputRef}
-                type="text"
-                inputMode="text"
-                autoComplete="new-password"
-                autoCorrect="off"
-                autoCapitalize="off"
-                spellCheck={false}
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
+                role="textbox"
+                contentEditable
+                suppressContentEditableWarning
+                data-placeholder="메시지를 입력하세요"
+                aria-label="메시지 입력"
+                className="min-h-[1.5rem] w-full bg-transparent text-base font-semibold text-white/70 outline-none empty:before:content-[attr(data-placeholder)] empty:before:text-white/30"
+                style={{ fontSize: "16px" }}
+                onInput={() => {
+                  const el = challengeInputRef.current;
+                  if (!el) return;
+                  const text = (el.innerText ?? "").replace(/\n/g, " ");
+                  setValue(text);
+                  // 한 줄 유지: 브라우저가 줄바꿈 넣으면 제거
+                  if ((el.innerText ?? "").includes("\n")) {
+                    el.innerText = text;
+                  }
+                }}
+                onPaste={(e) => {
+                  e.preventDefault();
+                  const text = e.clipboardData.getData("text/plain").replace(/\n/g, " ");
+                  document.execCommand("insertText", false, text);
+                }}
                 onKeyDown={(e) => {
                   const composing = (e.nativeEvent as KeyboardEvent & { isComposing?: boolean })?.isComposing;
                   if (composing) return;
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
                     sendMessage();
-                    // 모바일에서 rAF는 너무 빨라 키보드가 내려감. setTimeout으로 지연 포커스
+                    if (challengeInputRef.current) {
+                      challengeInputRef.current.innerText = "";
+                    }
+                    setValue("");
                     setTimeout(() => challengeInputRef.current?.focus(), 100);
                   }
                 }}
-                placeholder="메시지를 입력하세요"
-                className="w-full bg-transparent text-base font-semibold text-white/70 outline-none placeholder:text-white/30"
-                style={{ fontSize: "16px" }}
-                aria-label="메시지 입력"
               />
               <button
                 type="button"

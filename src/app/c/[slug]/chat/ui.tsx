@@ -32,6 +32,49 @@ type Msg = {
   /** 마지막 활동 시각(epoch ms). 오랜만 복귀 시 안부 오프닝 판단용 */
   at?: number;
 };
+/** contenteditable div에서 커서 위치(문자 오프셋) 반환 */
+function getCaretOffset(div: HTMLDivElement): number {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return 0;
+  const range = sel.getRangeAt(0).cloneRange();
+  try {
+    range.selectNodeContents(div);
+    range.setEnd(sel.anchorNode!, sel.anchorOffset);
+    return range.toString().length;
+  } catch {
+    return 0;
+  }
+}
+
+/** contenteditable div에서 커서를 지정한 문자 오프셋으로 이동 */
+function setCaretOffset(div: HTMLDivElement, offset: number): void {
+  const sel = window.getSelection();
+  if (!sel) return;
+  const text = div.innerText ?? "";
+  const pos = Math.max(0, Math.min(offset, text.length));
+  const range = document.createRange();
+  let passed = 0;
+  const walk = (node: Node): boolean => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const len = (node.textContent ?? "").length;
+      if (passed + len >= pos) {
+        range.setStart(node, pos - passed);
+        range.collapse(true);
+        return true;
+      }
+      passed += len;
+      return false;
+    }
+    for (let i = 0; i < node.childNodes.length; i++) {
+      if (walk(node.childNodes[i]!)) return true;
+    }
+    return false;
+  };
+  walk(div);
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
 /** 제3자 개입 시스템 메시지: [시스템] system_message:"..." 형태면 따옴표 안 내용만 반환 */
 function getSystemMessageDisplayText(raw: string): string {
   const s = String(raw || "").trim();
@@ -327,7 +370,7 @@ export function CharacterChatClient({
   const [showTyping, setShowTyping] = useState(false);
   const [value, setValue] = useState("");
   const [scriptMode, setScriptMode] = useState(false); // 지문 입력 모드: ( ) 괄호 안 커서
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLDivElement>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(true);
@@ -1153,6 +1196,7 @@ export function CharacterChatClient({
     isAtBottomRef.current = true;
     setMessages((prev) => [...prev, { id: `u-${Date.now()}`, from: "user", text, at: Date.now() }]);
     setValue("");
+    if (inputRef.current) inputRef.current.innerText = "";
     setScriptMode(false);
 
     await requestChat(
@@ -1485,45 +1529,44 @@ export function CharacterChatClient({
               type="button"
               aria-label={scriptMode ? "지문 입력 끝내기 (일반 대화)" : "지문 입력"}
               onClick={() => {
-                const input = inputRef.current;
-                if (!input) return;
-                const start = input.selectionStart ?? value.length;
-                const end = input.selectionEnd ?? value.length;
+                const div = inputRef.current;
+                if (!div) return;
+                const start = getCaretOffset(div);
+                const end = start; // 단일 커서
                 const before = value.slice(0, start);
                 const after = value.slice(end);
                 if (scriptMode) {
-                  // 닫는 ) 오른쪽 바깥으로 이동, ) 뒤에 공백 한 칸 넣고 커서는 공백 뒤로
                   const afterCursor = value.slice(end);
                   const closeParen = afterCursor.indexOf(")");
                   if (closeParen >= 0) {
                     const parenPos = end + closeParen + 1;
                     const afterParen = value.slice(parenPos);
                     const needSpace = afterParen.length === 0 || afterParen[0] !== " ";
-                    setValue(
-                      needSpace
-                        ? value.slice(0, parenPos) + " " + value.slice(parenPos)
-                        : value
-                    );
+                    const newVal = needSpace
+                      ? value.slice(0, parenPos) + " " + value.slice(parenPos)
+                      : value;
+                    setValue(newVal);
+                    div.innerText = newVal;
                     setScriptMode(false);
                     requestAnimationFrame(() => {
-                      input.focus();
-                      const cursorPos = needSpace ? parenPos + 1 : parenPos;
-                      input.setSelectionRange(cursorPos, cursorPos);
+                      div.focus();
+                      setCaretOffset(div, needSpace ? parenPos + 1 : parenPos);
                     });
                   } else {
                     setScriptMode(false);
                     requestAnimationFrame(() => {
-                      input.focus();
-                      input.setSelectionRange(value.length, value.length);
+                      div.focus();
+                      setCaretOffset(div, value.length);
                     });
                   }
                 } else {
-                  setValue(before + "(" + ")" + after);
+                  const newVal = before + "(" + ")" + after;
+                  setValue(newVal);
+                  div.innerText = newVal;
                   setScriptMode(true);
                   requestAnimationFrame(() => {
-                    input.focus();
-                    const pos = before.length + 1;
-                    input.setSelectionRange(pos, pos);
+                    div.focus();
+                    setCaretOffset(div, before.length + 1);
                   });
                 }
               }}
@@ -1532,30 +1575,38 @@ export function CharacterChatClient({
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/jimun.png" alt="" width={22} height={22} className="h-[22px] w-[22px] opacity-90" />
             </button>
-            <input
+            <div
               ref={inputRef}
-              type="text"
-              inputMode="text"
-              autoComplete="new-password"
-              autoCorrect="off"
-              autoCapitalize="off"
-              spellCheck={false}
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
+              role="textbox"
+              contentEditable
+              suppressContentEditableWarning
+              data-placeholder="메시지를 입력하세요"
+              aria-label="메시지 입력"
+              className="min-h-[1.5rem] w-full bg-transparent text-base font-semibold text-white/70 outline-none empty:before:content-[attr(data-placeholder)] empty:before:text-white/30"
+              style={{ fontSize: "16px" }}
+              onInput={() => {
+                const el = inputRef.current;
+                if (!el) return;
+                const text = (el.innerText ?? "").replace(/\n/g, " ");
+                setValue(text);
+                if ((el.innerText ?? "").includes("\n")) el.innerText = text;
+              }}
+              onPaste={(e) => {
+                e.preventDefault();
+                const text = e.clipboardData.getData("text/plain").replace(/\n/g, " ");
+                document.execCommand("insertText", false, text);
+              }}
               onKeyDown={(e) => {
                 const composing = (e.nativeEvent as KeyboardEvent & { isComposing?: boolean })?.isComposing;
                 if (composing) return;
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   send();
-                  // 모바일에서 rAF는 너무 빨라 키보드가 내려감. setTimeout으로 지연 포커스
+                  if (inputRef.current) inputRef.current.innerText = "";
+                  setValue("");
                   setTimeout(() => inputRef.current?.focus(), 100);
                 }
               }}
-              className="w-full bg-transparent text-base font-semibold text-white/70 outline-none placeholder:text-white/30"
-              placeholder="메시지를 입력하세요"
-              style={{ fontSize: "16px" }}
-              aria-label="메시지 입력"
             />
             <button
               type="button"
