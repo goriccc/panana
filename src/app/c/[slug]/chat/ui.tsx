@@ -1370,11 +1370,11 @@ export function CharacterChatClient({
   }
 
   return (
-    <div className="h-dvh overflow-hidden bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.12),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white flex flex-col">
+    <div className="fixed inset-0 flex flex-col overflow-hidden bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.12),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">
       <style>{`@keyframes pananaDot{0%,100%{transform:translateY(0);opacity:.55}50%{transform:translateY(-4px);opacity:1}}`}</style>
       <>
-      {/* 키보드 올라와도 헤더가 스크롤되지 않도록 뷰포트 고정 */}
-      <header className="fixed top-0 left-0 right-0 z-20 shrink-0 bg-[#07070B]/95 backdrop-blur-sm pt-[env(safe-area-inset-top)]">
+      {/* 키보드 올라와도 헤더가 밀리지 않도록 상단 고정(스크롤 영역 밖) */}
+      <header className="shrink-0 z-20 bg-[#07070B]/95 backdrop-blur-sm pt-[env(safe-area-inset-top)]">
         <div className="relative flex h-11 items-center mx-auto w-full max-w-[420px] px-5 pb-3 pt-3">
           <Link 
             href={backHref} 
@@ -1445,7 +1445,7 @@ export function CharacterChatClient({
           </button>
         </div>
       </header>
-      {/* 헤더 높이만큼 공간 확보(키보드 시에도 본문이 헤더에 가리지 않음) */}
+      {/* 헤더 높이만큼 공간 확보 */}
       <div className="shrink-0" style={{ height: "calc(80px + env(safe-area-inset-top, 0px))" }} aria-hidden />
 
       {!onboardingDismissed ? (

@@ -580,10 +580,10 @@ export function ChallengeClient({
 
   if (view === "chat") {
     return (
-      <div className="flex h-dvh flex-col overflow-hidden bg-[linear-gradient(#07070B,#0B0C10)] text-white">
+      <div className="fixed inset-0 flex flex-col overflow-hidden bg-[linear-gradient(#07070B,#0B0C10)] text-white">
         <style>{`@keyframes pananaDot{0%,100%{transform:translateY(0);opacity:.55}50%{transform:translateY(-4px);opacity:1}}`}</style>
-        {/* 키보드 올라와도 스크롤되지 않도록 헤더+도전목표를 뷰포트 고정 */}
-        <div className="fixed top-0 left-0 right-0 z-20 flex flex-col bg-[#07070B] shrink-0 overflow-visible pt-[env(safe-area-inset-top)]">
+        {/* 키보드 올라와도 헤더+도전목표가 밀리지 않도록 상단 고정(스크롤 영역 밖) */}
+        <div className="shrink-0 z-20 flex flex-col bg-[#07070B] overflow-visible pt-[env(safe-area-inset-top)]">
         <header className="flex shrink-0 justify-center border-b border-white/10 bg-[#07070B]/95 py-3 backdrop-blur-sm">
           <div className="flex min-h-[52px] w-full max-w-[420px] items-center px-4">
             <button type="button" onClick={confirmGiveUp} className="shrink-0 p-1 text-[#ffa1cc]" aria-label="뒤로">
@@ -629,7 +629,7 @@ export function ChallengeClient({
           </div>
         </div>
         </div>
-        {/* 헤더+도전목표 높이만큼 공간 확보(키보드 시에도 본문이 가리지 않음) */}
+        {/* 헤더+도전목표 높이만큼 공간 확보 */}
         <div className="shrink-0" style={{ height: "calc(150px + env(safe-area-inset-top, 0px))" }} aria-hidden />
 
         <main
