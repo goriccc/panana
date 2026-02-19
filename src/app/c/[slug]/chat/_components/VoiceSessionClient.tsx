@@ -139,6 +139,8 @@ export function VoiceSessionClient({
   const userDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** iOS: 사용자 탭 직후(await 전)에 마이크 권한 요청을 시작해 한 번만 컨펌받고 저장되도록 함 */
   const iosMicStreamPromiseRef = useRef<Promise<MediaStream> | null>(null);
+  /** iOS: 마이크 권한이 이미 허용되었는지 확인 (한 번 확인 후 캐시) */
+  const iosMicPermissionGrantedRef = useRef<boolean | null>(null);
   const ringEndedRef = useRef(false);
 
   useEffect(() => {
@@ -160,8 +162,9 @@ export function VoiceSessionClient({
 
   const [shouldAutoStart, setShouldAutoStart] = useState(false);
 
-  // 링톤 URL 로드 (모달 열릴 때). 링톤 없으면 자동으로 통화 시작해 "음성 통화를 시작할까요?" 화면 스킵
+  // 링톤 URL 로드 (모달 열릴 때). iOS는 prepareIOSVoice에서 이미 처리하므로 스킵
   useEffect(() => {
+    if (isIOSDevice() && startOnOpen) return; // iOS는 prepareIOSVoice에서 config fetch + 링톤 재생
     fetch("/api/voice/config")
       .then((r) => r.json())
       .then((d) => {
@@ -192,13 +195,14 @@ export function VoiceSessionClient({
         hangupPreloadAudioRef.current = null;
       }
     };
-  }, []);
+  }, [startOnOpen]);
 
   const RING_EARLY_MS = 1200;
 
-  // 링 재생 + (종료 1200ms 전) 전화 연결 화면 전환
+  // 링 재생 + (종료 1200ms 전) 전화 연결 화면 전환 (iOS는 prepareIOSVoice에서 이미 재생 중이면 스킵)
   useEffect(() => {
     if (phase !== "ringing" || !ringtoneUrl) return;
+    if (isIOSDevice() && ringAudioRef.current) return; // iOS는 prepareIOSVoice에서 이미 재생 시작됨
     const audio = new Audio(ringtoneUrl);
     if (isIOSDevice()) setInlinePlaybackAttributes(audio);
     ringAudioRef.current = audio;
@@ -582,10 +586,42 @@ export function VoiceSessionClient({
     if (!isIOSDevice()) return;
     if (recorderRef.current && streamerRef.current) return;
     try {
+      // iOS: 사용자 제스처 안에서 config를 먼저 fetch해 링톤 URL 확보
+      let ringUrl: string | null = null;
+      try {
+        const res = await fetch("/api/voice/config");
+        const data = await res.json().catch(() => ({}));
+        const cfg = (data?.data as any) || {};
+        ringUrl = cfg?.ringtone_url && typeof cfg.ringtone_url === "string" && cfg.ringtone_url.trim() ? cfg.ringtone_url.trim() : null;
+        const hangupUrl = cfg?.hangup_sound_url;
+        if (hangupUrl && typeof hangupUrl === "string" && hangupUrl.trim()) {
+          const normalized = hangupUrl.trim();
+          setHangupSoundUrl(normalized);
+          const pre = new Audio(normalized);
+          pre.preload = "auto";
+          pre.crossOrigin = "anonymous";
+          setInlinePlaybackAttributes(pre);
+          pre.load();
+          hangupPreloadAudioRef.current = pre;
+        }
+      } catch {
+        // config fetch 실패 시 무시
+      }
+      
       if (!iosRecorderContextRef.current) {
         iosRecorderContextRef.current = new AudioContext({ sampleRate: 16000 });
       }
+      // iOS: 마이크 권한이 이미 허용되었는지 확인 (한 번만 확인)
       if (typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia && !iosMicStreamPromiseRef.current) {
+        if (iosMicPermissionGrantedRef.current === null && typeof navigator.permissions !== "undefined" && navigator.permissions.query) {
+          try {
+            const status = await navigator.permissions.query({ name: "microphone" as PermissionName });
+            iosMicPermissionGrantedRef.current = status.state === "granted";
+          } catch {
+            // permissions API가 지원되지 않거나 실패하면 null 유지
+          }
+        }
+        // 권한이 이미 허용되었으면 getUserMedia 호출해도 권한 요청 팝업이 뜨지 않음
         iosMicStreamPromiseRef.current = navigator.mediaDevices.getUserMedia({ audio: true });
       }
       if (typeof window !== "undefined") {
@@ -611,6 +647,38 @@ export function VoiceSessionClient({
       });
       recorder.on("volume", (v: number) => setInVolume(v));
       recorderRef.current = recorder;
+      
+      // iOS: 사용자 제스처 안에서 링톤 재생 시작
+      if (ringUrl && !ringAudioRef.current) {
+        setRingtoneUrl(ringUrl);
+        setPhase("ringing");
+        const audio = new Audio(ringUrl);
+        setInlinePlaybackAttributes(audio);
+        ringAudioRef.current = audio;
+        let earlyTimer: ReturnType<typeof setTimeout> | null = null;
+        const switchToConnected = () => {
+          ringEndedRef.current = true;
+          setPhase("connected");
+          ringAudioRef.current = null;
+        };
+        const onEnded = () => switchToConnected();
+        const scheduleEarlySwitch = () => {
+          const durationMs = Number.isFinite(audio.duration) ? audio.duration * 1000 : 0;
+          const delay = durationMs > RING_EARLY_MS ? durationMs - RING_EARLY_MS : 0;
+          if (delay > 0) {
+            earlyTimer = setTimeout(() => {
+              earlyTimer = null;
+              switchToConnected();
+            }, delay);
+          }
+        };
+        audio.addEventListener("ended", onEnded);
+        audio.addEventListener("loadedmetadata", scheduleEarlySwitch);
+        if (audio.readyState >= 1) scheduleEarlySwitch();
+        audio.play().catch(() => onEnded());
+      } else if (!ringUrl) {
+        setShouldAutoStart(true);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "오디오 초기화 실패");
     }
@@ -624,6 +692,16 @@ export function VoiceSessionClient({
       }
     }
     if (isIOSDevice() && typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia && !iosMicStreamPromiseRef.current) {
+      // iOS: 마이크 권한이 이미 허용되었는지 확인 (한 번만 확인)
+      if (iosMicPermissionGrantedRef.current === null && typeof navigator.permissions !== "undefined" && navigator.permissions.query) {
+        try {
+          const status = await navigator.permissions.query({ name: "microphone" as PermissionName });
+          iosMicPermissionGrantedRef.current = status.state === "granted";
+        } catch {
+          // permissions API가 지원되지 않거나 실패하면 null 유지
+        }
+      }
+      // 권한이 이미 허용되었으면 getUserMedia 호출해도 권한 요청 팝업이 뜨지 않음
       iosMicStreamPromiseRef.current = navigator.mediaDevices.getUserMedia({ audio: true });
     }
 
