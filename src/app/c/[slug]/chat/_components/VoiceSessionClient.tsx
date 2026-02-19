@@ -715,7 +715,6 @@ export function VoiceSessionClient({
     const resolvedUrl = await resolveHangupSoundUrl();
     if (resolvedUrl) {
       setClosingWithHangupSound(true);
-      stopVoiceCore({ closeUi: false, setIdle: false });
       try {
         const audio = hangupPreloadAudioRef.current || new Audio(resolvedUrl);
         audio.preload = "auto";
@@ -724,6 +723,12 @@ export function VoiceSessionClient({
         audio.currentTime = 0;
         audio.volume = 1;
         hangupAudioRef.current = audio;
+        let teardownStarted = false;
+        const startTeardown = () => {
+          if (teardownStarted) return;
+          teardownStarted = true;
+          stopVoiceCore({ closeUi: false, setIdle: false });
+        };
         let done = false;
         const finish = () => {
           if (done) return;
@@ -744,7 +749,10 @@ export function VoiceSessionClient({
           window.clearTimeout(fallbackTimer);
           finish();
         };
-        void audio.play().catch(() => {
+        const playPromise = audio.play();
+        // 재생을 먼저 시작시키고, 세션 정리는 다음 틱으로 미뤄 클릭 직후 소리가 늦게 나는 현상 최소화
+        window.setTimeout(startTeardown, 0);
+        void playPromise.catch(() => {
           // 1차 재생 실패 시 캐시버스터 URL로 1회 재시도
           const retry = new Audio(`${resolvedUrl}${resolvedUrl.includes("?") ? "&" : "?"}t=${Date.now()}`);
           retry.preload = "auto";
@@ -752,6 +760,7 @@ export function VoiceSessionClient({
           setInlinePlaybackAttributes(retry);
           retry.volume = 1;
           hangupAudioRef.current = retry;
+          window.setTimeout(startTeardown, 0);
           retry.onended = () => {
             window.clearTimeout(fallbackTimer);
             finish();
