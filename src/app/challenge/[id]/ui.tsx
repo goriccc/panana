@@ -53,6 +53,18 @@ function formatMessageReadability(text: string): string {
     .trim();
 }
 
+/** 도전 모드용: 지문 ( ) （ ） **...** 제거 후 반환 */
+function stripFingerprintForChallenge(text: string): string {
+  let s = String(text ?? "").trim();
+  if (!s) return s;
+  // ( ) （ ） 괄호 안 지문 제거
+  s = s.replace(/\([^)]*\)/g, "").replace(/（[^）]*）/g, "");
+  // ** ... ** 형태 지문 제거 (여러 줄 포함)
+  s = s.replace(/\*\*[\s\S]*?\*\*/g, "");
+  s = s.replace(/\n{3,}/g, "\n\n").replace(/\s{2,}/g, " ").trim();
+  return s;
+}
+
 /** MM:SS:cs (분:초:센티초 2자리) */
 function formatDurationRanking(ms: number): string {
   const totalSec = ms / 1000;
@@ -570,7 +582,8 @@ export function ChallengeClient({
     return (
       <div className="flex h-dvh flex-col overflow-hidden bg-[linear-gradient(#07070B,#0B0C10)] text-white">
         <style>{`@keyframes pananaDot{0%,100%{transform:translateY(0);opacity:.55}50%{transform:translateY(-4px);opacity:1}}`}</style>
-        <div className="fixed top-0 left-0 right-0 z-20 flex flex-col bg-[#07070B] shrink-0 overflow-visible">
+        {/* 키보드 올라와도 스크롤되지 않도록 헤더+도전목표를 뷰포트 고정 */}
+        <div className="fixed top-0 left-0 right-0 z-20 flex flex-col bg-[#07070B] shrink-0 overflow-visible pt-[env(safe-area-inset-top)]">
         <header className="flex shrink-0 justify-center border-b border-white/10 bg-[#07070B]/95 py-3 backdrop-blur-sm">
           <div className="flex min-h-[52px] w-full max-w-[420px] items-center px-4">
             <button type="button" onClick={confirmGiveUp} className="shrink-0 p-1 text-[#ffa1cc]" aria-label="뒤로">
@@ -616,13 +629,14 @@ export function ChallengeClient({
           </div>
         </div>
         </div>
+        {/* 헤더+도전목표 높이만큼 공간 확보(키보드 시에도 본문이 가리지 않음) */}
+        <div className="shrink-0" style={{ height: "calc(150px + env(safe-area-inset-top, 0px))" }} aria-hidden />
 
-        {/* 고정 헤더+도전목표 박스 바로 아래에서 시작하도록 paddingTop (가림 방지하면서 간격 최소화) */}
         <main
           ref={scrollRef}
           className="chat-scrollbar mx-auto w-full max-w-[420px] flex-1 min-h-0 overflow-y-auto px-5 pb-4 pt-4"
           style={{
-            paddingTop: "150px",
+            paddingTop: "16px",
             paddingBottom: challengeSuccess
               ? "320px"
               : `${Math.max(0, keyboardHeight) + Math.max(0, composerHeight) + 12}px`,
@@ -673,7 +687,7 @@ export function ChallengeClient({
                     <div className="relative h-7 w-7 flex-none overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10" />
                   )}
                   <div className="rounded-[22px] rounded-bl-[10px] bg-white/[0.06] px-4 py-3 text-[14px] font-semibold leading-[1.45] text-white/80">
-                    <div className="whitespace-pre-wrap">{formatMessageReadability(m.text)}</div>
+                    <div className="whitespace-pre-wrap">{formatMessageReadability(stripFingerprintForChallenge(m.text))}</div>
                   </div>
                 </div>
               </div>

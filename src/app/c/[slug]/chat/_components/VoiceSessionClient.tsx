@@ -82,6 +82,7 @@ export function VoiceSessionClient({
   userAvatarUrl,
   onPhaseChange,
   startOnOpen = false,
+  preloadedRingtoneUrl = null,
 }: {
   characterSlug: string;
   characterName: string;
@@ -97,6 +98,8 @@ export function VoiceSessionClient({
   onPhaseChange?: (phase: "idle" | "ringing" | "connected") => void;
   /** true면 모달이 열릴 때(전화 아이콘 탭과 동일 제스처) iOS에서 즉시 통화 시작 */
   startOnOpen?: boolean;
+  /** iOS: 부모가 미리 로드한 링톤 URL → 제스처 직후 재생 가능 */
+  preloadedRingtoneUrl?: string | null;
 }) {
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -793,8 +796,35 @@ export function VoiceSessionClient({
   useLayoutEffect(() => {
     if (!startOnOpen || !isIOSDevice() || startedByOpenRef.current) return;
     startedByOpenRef.current = true;
+    // iOS: 제스처 직후(await 전) 링톤 재생 시작해야 소리 남. 미리 로드된 URL이 있으면 즉시 재생.
+    if (preloadedRingtoneUrl && !ringAudioRef.current) {
+      setRingtoneUrl(preloadedRingtoneUrl);
+      setPhase("ringing");
+      const audio = new Audio(preloadedRingtoneUrl);
+      setInlinePlaybackAttributes(audio);
+      ringAudioRef.current = audio;
+      const switchToConnected = () => {
+        ringEndedRef.current = true;
+        setPhase("connected");
+        ringAudioRef.current = null;
+      };
+      const onEnded = () => switchToConnected();
+      const scheduleEarlySwitch = () => {
+        const durationMs = Number.isFinite(audio.duration) ? audio.duration * 1000 : 0;
+        const delay = durationMs > RING_EARLY_MS ? durationMs - RING_EARLY_MS : 0;
+        if (delay > 0) {
+          setTimeout(() => {
+            switchToConnected();
+          }, delay);
+        }
+      };
+      audio.addEventListener("ended", onEnded);
+      audio.addEventListener("loadedmetadata", scheduleEarlySwitch);
+      if (audio.readyState >= 1) scheduleEarlySwitch();
+      audio.play().catch(() => onEnded());
+    }
     void prepareIOSVoice();
-  }, [startOnOpen, prepareIOSVoice]);
+  }, [startOnOpen, prepareIOSVoice, preloadedRingtoneUrl]);
 
   const stopVoiceCore = useCallback((opts?: { closeUi?: boolean; setIdle?: boolean }) => {
     const closeUi = opts?.closeUi !== false;

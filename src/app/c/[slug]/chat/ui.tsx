@@ -32,6 +32,11 @@ type Msg = {
   /** 마지막 활동 시각(epoch ms). 오랜만 복귀 시 안부 오프닝 판단용 */
   at?: number;
 };
+
+/** 음성 통화에서 생성된 메시지 여부(문자 채팅만 기록하기 위해 제외용) */
+function isVoiceMessage(m: Msg): boolean {
+  return m.id.startsWith("u-voice-") || m.id.startsWith("b-voice-");
+}
 /** contenteditable div에서 커서 위치(문자 오프셋) 반환 */
 function getCaretOffset(div: HTMLDivElement): number {
   const sel = window.getSelection();
@@ -402,6 +407,8 @@ export function CharacterChatClient({
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [composerHeight, setComposerHeight] = useState(64);
   const [voiceModalOpen, setVoiceModalOpen] = useState(false);
+  /** iOS 링톤: 전화 아이콘 탭과 같은 제스처에서 재생하려면 URL을 미리 로드 */
+  const [preloadedVoiceRingtoneUrl, setPreloadedVoiceRingtoneUrl] = useState<string | null>(null);
   const [voicePhase, setVoicePhase] = useState<"idle" | "ringing" | "connected">("idle");
   const [currentModelLabel, setCurrentModelLabel] = useState<string | null>(null);
   const [currentVoiceModelLabel, setCurrentVoiceModelLabel] = useState<string | null>(null);
@@ -872,6 +879,17 @@ export function CharacterChatClient({
     };
   }, [characterSlug]);
 
+  /** iOS 링톤: 채팅 화면 로드 시 링톤 URL 미리 fetch → 전화 아이콘 탭 시 같은 제스처에서 재생 가능 */
+  useEffect(() => {
+    fetch("/api/voice/config")
+      .then((r) => r.json())
+      .then((d) => {
+        const url = (d?.data as any)?.ringtone_url;
+        if (url && typeof url === "string" && url.trim()) setPreloadedVoiceRingtoneUrl(url.trim());
+      })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     let alive = true;
     const pidCandidate = getPananaId();
@@ -998,11 +1016,12 @@ export function CharacterChatClient({
   useEffect(() => {
     const pid = pananaIdRef.current || getPananaId();
     if (!pid) return;
+    const textOnlyMessages = messages.filter((m) => !isVoiceMessage(m));
     const t = window.setTimeout(() => {
       saveChatHistory({
         pananaId: pid,
         characterSlug,
-        messages: messages.map((m) => ({
+        messages: textOnlyMessages.map((m) => ({
           id: m.id,
           from: m.from,
           text: m.text,
@@ -1011,13 +1030,13 @@ export function CharacterChatClient({
         })),
         threadId: currentThreadId,
       });
-      const firstUser = messages.find((m) => m.from === "user");
+      const firstUser = textOnlyMessages.find((m) => m.from === "user");
       const titleSnippet = firstUser?.text?.replace(/\s+/g, " ").trim().slice(0, 20) || "대화";
       setThreadUpdated({ pananaId: pid, characterSlug, threadId: currentThreadId, title: titleSnippet });
       setThreadListState(getThreadList({ pananaId: pid, characterSlug }));
       if (isDefaultThread(currentThreadId)) {
         // eslint-disable-next-line @typescript-eslint/no-floating-promises
-        persistToDb(pid, messages);
+        persistToDb(pid, textOnlyMessages);
       }
     }, 80);
     return () => window.clearTimeout(t);
@@ -1027,8 +1046,9 @@ export function CharacterChatClient({
     const onPageHide = () => {
       const pid = pananaIdRef.current;
       if (!pid || !isDefaultThread(currentThreadId)) return;
+      const textOnlyMessages = messages.filter((m) => !isVoiceMessage(m));
       // eslint-disable-next-line @typescript-eslint/no-floating-promises
-      persistToDb(pid, messages, { keepalive: true });
+      persistToDb(pid, textOnlyMessages, { keepalive: true });
     };
     window.addEventListener("pagehide", onPageHide);
     return () => window.removeEventListener("pagehide", onPageHide);
@@ -1353,8 +1373,9 @@ export function CharacterChatClient({
     <div className="h-dvh overflow-hidden bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.12),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white flex flex-col">
       <style>{`@keyframes pananaDot{0%,100%{transform:translateY(0);opacity:.55}50%{transform:translateY(-4px);opacity:1}}`}</style>
       <>
-      <header className="sticky top-0 z-20 mx-auto w-full max-w-[420px] shrink-0 bg-[#07070B]/95 px-5 pb-3 pt-3 backdrop-blur-sm">
-        <div className="relative flex h-11 items-center">
+      {/* 키보드 올라와도 헤더가 스크롤되지 않도록 뷰포트 고정 */}
+      <header className="fixed top-0 left-0 right-0 z-20 shrink-0 bg-[#07070B]/95 backdrop-blur-sm pt-[env(safe-area-inset-top)]">
+        <div className="relative flex h-11 items-center mx-auto w-full max-w-[420px] px-5 pb-3 pt-3">
           <Link 
             href={backHref} 
             aria-label="뒤로가기" 
@@ -1424,7 +1445,8 @@ export function CharacterChatClient({
           </button>
         </div>
       </header>
-
+      {/* 헤더 높이만큼 공간 확보(키보드 시에도 본문이 헤더에 가리지 않음) */}
+      <div className="shrink-0" style={{ height: "calc(80px + env(safe-area-inset-top, 0px))" }} aria-hidden />
 
       {!onboardingDismissed ? (
         <div className="mx-auto w-full max-w-[420px] shrink-0 px-5 pt-2">
@@ -1626,15 +1648,12 @@ export function CharacterChatClient({
               }}
               onPhaseChange={setVoicePhase}
               onVoiceModelReady={setCurrentVoiceModelLabel}
-              onUserTranscript={(text) => {
-                setMessages((prev) => [...prev, { id: `u-voice-${Date.now()}`, from: "user", text, at: Date.now() }]);
-              }}
-              onAssistantTranscript={(text) => {
-                setMessages((prev) => [...prev, { id: `b-voice-${Date.now()}`, from: "bot", text, at: Date.now() }]);
-              }}
+              onUserTranscript={() => {}}
+              onAssistantTranscript={() => {}}
               characterAvatarUrl={characterAvatarUrl}
               userAvatarUrl={userAvatarUrl}
               startOnOpen
+              preloadedRingtoneUrl={preloadedVoiceRingtoneUrl}
             />
           ) : null}
           {showNeedAdultVerifyBanner ? (
