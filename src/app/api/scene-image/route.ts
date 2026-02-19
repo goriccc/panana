@@ -140,6 +140,42 @@ async function callGeminiVision(args: {
   return Array.isArray(parts) ? parts.map((p: any) => p?.text).filter(Boolean).join("\n").trim() : "";
 }
 
+async function isFullBodyImage(args: { imageUrl: string; apiKey: string }): Promise<boolean> {
+  let base64: string;
+  let mediaType = "image/jpeg";
+  try {
+    const res = await fetch(args.imageUrl);
+    if (!res.ok) return false;
+    const buf = await res.arrayBuffer();
+    base64 = Buffer.from(buf).toString("base64");
+    const ct = res.headers.get("content-type") || "";
+    if (ct.includes("png")) mediaType = "image/png";
+    else if (ct.includes("webp")) mediaType = "image/webp";
+  } catch {
+    return false;
+  }
+
+  const system = `You are an image framing inspector.
+Determine if the main person is shown as FULL BODY.
+FULL BODY means head to toe is visible in a single frame, including both feet/shoes.
+If legs or feet are cut out, or only upper/half body is shown, it is NOT full body.
+Return strict JSON only: {"isFullBody": true} or {"isFullBody": false}.`;
+  try {
+    const raw = await callGeminiVision({
+      apiKey: args.apiKey,
+      system,
+      text: "Is this a full body shot of the main person (head-to-toe with visible feet/shoes)? Return JSON only.",
+      base64,
+      mimeType: mediaType,
+      maxTokens: 80,
+    });
+    const parsed = JSON.parse(String(raw || "{}")) as { isFullBody?: boolean };
+    return Boolean(parsed?.isFullBody);
+  } catch {
+    return false;
+  }
+}
+
 async function callGeminiText(args: {
   apiKey: string;
   system: string;
@@ -229,6 +265,100 @@ Output one dense paragraph. Start with "Wearing" or "She is wearing" / "He is we
 }
 
 const WORLD_SUMMARY_MAX = 420;
+
+/** 챗봇 응답에서 괄호 지문 추출 (이 턴 장면 묘사). (…) 또는 （…） 한/영 괄호 지원 */
+function extractNarrativeFromMessage(assistantMessage: string): string {
+  if (!assistantMessage || typeof assistantMessage !== "string") return "";
+  const s = assistantMessage.trim();
+  const matches = s.match(/[（(]([^）)]*)[）)]/g);
+  if (!matches || matches.length === 0) return "";
+  const combined = matches
+    .map((m) => m.replace(/^[（(]|[）)]$/g, "").trim())
+    .filter(Boolean)
+    .join(". ");
+  return combined.slice(0, 600);
+}
+
+/** 이 턴만의 차별점 1문장 (영어) — Gemini Flash로 추출, enPrompt 맨 앞에 배치 */
+async function getSceneDifferentiator(
+  userMessage: string,
+  assistantMessage: string,
+  narrativeBlock: string,
+  geminiKey: string
+): Promise<string> {
+  const narrativeHint = narrativeBlock
+    ? `[이번 턴 지문] ${narrativeBlock}\n\n`
+    : "";
+  const system = `You are an expert at summarizing a single scene moment for AI image generation.
+${narrativeHint}[User] ${String(userMessage || "").slice(0, 400)}
+[Assistant] ${String(assistantMessage || "").slice(0, 800)}
+
+Output exactly ONE short English sentence that describes the ONE thing that MUST appear in this scene (action, gesture, location, expression, or key visual). Examples: "She is covering her mouth with her hand, surprised." "In a flower shop, holding a bouquet." "Winking playfully with one eye closed." No preamble. One sentence only.`;
+  try {
+    const raw = await callGeminiText({
+      apiKey: geminiKey,
+      system,
+      userMessage: "Output the one mandatory scene differentiator sentence in English.",
+      maxTokens: 120,
+      model: "gemini-2.5-flash",
+      responseSchema: {
+        type: "object",
+        properties: { differentiator: { type: "string" } },
+        required: ["differentiator"],
+      },
+    });
+    const parsed = JSON.parse(raw || "{}") as { differentiator?: string };
+    const d = String(parsed?.differentiator ?? "").trim();
+    return d ? d.slice(0, 200) : "";
+  } catch {
+    return "";
+  }
+}
+
+/** 매 요청마다 다른 각도/쇼트 — 다양성 확보 */
+const RANDOM_ANGLE_SHOT = [
+  "3/4 view, slight side angle",
+  "over the shoulder angle",
+  "medium shot from the left",
+  "medium shot from the right",
+  "looking slightly away from camera",
+  "slight low angle, medium shot",
+  "candid angle, not centered",
+];
+
+const RANDOM_ANGLE_SHOT_FULL_BODY = [
+  "full body shot, 3/4 view",
+  "extreme wide shot, full body in frame",
+  "full body shot from slight side angle",
+  "head-to-toe standing pose, slight low angle",
+  "full body candid angle, not centered",
+];
+
+const FULL_BODY_REQUEST_REGEX =
+  /(전신\s*(사진|샷)?|머리부터\s*발끝|발끝까지|온몸|full[\s-]*body|head[\s-]*to[\s-]*toe|visible\s*(feet|shoes))/i;
+
+function wantsFullBodyScene(args: {
+  userMessage?: string;
+  assistantMessage?: string;
+  narrativeBlock?: string;
+  recentContext?: { role: "user" | "assistant"; content: string }[];
+}): boolean {
+  const source = [
+    String(args.userMessage || ""),
+    String(args.assistantMessage || ""),
+    String(args.narrativeBlock || ""),
+    ...((args.recentContext || []).slice(-4).map((m) => String(m?.content || ""))),
+  ]
+    .join(" ")
+    .trim();
+  if (!source) return false;
+  return FULL_BODY_REQUEST_REGEX.test(source);
+}
+
+function pickRandomAngleShot(forceFullBody = false): string {
+  const pool = forceFullBody ? RANDOM_ANGLE_SHOT_FULL_BODY : RANDOM_ANGLE_SHOT;
+  return pool[Math.floor(Math.random() * pool.length)] ?? pool[0];
+}
 
 async function getCharacterData(slug: string): Promise<{
   profileImageUrl: string | null;
@@ -336,8 +466,13 @@ async function messageToEnPrompt(
     roleOrSetting?: string;
     worldSummary?: string;
     recentContext?: { role: string; content: string }[];
+    /** 이 턴 괄호 지문 — enPrompt에 최우선 반영 */
+    narrativeBlock?: string;
   }
 ): Promise<string> {
+  const narrativeHint =
+    opts.narrativeBlock &&
+    `\n[이번 턴 지문 (필수 반영 - 장면·장소·액션·분위기를 여기서 최우선 추출)]\n${String(opts.narrativeBlock).slice(0, 600)}`;
   const appearanceHint = opts.appearance
     ? `\n[캐릭터 고정 정보 - 반드시 100% 유지] ${String(opts.appearance).slice(0, 500)}`
     : "";
@@ -357,6 +492,7 @@ async function messageToEnPrompt(
           .join("\n")
       : "";
   const system = `당신은 대화 장면을 Flux 이미지 생성용 영어 프롬프트로 변환합니다.
+${narrativeHint || ""}
 [유저] ${String(userMessage || "").slice(0, 500)}
 [챗봇] ${String(assistantMessage || "").slice(0, 1500)}${appearanceHint}${roleHint || ""}${worldHint || ""}${ctxLines}
 
@@ -417,14 +553,34 @@ enPrompt는 100단어 이상으로 상세히. 다음 JSON만 출력: {"enPrompt"
   return prompt;
 }
 
+/** 요청마다 다른 seed로 다양성 확보 (같은 프롬프트도 다른 결과) */
+function getRandomSeed(pananaId: string): number {
+  const mix = `${pananaId}-${Date.now()}-${Math.random()}`;
+  let h = 0;
+  for (let i = 0; i < mix.length; i++) h = (Math.imul(31, h) + mix.charCodeAt(i)) | 0;
+  return Math.abs(h) % 2147483647;
+}
+
+const FAL_NEGATIVE_PROMPT_BASE =
+  "passport photo, id photo, frontal portrait only, same pose, repetitive, illustration, cartoon, anime, drawing, painting, digital art, 3d render, cgi, stylized, artistic, comic, manga, bad quality, worst quality, text, signature, watermark, extra limbs, deformed, blurry, different outfit, changed clothes, different dress, different top, different shirt, different uniform, different hair, different hairstyle, different hair color, different colors, color change, suit, jacket, blazer, shirt, polo, wearing different";
+const FAL_NEGATIVE_PROMPT_DIVERSITY =
+  ", same pose as reference, same background, repeated composition, identical to previous";
+
 async function callFalFluxPulid(
   referenceImageUrl: string,
   prompt: string,
-  steps: number
+  steps: number,
+  pananaId: string,
+  opts?: {
+    extraNegative?: string;
+    idWeight?: number;
+    imageSize?: { width: number; height: number };
+  }
 ): Promise<string | null> {
   const falKey = process.env.FAL_KEY || process.env.FAL_KEY_ID;
   if (!falKey) throw new Error("Missing FAL_KEY");
   const numSteps = Math.max(8, Math.min(20, Math.round(steps)));
+  const seed = getRandomSeed(pananaId);
   const res = await fetch("https://fal.run/fal-ai/flux-pulid", {
     method: "POST",
     headers: {
@@ -434,11 +590,18 @@ async function callFalFluxPulid(
     body: JSON.stringify({
       prompt,
       reference_image_url: referenceImageUrl,
-      image_size: { width: 1024, height: 768 },
+      image_size: opts?.imageSize || { width: 1024, height: 768 },
       num_inference_steps: numSteps,
+      seed,
+      id_weight:
+        typeof opts?.idWeight === "number"
+          ? Math.max(0.6, Math.min(1.0, Number(opts.idWeight)))
+          : 0.85,
       max_sequence_length: "256",
       negative_prompt:
-        "passport photo, id photo, frontal portrait only, same pose, repetitive, illustration, cartoon, anime, drawing, painting, digital art, 3d render, cgi, stylized, artistic, comic, manga, bad quality, worst quality, text, signature, watermark, extra limbs, deformed, blurry, different outfit, changed clothes, different dress, different top, different shirt, different uniform, different hair, different hairstyle, different hair color, different colors, color change, suit, jacket, blazer, shirt, polo, wearing different",
+        FAL_NEGATIVE_PROMPT_BASE +
+        FAL_NEGATIVE_PROMPT_DIVERSITY +
+        (opts?.extraNegative ? `, ${opts.extraNegative}` : ""),
     }),
   });
   if (!res.ok) {
@@ -541,6 +704,9 @@ export async function POST(req: Request) {
         : visionAppearance
       : characterData.appearance;
 
+    const narrativeBlock = extractNarrativeFromMessage(String(assistantMessage ?? ""));
+    const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY;
+
     let resolvedPrompt = String(enPrompt || "").trim();
     if (!resolvedPrompt && userMessage != null && assistantMessage != null) {
       resolvedPrompt = await messageToEnPrompt(String(userMessage), String(assistantMessage), {
@@ -549,6 +715,7 @@ export async function POST(req: Request) {
         roleOrSetting: characterData.roleOrSetting || undefined,
         worldSummary: characterData.worldSummary || undefined,
         recentContext: recentContext?.filter((m) => m?.role && m?.content),
+        narrativeBlock: narrativeBlock || undefined,
       });
     }
     if (!resolvedPrompt) {
@@ -570,16 +737,75 @@ export async function POST(req: Request) {
       );
     }
 
+    let differentiator = "";
+    if (geminiKey && userMessage != null && assistantMessage != null) {
+      try {
+        differentiator = await getSceneDifferentiator(
+          String(userMessage),
+          String(assistantMessage),
+          narrativeBlock,
+          geminiKey
+        );
+      } catch (e) {
+        console.warn("[scene-image] getSceneDifferentiator:", (e as Error)?.message);
+      }
+    }
+
+    const forceFullBody = wantsFullBodyScene({
+      userMessage,
+      assistantMessage,
+      narrativeBlock,
+      recentContext,
+    });
+    const randomAngleShot = pickRandomAngleShot(forceFullBody);
+    const variableBlock = [differentiator, randomAngleShot, resolvedPrompt].filter(Boolean).join(". ");
     const stylePrefix = "Photorealistic, realistic photograph, 8k photo, real person, natural lighting. ";
+    const qualitySuffix = " Detailed, sharp, high quality.";
     const accessoryRule = "Accessories (brooch, scarf, pin, name tag, etc.): keep exactly as in reference; do not add any accessory not in the reference image. ";
-    const finalPrompt = appearance
-      ? `${stylePrefix}Same exact outfit, same colors, same hairstyle as reference. ${accessoryRule}${appearance}. [Scene and pose - do not change outfit, colors, or add/remove accessories] ${resolvedPrompt}`
-      : `${stylePrefix}${resolvedPrompt}`;
-    const falUrl = await callFalFluxPulid(
+    const fullBodyBlock = forceFullBody
+      ? "(Extreme wide shot), (Full body shot:1.6), head-to-toe framing, visible feet, visible shoes, entire body fully inside frame, clear space above head and below feet, camera pulled back, no body crop."
+      : "";
+    const fixedBlock = appearance
+      ? `${stylePrefix}Same exact outfit, same colors, same hairstyle as reference. ${accessoryRule}${appearance}. ${fullBodyBlock} [Scene and pose - do not change outfit, colors, or add/remove accessories] `
+      : stylePrefix;
+    const finalPrompt = fixedBlock + variableBlock + qualitySuffix;
+    const fullBodyOpts = forceFullBody
+      ? {
+          idWeight: 0.74,
+          imageSize: { width: 768, height: 1152 },
+          extraNegative:
+            "close up, portrait, selfie closeup, cropped, bust shot, upper body only, half body, torso shot, cropped feet, feet out of frame, head cut off, body cut off, seated portrait, waist-up",
+        }
+      : undefined;
+
+    let falUrl = await callFalFluxPulid(
       characterData.profileImageUrl,
       finalPrompt,
-      settings.steps
+      settings.steps,
+      pananaId,
+      fullBodyOpts
     );
+    // 전신 요청인데 상반신으로 생성되면, 더 강한 구도 제약으로 1회 자동 재시도
+    if (forceFullBody && falUrl && geminiKey) {
+      const fullBodyOk = await isFullBodyImage({ imageUrl: falUrl, apiKey: geminiKey });
+      if (!fullBodyOk) {
+        const retryPrompt =
+          `${finalPrompt} ` +
+          "(MUST full body) head-to-toe standing pose, both feet and shoes clearly visible, full legs visible, camera much farther away, subject fully inside frame with margin above head and below feet, not cropped at any body part.";
+        falUrl = await callFalFluxPulid(
+          characterData.profileImageUrl,
+          retryPrompt,
+          settings.steps,
+          pananaId,
+          {
+            idWeight: 0.68,
+            imageSize: { width: 768, height: 1280 },
+            extraNegative:
+              "close up, portrait, selfie closeup, cropped, bust shot, upper body only, half body, torso shot, cropped feet, feet out of frame, head cut off, body cut off, seated portrait, waist-up, knee-up shot, medium shot",
+          }
+        );
+      }
+    }
     if (!falUrl) {
       return NextResponse.json({ ok: false, error: "이미지 생성에 실패했어요." }, { status: 500 });
     }

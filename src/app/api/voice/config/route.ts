@@ -45,15 +45,25 @@ export async function GET() {
       .maybeSingle();
 
     if (error) throw error;
+    const fallback = {
+      voice_style_female: "warm",
+      voice_style_male: "calm",
+      voice_name_female: "Aoede",
+      voice_name_male: "Fenrir",
+      base_model: "gemini-2.5-flash-native-audio-preview-12-2025",
+      ringtone_url: null as string | null,
+      hangup_sound_url: null as string | null,
+    };
     return NextResponse.json({
       ok: true,
-      data: data ?? {
-        voice_style_female: "warm",
-        voice_style_male: "calm",
-        voice_name_female: "Aoede",
-        voice_name_male: "Fenrir",
-        base_model: "gemini-2.5-flash-native-audio-preview-12-2025",
-      },
+      data: data
+        ? {
+            ...fallback,
+            ...data,
+            ringtone_url: (data as any).ringtone_url ?? null,
+            hangup_sound_url: (data as any).hangup_sound_url ?? null,
+          }
+        : fallback,
     });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Unknown error";
@@ -100,6 +110,10 @@ export async function POST(req: NextRequest) {
     if (typeof body.voice_name_female === "string") updateData.voice_name_female = body.voice_name_female;
     if (typeof body.voice_name_male === "string") updateData.voice_name_male = body.voice_name_male;
     if (typeof body.base_model === "string") updateData.base_model = body.base_model;
+    if (typeof body.ringtone_url === "string" || body.ringtone_url === null) updateData.ringtone_url = body.ringtone_url;
+    if (typeof body.hangup_sound_url === "string" || body.hangup_sound_url === null) {
+      updateData.hangup_sound_url = body.hangup_sound_url;
+    }
 
     const { data: existing } = await sb
       .from("panana_voice_config")
@@ -109,36 +123,37 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     if (existing?.id) {
-      const { data, error } = await sb
-        .from("panana_voice_config")
-        .update(updateData)
-        .eq("id", existing.id)
-        .select("*")
-        .limit(1)
-        .single();
-
-      if (error) throw error;
-      return NextResponse.json({ ok: true, data });
+      const doUpdate = async (payload: Record<string, unknown>) =>
+        await sb.from("panana_voice_config").update(payload).eq("id", existing.id).select("*").limit(1).single();
+      let updated = await doUpdate(updateData);
+      if (updated.error && /hangup_sound_url/i.test(String((updated.error as any)?.message || ""))) {
+        const fallbackPayload = { ...updateData };
+        delete fallbackPayload.hangup_sound_url;
+        updated = await doUpdate(fallbackPayload);
+      }
+      if (updated.error) throw updated.error;
+      return NextResponse.json({ ok: true, data: updated.data });
     }
 
-    const { data, error } = await sb
-      .from("panana_voice_config")
-      .insert({
-        voice_gender: "female",
-        voice_style: "warm",
-        voice_style_female: updateData.voice_style_female ?? "warm",
-        voice_style_male: updateData.voice_style_male ?? "calm",
-        voice_name_female: updateData.voice_name_female ?? "Aoede",
-        voice_name_male: updateData.voice_name_male ?? "Fenrir",
-        base_model: updateData.base_model ?? "gemini-2.5-flash-native-audio-preview-12-2025",
-        updated_at: updateData.updated_at,
-      })
-      .select("*")
-      .limit(1)
-      .single();
+    const makeInsertPayload = (includeHangup: boolean) => ({
+      voice_gender: "female",
+      voice_style: "warm",
+      voice_style_female: updateData.voice_style_female ?? "warm",
+      voice_style_male: updateData.voice_style_male ?? "calm",
+      voice_name_female: updateData.voice_name_female ?? "Aoede",
+      voice_name_male: updateData.voice_name_male ?? "Fenrir",
+      base_model: updateData.base_model ?? "gemini-2.5-flash-native-audio-preview-12-2025",
+      ringtone_url: updateData.ringtone_url ?? null,
+      ...(includeHangup ? { hangup_sound_url: updateData.hangup_sound_url ?? null } : {}),
+      updated_at: updateData.updated_at,
+    });
 
-    if (error) throw error;
-    return NextResponse.json({ ok: true, data });
+    let inserted = await sb.from("panana_voice_config").insert(makeInsertPayload(true)).select("*").limit(1).single();
+    if (inserted.error && /hangup_sound_url/i.test(String((inserted.error as any)?.message || ""))) {
+      inserted = await sb.from("panana_voice_config").insert(makeInsertPayload(false)).select("*").limit(1).single();
+    }
+    if (inserted.error) throw inserted.error;
+    return NextResponse.json({ ok: true, data: inserted.data });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Unknown error";
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });

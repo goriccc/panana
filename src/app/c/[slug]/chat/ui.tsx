@@ -211,19 +211,6 @@ function Bubble({
           {sceneImageError ? (
             <div className="text-[11px] font-semibold text-[#ff9aa1]">{sceneImageError}</div>
           ) : null}
-          {onGenerateImage && !sceneImageUrl && sceneImageQuota && sceneImageQuota.remaining > 0 ? (
-            <button
-              type="button"
-              onClick={() => onGenerateImage(prevUserMsg || "", text)}
-              className="inline-flex w-fit items-center gap-1.5 rounded-full border border-panana-pink/40 bg-panana-pink/15 px-3 py-1.5 text-[11px] font-extrabold text-panana-pink transition hover:bg-panana-pink/25"
-              aria-label="장면 이미지 생성"
-            >
-              <span className="font-bold">
-                {sceneImageQuota.remaining}/{sceneImageQuota.dailyLimit}
-              </span>
-              이미지생성
-            </button>
-          ) : null}
         </div>
       </div>
       {sceneImageLoading ? (
@@ -415,6 +402,7 @@ export function CharacterChatClient({
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [composerHeight, setComposerHeight] = useState(64);
   const [voiceModalOpen, setVoiceModalOpen] = useState(false);
+  const [voicePhase, setVoicePhase] = useState<"idle" | "ringing" | "connected">("idle");
   const [currentModelLabel, setCurrentModelLabel] = useState<string | null>(null);
   const [currentVoiceModelLabel, setCurrentVoiceModelLabel] = useState<string | null>(null);
   const { data: session } = useSession();
@@ -711,7 +699,7 @@ export function CharacterChatClient({
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) throw new Error(data?.error || `LLM error (${res.status})`);
       if (hasSentRef.current) return;
-      if (data?.provider != null && data?.model != null) {
+      if (data?.provider != null && data?.model != null && String(data.model).toLowerCase() !== "auto") {
         const p = String(data.provider).toLowerCase();
         const providerLabel = p === "anthropic" ? "Claude" : p === "gemini" ? "Gemini" : p === "deepseek" ? "DeepSeek" : data.provider;
         setCurrentModelLabel(`${providerLabel} · ${String(data.model)}`);
@@ -1059,6 +1047,41 @@ export function CharacterChatClient({
     return { script: null, text };
   };
 
+  /** 사진/셀카 요청 가능성 있는지 (이 키워드 있을 때만 분류 API 호출) */
+  const mightBePhotoRequest = (msg: string): boolean => {
+    const s = (msg || "").trim();
+    if (!s) return false;
+    return /사진|셀카|찍어|보내/.test(s);
+  };
+
+  /** 서버와 동일한 패턴: 명확한 "사진/셀카 보내" 요청 (API 실패 시 클라이언트 폴백용) */
+  const isClearPhotoRequest = (msg: string): boolean => {
+    const s = (msg || "").trim();
+    if (!s) return false;
+    const explicitRequest =
+      /(?:사진|셀카|셀피|selfie|photo|pic)[^.!?\n]{0,24}?(?:찍(?:어|어서)?\s*)?(?:보내(?:줘|주라|주세요|줘요|줄래)?|전송(?:해|해줘|해주세요)?)(?:\s*줘)?|(?:보내(?:줘|주라|주세요|줘요|줄래)?|전송(?:해|해줘|해주세요)?)[^.!?\n]{0,24}?(?:사진|셀카|셀피|selfie|photo|pic)/i;
+    const shortNaturalRequest = /^(?:셀카|사진)\s*(?:좀|하나|한\s*장|한장)?\s*(?:만)?\s*$/i;
+    return explicitRequest.test(s) || shortNaturalRequest.test(s);
+  };
+
+  /** "사진/셀카 찍어서 보내달라" 의미인지 판별 (API + 실패 시 클라이언트 폴백) */
+  const classifyPhotoRequest = async (userMessage: string): Promise<boolean> => {
+    if (!mightBePhotoRequest(userMessage)) return false;
+    if (isClearPhotoRequest(userMessage)) return true;
+    try {
+      const res = await fetch("/api/classify-photo-request", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ message: userMessage }),
+      });
+      const d = await res.json().catch(() => ({}));
+      const apiResult = Boolean(d?.isPhotoRequest);
+      return apiResult || isClearPhotoRequest(userMessage);
+    } catch {
+      return isClearPhotoRequest(userMessage);
+    }
+  };
+
   // 공통: 메시지 목록(마지막이 유저 메시지)으로 LLM 요청 후 봇 응답 반영. 재시도 시 사용.
   const requestChat = async (messagesIncludingLastUser: Msg[], userScript: string | null) => {
     const history = messagesIncludingLastUser.filter((m) => m.from !== "system");
@@ -1129,7 +1152,7 @@ export function CharacterChatClient({
       if (!res.ok || !data?.ok) {
         throw new Error(data?.error || `LLM error (${res.status})`);
       }
-      if (data?.provider != null && data?.model != null) {
+      if (data?.provider != null && data?.model != null && String(data.model).toLowerCase() !== "auto") {
         const p = String(data.provider).toLowerCase();
         const providerLabel = p === "anthropic" ? "Claude" : p === "gemini" ? "Gemini" : p === "deepseek" ? "DeepSeek" : data.provider;
         setCurrentModelLabel(`${providerLabel} · ${String(data.model)}`);
@@ -1162,8 +1185,82 @@ export function CharacterChatClient({
 
       const reply = String(data.text || "").trim() || "…";
       resetTyping();
-      setMessages((prev) => [...prev, { id: `b-${Date.now()}`, from: "bot", text: reply, at: Date.now() }]);
+      const botId = `b-${Date.now()}`;
+      const newBotMsg: Msg = { id: botId, from: "bot", text: reply, at: Date.now() };
+      setMessages((prev) => [...prev, newBotMsg]);
       if (data.needAdultVerify) setShowNeedAdultVerifyBanner(true);
+
+      if (characterAvatarUrl) {
+        const isPhotoRequest =
+          isClearPhotoRequest(text) || (await classifyPhotoRequest(text));
+        if (isPhotoRequest) {
+          setMessages((prev) =>
+            prev.map((x) =>
+              x.id === botId ? { ...x, sceneImageLoading: true } : x
+            )
+          );
+          const pid = pananaIdRef.current || getPananaId();
+          if (!pid) {
+            setMessages((prev) =>
+              prev.map((x) =>
+                x.id === botId
+                  ? { ...x, sceneImageLoading: false, sceneImageError: "이미지를 생성하려면 로그인이 필요해요." }
+                  : x
+              )
+            );
+          } else {
+            const upToCurrent = [...messagesIncludingLastUser, { ...newBotMsg, text: reply }];
+            const recentContext = upToCurrent
+              .filter((x) => x.from === "user" || x.from === "bot")
+              .slice(-8)
+              .map((x) => ({
+                role: (x.from === "user" ? "user" : "assistant") as "user" | "assistant",
+                content: x.text || "",
+              }));
+            fetch("/api/scene-image", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                pananaId: pid,
+                characterSlug,
+                userMessage: text,
+                assistantMessage: reply,
+                recentContext,
+              }),
+            })
+              .then(async (r) => {
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok || !d?.ok) throw new Error(String(d?.error || `서버 오류 (${r.status})`));
+                return d;
+              })
+              .then((d) => {
+                setMessages((prev) =>
+                  prev.map((x) =>
+                    x.id === botId
+                      ? { ...x, sceneImageUrl: d.url, sceneImageLoading: false, sceneImageError: undefined }
+                      : x
+                  )
+                );
+                if (typeof d?.quotaRemaining === "number" && typeof d?.dailyLimit === "number") {
+                  setSceneImageQuota({ remaining: d.quotaRemaining, dailyLimit: d.dailyLimit });
+                }
+              })
+              .catch((e) => {
+                setMessages((prev) =>
+                  prev.map((x) =>
+                    x.id === botId
+                      ? {
+                          ...x,
+                          sceneImageLoading: false,
+                          sceneImageError: e?.message || "이미지 생성에 실패했어요.",
+                        }
+                      : x
+                  )
+                );
+              });
+          }
+        }
+      }
 
       const next: ChatRuntimeState | null =
         data?.runtime?.chat
@@ -1292,7 +1389,7 @@ export function CharacterChatClient({
                 </span>
               ) : null;
             })()}
-            {currentModelLabel ? (
+            {currentModelLabel && !currentModelLabel.toLowerCase().includes("auto") ? (
               <span className="text-[11px] text-white/40 mt-0.5" aria-hidden>
                 {currentModelLabel}
               </span>
@@ -1309,11 +1406,21 @@ export function CharacterChatClient({
             className="absolute right-0 p-2 text-white/70 hover:text-panana-pink transition"
             aria-label="음성 대화"
           >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-              <line x1="12" y1="19" x2="12" y2="22" />
-            </svg>
+            <style
+              dangerouslySetInnerHTML={{
+                __html: `@keyframes voice-ring-shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-4px)}40%{transform:translateX(4px)}60%{transform:translateX(-2px)}80%{transform:translateX(2px)}}`,
+              }}
+            />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/call_start.png"
+              alt=""
+              width={36}
+              height={36}
+              className="h-9 w-9 object-contain"
+              style={voiceModalOpen && voicePhase === "ringing" ? { animation: "voice-ring-shake 0.5s ease-in-out infinite" } : undefined}
+              aria-hidden
+            />
           </button>
         </div>
       </header>
@@ -1514,8 +1621,10 @@ export function CharacterChatClient({
               callSign={userName}
               onClose={() => {
                 setVoiceModalOpen(false);
+                setVoicePhase("idle");
                 setCurrentVoiceModelLabel(null);
               }}
+              onPhaseChange={setVoicePhase}
               onVoiceModelReady={setCurrentVoiceModelLabel}
               onUserTranscript={(text) => {
                 setMessages((prev) => [...prev, { id: `u-voice-${Date.now()}`, from: "user", text, at: Date.now() }]);

@@ -1,12 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AudioRecorder } from "@/lib/voice/genai-live/audio-recorder";
 import { AudioStreamer } from "@/lib/voice/genai-live/audio-streamer";
 import { audioContext, base64ToArrayBuffer } from "@/lib/voice/genai-live/utils";
 import VolMeterWorklet from "@/lib/voice/genai-live/worklets/vol-meter";
 
 const LIVE_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025";
+
+/** 통화 시간 MM:SS */
+function formatCallDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+}
 const MAX_RECONNECT_ATTEMPTS = 5;
 
 function isIOSDevice(): boolean {
@@ -51,6 +59,12 @@ function stripNarration(text: string): string {
     .trim();
 }
 
+function defaultHangupSoundUrlFromSupabase(): string | null {
+  const base = String(process.env.NEXT_PUBLIC_SUPABASE_URL || "").trim();
+  if (!base) return null;
+  return `${base}/storage/v1/object/public/panana-characters/voice/hangup.mp3`;
+}
+
 export function VoiceSessionClient({
   characterSlug,
   characterName,
@@ -61,6 +75,7 @@ export function VoiceSessionClient({
   onVoiceModelReady,
   characterAvatarUrl,
   userAvatarUrl,
+  onPhaseChange,
 }: {
   characterSlug: string;
   characterName: string;
@@ -72,14 +87,32 @@ export function VoiceSessionClient({
   onVoiceModelReady?: (modelLabel: string) => void;
   characterAvatarUrl?: string;
   userAvatarUrl?: string;
+  /** 링 중일 때 부모(헤더 아이콘)에서 흔들림 등 표시용 */
+  onPhaseChange?: (phase: "idle" | "ringing" | "connected") => void;
 }) {
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reconnectGaveUp, setReconnectGaveUp] = useState(false);
   const [inVolume, setInVolume] = useState(0);
   const [outVolume, setOutVolume] = useState(0);
+  const inVolumeRef = useRef(0);
+  const outVolumeRef = useRef(0);
+  inVolumeRef.current = inVolume;
+  outVolumeRef.current = outVolume;
+  const [displayVolume, setDisplayVolume] = useState({ in: 0, out: 0 });
   /** 마이크 민감도 0.5(낮음) ~ 2(높음). 음성 시작 후에도 변경 가능. */
   const [micSensitivity, setMicSensitivity] = useState(1);
+  /** 'ringing' = 링 재생 중(전화 걸기), 'connected' = 통화 중 풀스크린 */
+  const [phase, setPhase] = useState<"idle" | "ringing" | "connected">("idle");
+  const [ringtoneUrl, setRingtoneUrl] = useState<string | null>(null);
+  const [hangupSoundUrl, setHangupSoundUrl] = useState<string | null>(null);
+  const [closingWithHangupSound, setClosingWithHangupSound] = useState(false);
+  const [callDurationSec, setCallDurationSec] = useState(0);
+  const [started, setStarted] = useState(false);
+  const ringAudioRef = useRef<HTMLAudioElement | null>(null);
+  const hangupAudioRef = useRef<HTMLAudioElement | null>(null);
+  const hangupPreloadAudioRef = useRef<HTMLAudioElement | null>(null);
+  const callDurationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const recorderRef = useRef<AudioRecorder | null>(null);
   const streamerRef = useRef<AudioStreamer | null>(null);
@@ -98,6 +131,125 @@ export function VoiceSessionClient({
   const userDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** iOS: 사용자 탭 직후(await 전)에 마이크 권한 요청을 시작해 한 번만 컨펌받고 저장되도록 함 */
   const iosMicStreamPromiseRef = useRef<Promise<MediaStream> | null>(null);
+  const ringEndedRef = useRef(false);
+
+  useEffect(() => {
+    onPhaseChange?.(phase);
+  }, [phase, onPhaseChange]);
+
+  const VOLUME_THROTTLE_MS = 50;
+  const VOLUME_SMOOTHING = 0.38;
+  useEffect(() => {
+    if (phase !== "connected" || !started) return;
+    const t = setInterval(() => {
+      setDisplayVolume((prev) => ({
+        in: prev.in + (inVolumeRef.current - prev.in) * VOLUME_SMOOTHING,
+        out: prev.out + (outVolumeRef.current - prev.out) * VOLUME_SMOOTHING,
+      }));
+    }, VOLUME_THROTTLE_MS);
+    return () => clearInterval(t);
+  }, [phase, started]);
+
+  const [shouldAutoStart, setShouldAutoStart] = useState(false);
+
+  // 링톤 URL 로드 (모달 열릴 때). 링톤 없으면 자동으로 통화 시작해 "음성 통화를 시작할까요?" 화면 스킵
+  useEffect(() => {
+    fetch("/api/voice/config")
+      .then((r) => r.json())
+      .then((d) => {
+        const cfg = (d?.data as any) || {};
+        const url = cfg?.ringtone_url;
+        const hangupUrl = cfg?.hangup_sound_url;
+        if (hangupUrl && typeof hangupUrl === "string" && hangupUrl.trim()) {
+          const normalized = hangupUrl.trim();
+          setHangupSoundUrl(normalized);
+          const pre = new Audio(normalized);
+          pre.preload = "auto";
+          pre.crossOrigin = "anonymous";
+          pre.playsInline = true;
+          pre.load();
+          hangupPreloadAudioRef.current = pre;
+        }
+        if (url && typeof url === "string" && url.trim()) {
+          setRingtoneUrl(url.trim());
+          setPhase("ringing");
+        } else {
+          setShouldAutoStart(true);
+        }
+      })
+      .catch(() => setShouldAutoStart(true));
+    return () => {
+      if (hangupPreloadAudioRef.current) {
+        hangupPreloadAudioRef.current.pause();
+        hangupPreloadAudioRef.current = null;
+      }
+    };
+  }, []);
+
+  const RING_EARLY_MS = 1200;
+
+  // 링 재생 + (종료 1200ms 전) 전화 연결 화면 전환
+  useEffect(() => {
+    if (phase !== "ringing" || !ringtoneUrl) return;
+    const audio = new Audio(ringtoneUrl);
+    ringAudioRef.current = audio;
+    let earlyTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const switchToConnected = () => {
+      ringEndedRef.current = true;
+      setPhase("connected");
+      ringAudioRef.current = null;
+    };
+
+    const onEnded = () => {
+      switchToConnected();
+    };
+
+    const scheduleEarlySwitch = () => {
+      const durationMs = Number.isFinite(audio.duration) ? audio.duration * 1000 : 0;
+      const delay = durationMs > RING_EARLY_MS ? durationMs - RING_EARLY_MS : 0;
+      if (delay > 0) {
+        earlyTimer = setTimeout(() => {
+          earlyTimer = null;
+          switchToConnected();
+        }, delay);
+      }
+    };
+
+    audio.addEventListener("ended", onEnded);
+    audio.addEventListener("loadedmetadata", scheduleEarlySwitch);
+    if (audio.readyState >= 1) scheduleEarlySwitch();
+    audio.play().catch(() => onEnded());
+
+    return () => {
+      audio.removeEventListener("ended", onEnded);
+      audio.removeEventListener("loadedmetadata", scheduleEarlySwitch);
+      if (earlyTimer) clearTimeout(earlyTimer);
+      ringAudioRef.current = null;
+    };
+  }, [phase, ringtoneUrl]);
+
+  // 통화 시간 타이머 (started && connected)
+  useEffect(() => {
+    if (!started) {
+      if (callDurationTimerRef.current) {
+        clearInterval(callDurationTimerRef.current);
+        callDurationTimerRef.current = null;
+      }
+      setCallDurationSec(0);
+      return;
+    }
+    setPhase("connected");
+    callDurationTimerRef.current = setInterval(() => {
+      setCallDurationSec((s) => s + 1);
+    }, 1000);
+    return () => {
+      if (callDurationTimerRef.current) {
+        clearInterval(callDurationTimerRef.current);
+        callDurationTimerRef.current = null;
+      }
+    };
+  }, [started]);
   /** iOS 17 등: 첫 오디오 수신 시 suspend→resume 워크어라운드 1회만 수행 */
   const iosContextWorkaroundDoneRef = useRef(false);
   /** iOS: 사용자 제스처와 같은 틱에 생성한 녹음용 AudioContext (Safari 요구사항) */
@@ -385,8 +537,6 @@ export function VoiceSessionClient({
     };
   }, [clearReconnectTimer]);
 
-  const [started, setStarted] = useState(false);
-
   useEffect(() => {
     startedRef.current = started;
   }, [started]);
@@ -419,6 +569,7 @@ export function VoiceSessionClient({
   }, [ensurePlaybackResumed]);
 
   const startVoice = useCallback(async () => {
+    setPhase("connected");
     if (isIOSDevice()) {
       if (!iosRecorderContextRef.current) {
         iosRecorderContextRef.current = new AudioContext({ sampleRate: 16000 });
@@ -498,7 +649,23 @@ export function VoiceSessionClient({
     setStarted(true);
   }, [clearReconnectTimer, connect, ensurePlaybackResumed, micSensitivity]);
 
-  const stopVoice = useCallback(() => {
+  // 링 종료 후 자동으로 통화 시작
+  useEffect(() => {
+    if (phase !== "connected" || started || !ringEndedRef.current) return;
+    ringEndedRef.current = false;
+    void startVoice();
+  }, [phase, started, startVoice]);
+
+  // 링톤 없을 때 자동 통화 시작 ("음성 통화를 시작할까요?" 화면 스킵)
+  useEffect(() => {
+    if (!shouldAutoStart || phase !== "idle") return;
+    setShouldAutoStart(false);
+    void startVoice();
+  }, [shouldAutoStart, phase, startVoice]);
+
+  const stopVoiceCore = useCallback((opts?: { closeUi?: boolean; setIdle?: boolean }) => {
+    const closeUi = opts?.closeUi !== false;
+    const setIdle = opts?.setIdle !== false;
     userStoppedRef.current = true;
     reconnectAttemptRef.current = 0;
     iosContextWorkaroundDoneRef.current = false;
@@ -514,8 +681,94 @@ export function VoiceSessionClient({
     wsRef.current?.close();
     setConnected(false);
     setStarted(false);
+    if (setIdle) setPhase("idle");
     initSentRef.current = false;
-  }, [clearReconnectTimer, flushAssistant, flushUser]);
+    if (closeUi) onClose();
+  }, [clearReconnectTimer, flushAssistant, flushUser, onClose]);
+
+  const stopVoice = useCallback(() => {
+    stopVoiceCore();
+  }, [stopVoiceCore]);
+
+  const resolveHangupSoundUrl = useCallback(async (): Promise<string | null> => {
+    if (hangupSoundUrl && hangupSoundUrl.trim()) return hangupSoundUrl.trim();
+    try {
+      const res = await fetch("/api/voice/config");
+      const data = await res.json().catch(() => ({}));
+      const url = String((data?.data as any)?.hangup_sound_url || "").trim();
+      if (url) {
+        setHangupSoundUrl(url);
+        return url;
+      }
+    } catch {
+      // ignore
+    }
+    return defaultHangupSoundUrlFromSupabase();
+  }, [hangupSoundUrl]);
+
+  const handleHangupClick = useCallback(async () => {
+    const resolvedUrl = await resolveHangupSoundUrl();
+    if (resolvedUrl) {
+      setClosingWithHangupSound(true);
+      stopVoiceCore({ closeUi: false, setIdle: false });
+      try {
+        const audio = hangupPreloadAudioRef.current || new Audio(resolvedUrl);
+        audio.preload = "auto";
+        audio.crossOrigin = "anonymous";
+        audio.playsInline = true;
+        audio.currentTime = 0;
+        audio.volume = 1;
+        hangupAudioRef.current = audio;
+        let done = false;
+        const finish = () => {
+          if (done) return;
+          done = true;
+          audio.onended = null;
+          audio.onerror = null;
+          hangupAudioRef.current = null;
+          setClosingWithHangupSound(false);
+          setPhase("idle");
+          onClose();
+        };
+        const fallbackTimer = window.setTimeout(finish, 4500);
+        audio.onended = () => {
+          window.clearTimeout(fallbackTimer);
+          finish();
+        };
+        audio.onerror = () => {
+          window.clearTimeout(fallbackTimer);
+          finish();
+        };
+        void audio.play().catch(() => {
+          // 1차 재생 실패 시 캐시버스터 URL로 1회 재시도
+          const retry = new Audio(`${resolvedUrl}${resolvedUrl.includes("?") ? "&" : "?"}t=${Date.now()}`);
+          retry.preload = "auto";
+          retry.crossOrigin = "anonymous";
+          retry.playsInline = true;
+          retry.volume = 1;
+          hangupAudioRef.current = retry;
+          retry.onended = () => {
+            window.clearTimeout(fallbackTimer);
+            finish();
+          };
+          retry.onerror = () => {
+            window.clearTimeout(fallbackTimer);
+            finish();
+          };
+          void retry.play().catch(() => {
+            window.clearTimeout(fallbackTimer);
+            finish();
+          });
+        });
+      } catch {
+        setClosingWithHangupSound(false);
+        setPhase("idle");
+        onClose();
+      }
+      return;
+    }
+    stopVoice();
+  }, [onClose, resolveHangupSoundUrl, stopVoice, stopVoiceCore]);
 
   const retryConnect = useCallback(() => {
     clearReconnectTimer();
@@ -525,9 +778,184 @@ export function VoiceSessionClient({
     void connect();
   }, [clearReconnectTimer, connect]);
 
+  const fullScreenZ = "z-[100]";
+  const portalTarget = typeof document !== "undefined" ? document.body : null;
+  const overlayPosition = "fixed left-0 right-0 bottom-0 top-14";
+
+  if (closingWithHangupSound) {
+    const closingUI = (
+      <div className={`${overlayPosition} ${fullScreenZ} flex items-center justify-center bg-[#0B0C10]`}>
+        <p className="text-sm text-white/70">통화 종료 중...</p>
+      </div>
+    );
+    return portalTarget ? createPortal(closingUI, portalTarget) : closingUI;
+  }
+
+  const voiceBounceStyle = (
+    <style
+      dangerouslySetInnerHTML={{
+        __html: "@keyframes voice-bounce-dots{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-4px)}}",
+      }}
+    />
+  );
+  const bouncingDots = (
+    <span className="inline-flex gap-0.5" aria-hidden>
+      <span className="opacity-70" style={{ animation: "voice-bounce-dots 0.6s ease-in-out infinite" }}>.</span>
+      <span className="opacity-70" style={{ animation: "voice-bounce-dots 0.6s ease-in-out 0.2s infinite" }}>.</span>
+      <span className="opacity-70" style={{ animation: "voice-bounce-dots 0.6s ease-in-out 0.4s infinite" }}>.</span>
+    </span>
+  );
+
+  // idle: 연결 중 + 취소 동시 표시
+  if (phase === "idle") {
+    const idleUI = (
+      <div className={`${overlayPosition} ${fullScreenZ} flex flex-col items-center justify-center bg-[#0B0C10] gap-6`}>
+        {voiceBounceStyle}
+        <p className="text-sm text-white/70">
+          연결 중{bouncingDots}
+        </p>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-full bg-panana-pink px-6 py-3 text-sm font-bold text-[#0B0C10] hover:bg-panana-pink/90"
+        >
+          취소
+        </button>
+      </div>
+    );
+    return portalTarget ? createPortal(idleUI, portalTarget) : idleUI;
+  }
+
+  // 링 중: 연결 중 + 취소 동시 표시
+  if (phase === "ringing") {
+    const cancelRinging = () => {
+      ringAudioRef.current?.pause();
+      ringAudioRef.current = null;
+      setPhase("idle");
+      onClose();
+    };
+    const ringingUI = (
+      <div className={`${overlayPosition} ${fullScreenZ} flex flex-col items-center justify-center bg-[#0B0C10] gap-6`}>
+        {voiceBounceStyle}
+        <p className="text-sm text-white/70">
+          연결 중{bouncingDots}
+        </p>
+        <button
+          type="button"
+          onClick={cancelRinging}
+          className="rounded-full bg-panana-pink px-6 py-3 text-sm font-bold text-[#0B0C10] hover:bg-panana-pink/90"
+        >
+          취소
+        </button>
+      </div>
+    );
+    return portalTarget ? createPortal(ringingUI, portalTarget) : ringingUI;
+  }
+
+  // 통화 중(연결된 뒤에만): 전화 통화화면. 볼륨은 스로틀된 displayVolume 사용으로 리렌더 최소화
+  if (phase === "connected" && started) {
+    // 상한 없이 볼륨에 비례해 커지도록 정규화(하한만 0으로 제한)
+    const normalizeVol = (v: number) => Math.max(0, (v - 0.004) * 20);
+    const inLevelRaw = Math.max(0, displayVolume.in);
+    const outLevelRaw = Math.max(0, displayVolume.out);
+    const inLevel = normalizeVol(inLevelRaw);
+    const outLevel = normalizeVol(outLevelRaw);
+    const combined = Math.max(inLevel, outLevel);
+    // 내 목소리/AI 목소리 어느 쪽이든 말하면 즉시 커지도록 반응 강화
+    const wholeScale = 1 + combined * 0.9;
+    // 탄성 바운스는 볼륨과 무관하게 천천히 둥실둥실
+    const bounceDurationSec = 2.8;
+    const inOpacity = 0.25 + inLevel * 0.75;
+    const outOpacity = 0.25 + outLevel * 0.75;
+
+    const callScreenKeyframes = `
+@keyframes voice-profile-blink{0%,100%{opacity:1}50%{opacity:0.88}}
+@keyframes voice-whole-bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+@keyframes voice-ring-spin{to{transform:rotate(360deg)}}
+@keyframes voice-ring-spin-rev{to{transform:rotate(-360deg)}}
+`;
+    const connectedUI = (
+      <div className={`${overlayPosition} ${fullScreenZ} flex flex-col items-center bg-[#0B0C10] pt-6 pb-6`}>
+        <style dangerouslySetInnerHTML={{ __html: callScreenKeyframes }} />
+        <div
+          className="overflow-hidden rounded-full ring-2 ring-white/20 shrink-0"
+          style={{ width: 80, height: 80, animation: "voice-profile-blink 2.5s ease-in-out infinite" }}
+        >
+          {characterAvatarUrl ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img src={characterAvatarUrl} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" loading="eager" />
+          ) : (
+            <div className="h-full w-full bg-panana-pink/40" />
+          )}
+        </div>
+        <p className="mt-3 text-base font-medium text-white/90">{characterName || "캐릭터"}</p>
+        <p className="mt-1 text-sm text-white/60">{formatCallDuration(callDurationSec)}</p>
+        <div className="relative mt-14 h-56 w-56 shrink-0" aria-hidden>
+          <div className="absolute left-1/2 top-1/2 h-56 w-56 -translate-x-1/2 -translate-y-1/2">
+            <div
+              className="relative h-full w-full"
+              style={{
+                transform: `scale(${wholeScale})`,
+                animation: `voice-whole-bounce ${bounceDurationSec.toFixed(2)}s ease-in-out infinite`,
+                willChange: "transform",
+                transition: "transform 170ms cubic-bezier(0.22, 0.61, 0.36, 1)",
+              }}
+            >
+              <div
+                className="absolute left-1/2 top-1/2 h-36 w-36 -translate-x-1/2 -translate-y-1/2 rounded-full"
+                style={{
+                  border: "4px solid rgba(236,72,153,0.65)",
+                  boxShadow: `0 0 ${14 + combined * 60}px rgba(236,72,153,${0.45 + combined * 0.45})`,
+                  transform: `translate(-50%, -50%) scale(${1 + combined * 0.28})`,
+                  transition: "transform 170ms cubic-bezier(0.22, 0.61, 0.36, 1)",
+                }}
+              />
+              <div
+                className="absolute left-1/2 top-1/2 h-28 w-28 -translate-x-1/2 -translate-y-1/2 rounded-full"
+                style={{
+                  background: "radial-gradient(circle at 35% 30%, rgba(255,255,255,0.92), rgba(255,255,255,0.2) 24%, rgba(236,72,153,0.78) 45%, rgba(88,28,135,0.88) 100%)",
+                  transform: `translate(-50%, -50%) scale(${0.9 + combined * 0.35})`,
+                }}
+              />
+              <div
+                className="absolute left-1/2 top-1/2 h-20 w-20 -translate-x-1/2 -translate-y-1/2 rounded-full bg-pink-300/80"
+                style={{ transform: `translate(-50%, -50%) scale(${0.92 + combined * 0.45})` }}
+              />
+            </div>
+          </div>
+        </div>
+        <button type="button" onClick={handleHangupClick} className="mt-auto mb-24 flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-transparent" aria-label="전화 끊기">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/call_end.png" alt="" width={56} height={56} className="opacity-90 hover:opacity-100" />
+        </button>
+        {error && (
+          <span className="mt-2 truncate text-[11px] text-red-300">{error}</span>
+        )}
+        {reconnectGaveUp && (
+          <button
+            type="button"
+            onClick={retryConnect}
+            className="mt-2 text-sm text-panana-pink"
+          >
+          다시 연결
+        </button>
+        )}
+      </div>
+    );
+    return portalTarget ? createPortal(connectedUI, portalTarget) : connectedUI;
+  }
+
+  // connected이지만 아직 started 전 (링톤 끝난 직후, 통화 화면 전 대기) — 메시지 없이 대기
+  if (phase === "connected") {
+    const connectingUI = (
+      <div className={`${overlayPosition} ${fullScreenZ} bg-[#0B0C10]`} aria-hidden />
+    );
+    return portalTarget ? createPortal(connectingUI, portalTarget) : connectingUI;
+  }
+
+  // 대기/컴팩트 바 (폴백)
   return (
     <div className="flex items-center justify-between gap-2 rounded-xl border border-panana-pink/30 bg-panana-pink/10 px-4 py-3">
-      {/* 음성 AI 썸네일 (왼쪽) */}
       <div className="flex min-w-[2.5rem] justify-start">
         <div
           className="overflow-hidden rounded-full ring-1 ring-white/10 transition-transform"
@@ -551,7 +979,6 @@ export function VoiceSessionClient({
           )}
         </div>
       </div>
-      {/* 끊기, 닫기 버튼 (가운데) */}
       <div className="flex flex-1 flex-col items-center gap-1">
         {error && (
           <span className="truncate text-[11px] text-red-300">{error}</span>
@@ -613,11 +1040,10 @@ export function VoiceSessionClient({
             onClick={onClose}
             className="rounded-lg border border-white/20 px-3 py-2 text-[12px] font-semibold text-white/80 hover:bg-white/10"
           >
-            닫기
+            취소
           </button>
         </div>
       </div>
-      {/* 내 썸네일 (오른쪽) */}
       <div className="flex min-w-[2.5rem] justify-end">
         <div
           className="overflow-hidden rounded-full ring-1 ring-white/10 transition-transform"
