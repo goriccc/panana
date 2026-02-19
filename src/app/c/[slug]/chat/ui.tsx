@@ -420,6 +420,8 @@ export function CharacterChatClient({
   const lastKeyboardHeightRef = useRef(0);
   const forceScrollRef = useRef(false);
   const isInputFocusedRef = useRef(false);
+  /** 키보드 시 시각적 뷰포트에 맞춰 컨테이너 위치·크기 고정 → 헤더가 항상 보이도록 */
+  const [viewportFrame, setViewportFrame] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
   const llmConfigRef = useRef<{
     defaultProvider: string;
     fallbackProvider: string;
@@ -888,6 +890,27 @@ export function CharacterChatClient({
         if (url && typeof url === "string" && url.trim()) setPreloadedVoiceRingtoneUrl(url.trim());
       })
       .catch(() => {});
+  }, []);
+
+  /** 키보드 시 시각적 뷰포트에 맞춰 채팅 컨테이너 위치·크기 고정 → 상단 헤더가 항상 보이도록 */
+  useEffect(() => {
+    const vv = typeof window !== "undefined" ? window.visualViewport : null;
+    if (!vv) return;
+    const update = () => {
+      setViewportFrame({
+        top: vv.offsetTop,
+        left: vv.offsetLeft,
+        width: vv.width,
+        height: vv.height,
+      });
+    };
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
   }, []);
 
   useEffect(() => {
@@ -1370,7 +1393,14 @@ export function CharacterChatClient({
   }
 
   return (
-    <div className="fixed inset-0 flex flex-col overflow-hidden bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.12),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">
+    <div
+      className="fixed flex flex-col overflow-hidden bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.12),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white"
+      style={
+        viewportFrame
+          ? { top: viewportFrame.top, left: viewportFrame.left, width: viewportFrame.width, height: viewportFrame.height }
+          : { top: 0, left: 0, right: 0, bottom: 0 }
+      }
+    >
       <style>{`@keyframes pananaDot{0%,100%{transform:translateY(0);opacity:.55}50%{transform:translateY(-4px);opacity:1}}`}</style>
       <>
       {/* 키보드 올라와도 헤더가 밀리지 않도록 상단 고정(스크롤 영역 밖) */}
@@ -1410,16 +1440,6 @@ export function CharacterChatClient({
                 </span>
               ) : null;
             })()}
-            {currentModelLabel && !currentModelLabel.toLowerCase().includes("auto") ? (
-              <span className="text-[11px] text-white/40 mt-0.5" aria-hidden>
-                {currentModelLabel}
-              </span>
-            ) : null}
-            {currentVoiceModelLabel ? (
-              <span className="text-[11px] text-white/40 mt-0.5" aria-hidden>
-                음성 {currentVoiceModelLabel}
-              </span>
-            ) : null}
           </div>
           <button
             type="button"
@@ -1445,8 +1465,6 @@ export function CharacterChatClient({
           </button>
         </div>
       </header>
-      {/* 헤더 높이만큼 공간 확보 */}
-      <div className="shrink-0" style={{ height: "calc(80px + env(safe-area-inset-top, 0px))" }} aria-hidden />
 
       {!onboardingDismissed ? (
         <div className="mx-auto w-full max-w-[420px] shrink-0 px-5 pt-2">
@@ -1479,11 +1497,12 @@ export function CharacterChatClient({
         </div>
       ) : null}
 
-      {/* 메시지 영역만 스크롤(카톡 스타일). 입력창과 겹치지 않음 */}
+      {/* 스크롤 영역 = 헤더 바로 밑부터. 말풍선이 잘리지 않게 영역만 사용 */}
       <main
         ref={scrollRef}
-        className="chat-scrollbar mx-auto w-full max-w-[420px] flex-1 min-h-0 overflow-y-auto px-5 pb-4 pt-4"
+        className="chat-scrollbar mx-auto w-full max-w-[420px] min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-5 pb-4 pt-3"
         style={{
+          minHeight: 120,
           paddingBottom: `${Math.max(0, keyboardHeight) + Math.max(0, composerHeight) + 12}px`,
           scrollPaddingBottom: `${Math.max(0, keyboardHeight) + Math.max(0, composerHeight) + 12}px`,
         }}
