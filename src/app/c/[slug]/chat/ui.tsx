@@ -416,6 +416,7 @@ export function CharacterChatClient({
   const userAvatarUrl = String((session as any)?.profileImageUrl || (session as any)?.user?.image || "").trim() || undefined;
   const composerRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const chatContainerRef = useRef<HTMLDivElement | null>(null);
   const isAtBottomRef = useRef(true);
   const lastKeyboardHeightRef = useRef(0);
   const forceScrollRef = useRef(false);
@@ -1369,37 +1370,54 @@ export function CharacterChatClient({
     );
   }
 
-  // 키보드 올라와도 헤더가 밀리지 않도록 body 완전 고정 (스크롤 방지)
+  // Visual Viewport API: 키보드 시 보이는 영역에 컨테이너 맞춤 (fixed는 layout viewport 기준이라 iOS에서 헤더가 밀림 → visual viewport 기준으로 위치/크기 설정)
+  // 참고: https://stackoverflow.com/questions/74986310/how-to-keep-header-at-top-of-visual-viewport-after-layout-visual-viewport-change
+  // 참고: https://martijnhols.nl/gists/how-to-get-document-height-ios-safari-osk
   useEffect(() => {
-    if (needsAdultGate) return;
-    const b = document.body;
-    const html = document.documentElement;
-    const prev = {
-      bodyOverflow: b.style.overflow,
-      bodyPosition: b.style.position,
-      bodyInset: b.style.inset,
-      bodyWidth: b.style.width,
-      bodyHeight: b.style.height,
-      htmlOverflow: html.style.overflow,
+    if (needsAdultGate || !chatContainerRef.current) return;
+    const el = chatContainerRef.current;
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    const applyViewport = () => {
+      if (!el) return;
+      el.style.position = "fixed";
+      el.style.top = `${vv.offsetTop}px`;
+      el.style.left = `${vv.offsetLeft}px`;
+      el.style.width = `${vv.width}px`;
+      el.style.height = `${vv.height}px`;
     };
-    b.style.overflow = "hidden";
-    b.style.position = "fixed";
-    b.style.inset = "0";
-    b.style.width = "100%";
-    b.style.height = "100%";
-    html.style.overflow = "hidden";
+    const onResize = () => {
+      applyViewport();
+      // iOS: 키보드 닫을 때 visualViewport 갱신이 늦음
+      setTimeout(applyViewport, 1000);
+    };
+    const onScrollLock = () => {
+      window.scrollTo(0, 0);
+    };
+
+    applyViewport();
+    vv.addEventListener("resize", onResize);
+    vv.addEventListener("scroll", onResize);
+    window.addEventListener("scroll", onScrollLock, { passive: true });
+
     return () => {
-      b.style.overflow = prev.bodyOverflow;
-      b.style.position = prev.bodyPosition;
-      b.style.inset = prev.bodyInset;
-      b.style.width = prev.bodyWidth;
-      b.style.height = prev.bodyHeight;
-      html.style.overflow = prev.htmlOverflow;
+      vv.removeEventListener("resize", onResize);
+      vv.removeEventListener("scroll", onResize);
+      window.removeEventListener("scroll", onScrollLock);
+      el.style.position = "";
+      el.style.top = "";
+      el.style.left = "";
+      el.style.width = "";
+      el.style.height = "";
     };
   }, [needsAdultGate]);
 
   return (
-    <div className="fixed inset-0 flex flex-col overflow-hidden bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.12),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">
+    <div
+      ref={chatContainerRef}
+      className="fixed inset-0 flex flex-col overflow-hidden bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.12),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white"
+    >
       <style>{`@keyframes pananaDot{0%,100%{transform:translateY(0);opacity:.55}50%{transform:translateY(-4px);opacity:1}}`}</style>
       <>
       {/* 키보드 올라와도 헤더가 밀리지 않도록 상단 고정(스크롤 영역 밖) */}

@@ -143,32 +143,43 @@ export function ChallengeClient({
     };
   }, []);
 
-  // 도전 채팅 화면에서 키보드 올라와도 헤더가 밀리지 않도록 body 완전 고정 (스크롤 방지)
+  // Visual Viewport API: 도전 채팅에서 키보드 시 보이는 영역에 컨테이너 맞춤 (fixed는 layout viewport 기준이라 iOS에서 헤더 밀림 방지)
   useEffect(() => {
-    if (view !== "chat") return;
-    const b = document.body;
-    const html = document.documentElement;
-    const prev = {
-      bodyOverflow: b.style.overflow,
-      bodyPosition: b.style.position,
-      bodyInset: b.style.inset,
-      bodyWidth: b.style.width,
-      bodyHeight: b.style.height,
-      htmlOverflow: html.style.overflow,
+    if (view !== "chat" || !challengeChatContainerRef.current) return;
+    const el = challengeChatContainerRef.current;
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    const applyViewport = () => {
+      if (!el) return;
+      el.style.position = "fixed";
+      el.style.top = `${vv.offsetTop}px`;
+      el.style.left = `${vv.offsetLeft}px`;
+      el.style.width = `${vv.width}px`;
+      el.style.height = `${vv.height}px`;
     };
-    b.style.overflow = "hidden";
-    b.style.position = "fixed";
-    b.style.inset = "0";
-    b.style.width = "100%";
-    b.style.height = "100%";
-    html.style.overflow = "hidden";
+    const onResize = () => {
+      applyViewport();
+      setTimeout(applyViewport, 1000);
+    };
+    const onScrollLock = () => {
+      window.scrollTo(0, 0);
+    };
+
+    applyViewport();
+    vv.addEventListener("resize", onResize);
+    vv.addEventListener("scroll", onResize);
+    window.addEventListener("scroll", onScrollLock, { passive: true });
+
     return () => {
-      b.style.overflow = prev.bodyOverflow;
-      b.style.position = prev.bodyPosition;
-      b.style.inset = prev.bodyInset;
-      b.style.width = prev.bodyWidth;
-      b.style.height = prev.bodyHeight;
-      html.style.overflow = prev.htmlOverflow;
+      vv.removeEventListener("resize", onResize);
+      vv.removeEventListener("scroll", onResize);
+      window.removeEventListener("scroll", onScrollLock);
+      el.style.position = "";
+      el.style.top = "";
+      el.style.left = "";
+      el.style.width = "";
+      el.style.height = "";
     };
   }, [view]);
 
@@ -216,6 +227,7 @@ export function ChallengeClient({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLDivElement | null>(null);
   const challengeInputRef = useRef<HTMLDivElement | null>(null);
+  const challengeChatContainerRef = useRef<HTMLDivElement | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [composerHeight, setComposerHeight] = useState(64);
   const lastKeyboardHeightRef = useRef(0);
@@ -609,7 +621,10 @@ export function ChallengeClient({
 
   if (view === "chat") {
     return (
-      <div className="fixed inset-0 flex flex-col overflow-hidden bg-[linear-gradient(#07070B,#0B0C10)] text-white">
+      <div
+        ref={challengeChatContainerRef}
+        className="fixed inset-0 flex flex-col overflow-hidden bg-[linear-gradient(#07070B,#0B0C10)] text-white"
+      >
         <style>{`@keyframes pananaDot{0%,100%{transform:translateY(0);opacity:.55}50%{transform:translateY(-4px);opacity:1}}`}</style>
         {/* 키보드 올라와도 헤더+도전목표가 밀리지 않도록 상단 고정(스크롤 영역 밖) */}
         <div className="shrink-0 z-20 flex flex-col bg-[#07070B] overflow-visible pt-[env(safe-area-inset-top)]">
