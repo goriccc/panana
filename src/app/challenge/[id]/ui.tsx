@@ -143,57 +143,54 @@ export function ChallengeClient({
     };
   }, []);
 
-  // Visual Viewport API: 도전 채팅 키보드 시 컨테이너 맞춤. resize 연타 대신 포커스 시 한 번만 적용해 움찔/깜빡임 방지.
+  // Visual Viewport API: 도전 채팅 키보드 시 컨테이너 즉시 맞춤. 2px 이상 변경 시에만 DOM 갱신해 움찔 완화.
   useEffect(() => {
     if (view !== "chat" || !challengeChatContainerRef.current) return;
     const el = challengeChatContainerRef.current;
     const vv = window.visualViewport;
     if (!vv) return;
 
-    let applyTimer: ReturnType<typeof setTimeout> | null = null;
-    const KEYBOARD_OPEN_MS = 380;
-    const KEYBOARD_CLOSE_MS = 220;
+    const THRESHOLD = 2;
+    let lastTop = -999;
+    let lastLeft = -999;
+    let lastWidth = -999;
+    let lastHeight = -999;
 
     const applyViewport = () => {
       if (!el || !vv) return;
+      const top = vv.offsetTop;
+      const left = vv.offsetLeft;
+      const w = vv.width;
+      const h = vv.height;
+      const changed =
+        Math.abs(top - lastTop) >= THRESHOLD ||
+        Math.abs(left - lastLeft) >= THRESHOLD ||
+        Math.abs(w - lastWidth) >= THRESHOLD ||
+        Math.abs(h - lastHeight) >= THRESHOLD;
+      if (!changed && lastTop !== -999) return;
+      lastTop = top;
+      lastLeft = left;
+      lastWidth = w;
+      lastHeight = h;
       el.style.position = "fixed";
-      el.style.top = `${vv.offsetTop}px`;
-      el.style.left = `${vv.offsetLeft}px`;
-      el.style.width = `${vv.width}px`;
-      el.style.height = `${vv.height}px`;
-    };
-    const scheduleApply = (delayMs: number) => {
-      if (applyTimer) clearTimeout(applyTimer);
-      applyTimer = setTimeout(() => {
-        applyTimer = null;
-        applyViewport();
-      }, delayMs);
-    };
-    const onFocusIn = () => {
-      scheduleApply(KEYBOARD_OPEN_MS);
-    };
-    const onFocusOut = () => {
-      scheduleApply(KEYBOARD_CLOSE_MS);
+      el.style.top = `${top}px`;
+      el.style.left = `${left}px`;
+      el.style.width = `${w}px`;
+      el.style.height = `${h}px`;
     };
     const onScrollLock = () => {
       window.scrollTo(0, 0);
     };
-    const onOrientationChange = () => {
-      scheduleApply(100);
-    };
 
     applyViewport();
-    el.addEventListener("focusin", onFocusIn);
-    el.addEventListener("focusout", onFocusOut);
+    vv.addEventListener("resize", applyViewport);
+    vv.addEventListener("scroll", applyViewport);
     window.addEventListener("scroll", onScrollLock, { passive: true });
-    window.addEventListener("orientationchange", onOrientationChange);
 
     return () => {
-      el.removeEventListener("focusin", onFocusIn);
-      el.removeEventListener("focusout", onFocusOut);
+      vv.removeEventListener("resize", applyViewport);
+      vv.removeEventListener("scroll", applyViewport);
       window.removeEventListener("scroll", onScrollLock);
-      window.removeEventListener("orientationchange", onOrientationChange);
-      if (applyTimer) clearTimeout(applyTimer);
       el.style.position = "";
       el.style.top = "";
       el.style.left = "";
