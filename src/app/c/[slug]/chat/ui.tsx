@@ -420,8 +420,6 @@ export function CharacterChatClient({
   const lastKeyboardHeightRef = useRef(0);
   const forceScrollRef = useRef(false);
   const isInputFocusedRef = useRef(false);
-  /** 키보드 시 시각적 뷰포트에 맞춰 컨테이너 위치·크기 고정 → 헤더가 항상 보이도록 */
-  const [viewportFrame, setViewportFrame] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
   const llmConfigRef = useRef<{
     defaultProvider: string;
     fallbackProvider: string;
@@ -890,27 +888,6 @@ export function CharacterChatClient({
         if (url && typeof url === "string" && url.trim()) setPreloadedVoiceRingtoneUrl(url.trim());
       })
       .catch(() => {});
-  }, []);
-
-  /** 키보드 시 시각적 뷰포트에 맞춰 채팅 컨테이너 위치·크기 고정 → 상단 헤더가 항상 보이도록 */
-  useEffect(() => {
-    const vv = typeof window !== "undefined" ? window.visualViewport : null;
-    if (!vv) return;
-    const update = () => {
-      setViewportFrame({
-        top: vv.offsetTop,
-        left: vv.offsetLeft,
-        width: vv.width,
-        height: vv.height,
-      });
-    };
-    update();
-    vv.addEventListener("resize", update);
-    vv.addEventListener("scroll", update);
-    return () => {
-      vv.removeEventListener("resize", update);
-      vv.removeEventListener("scroll", update);
-    };
   }, []);
 
   useEffect(() => {
@@ -1392,15 +1369,20 @@ export function CharacterChatClient({
     );
   }
 
+  // 키보드 올라와도 헤더가 밀리지 않도록 body 스크롤 잠금
+  useEffect(() => {
+    if (needsAdultGate) return;
+    const prev = { body: document.body.style.overflow, html: document.documentElement.style.overflow };
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev.body;
+      document.documentElement.style.overflow = prev.html;
+    };
+  }, [needsAdultGate]);
+
   return (
-    <div
-      className="fixed flex flex-col overflow-hidden bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.12),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white"
-      style={
-        viewportFrame
-          ? { top: viewportFrame.top, left: viewportFrame.left, width: viewportFrame.width, height: viewportFrame.height }
-          : { top: 0, left: 0, right: 0, bottom: 0 }
-      }
-    >
+    <div className="fixed inset-0 flex flex-col overflow-hidden bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.12),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">
       <style>{`@keyframes pananaDot{0%,100%{transform:translateY(0);opacity:.55}50%{transform:translateY(-4px);opacity:1}}`}</style>
       <>
       {/* 키보드 올라와도 헤더가 밀리지 않도록 상단 고정(스크롤 영역 밖) */}

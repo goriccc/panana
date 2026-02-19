@@ -143,6 +143,18 @@ export function ChallengeClient({
     };
   }, []);
 
+  // 도전 채팅 화면에서 키보드 올라와도 헤더가 밀리지 않도록 body 스크롤 잠금
+  useEffect(() => {
+    if (view !== "chat") return;
+    const prev = { body: document.body.style.overflow, html: document.documentElement.style.overflow };
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev.body;
+      document.documentElement.style.overflow = prev.html;
+    };
+  }, [view]);
+
   const loadRanking = useCallback(async () => {
     const hasInitial = ranking.length > 0;
     if (!hasInitial) setRankingLoading(true);
