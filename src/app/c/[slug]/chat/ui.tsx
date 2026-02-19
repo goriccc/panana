@@ -1370,41 +1370,50 @@ export function CharacterChatClient({
     );
   }
 
-  // Visual Viewport API: 키보드 시 보이는 영역에 컨테이너 맞춤 (fixed는 layout viewport 기준이라 iOS에서 헤더가 밀림 → visual viewport 기준으로 위치/크기 설정)
-  // 참고: https://stackoverflow.com/questions/74986310/how-to-keep-header-at-top-of-visual-viewport-after-layout-visual-viewport-change
-  // 참고: https://martijnhols.nl/gists/how-to-get-document-height-ios-safari-osk
+  // Visual Viewport API: 키보드 시 보이는 영역에 컨테이너 맞춤. iOS는 resize를 여러 번(73/259/591ms 등) 보내 중간값 적용 시 떨림 → 디바운스로 마지막 값만 적용.
   useEffect(() => {
     if (needsAdultGate || !chatContainerRef.current) return;
     const el = chatContainerRef.current;
     const vv = window.visualViewport;
     if (!vv) return;
 
+    let debounceId: ReturnType<typeof setTimeout> | null = null;
+    let lateId: ReturnType<typeof setTimeout> | null = null;
+    const DEBOUNCE_MS = 80;
+    const LATE_APPLY_MS = 350;
+
     const applyViewport = () => {
-      if (!el) return;
+      if (!el || !vv) return;
       el.style.position = "fixed";
       el.style.top = `${vv.offsetTop}px`;
       el.style.left = `${vv.offsetLeft}px`;
       el.style.width = `${vv.width}px`;
       el.style.height = `${vv.height}px`;
     };
-    const onResize = () => {
-      applyViewport();
-      // iOS: 키보드 닫을 때 visualViewport 갱신이 늦음
-      setTimeout(applyViewport, 1000);
+    const scheduleApply = () => {
+      if (debounceId) clearTimeout(debounceId);
+      debounceId = setTimeout(() => {
+        debounceId = null;
+        applyViewport();
+        if (lateId) clearTimeout(lateId);
+        lateId = setTimeout(applyViewport, LATE_APPLY_MS);
+      }, DEBOUNCE_MS);
     };
     const onScrollLock = () => {
       window.scrollTo(0, 0);
     };
 
     applyViewport();
-    vv.addEventListener("resize", onResize);
-    vv.addEventListener("scroll", onResize);
+    vv.addEventListener("resize", scheduleApply);
+    vv.addEventListener("scroll", scheduleApply);
     window.addEventListener("scroll", onScrollLock, { passive: true });
 
     return () => {
-      vv.removeEventListener("resize", onResize);
-      vv.removeEventListener("scroll", onResize);
+      vv.removeEventListener("resize", scheduleApply);
+      vv.removeEventListener("scroll", scheduleApply);
       window.removeEventListener("scroll", onScrollLock);
+      if (debounceId) clearTimeout(debounceId);
+      if (lateId) clearTimeout(lateId);
       el.style.position = "";
       el.style.top = "";
       el.style.left = "";

@@ -143,38 +143,50 @@ export function ChallengeClient({
     };
   }, []);
 
-  // Visual Viewport API: 도전 채팅에서 키보드 시 보이는 영역에 컨테이너 맞춤 (fixed는 layout viewport 기준이라 iOS에서 헤더 밀림 방지)
+  // Visual Viewport API: 도전 채팅 키보드 시 컨테이너 맞춤. iOS 여러 번 resize 시 떨림 방지 위해 디바운스 적용.
   useEffect(() => {
     if (view !== "chat" || !challengeChatContainerRef.current) return;
     const el = challengeChatContainerRef.current;
     const vv = window.visualViewport;
     if (!vv) return;
 
+    let debounceId: ReturnType<typeof setTimeout> | null = null;
+    let lateId: ReturnType<typeof setTimeout> | null = null;
+    const DEBOUNCE_MS = 80;
+    const LATE_APPLY_MS = 350;
+
     const applyViewport = () => {
-      if (!el) return;
+      if (!el || !vv) return;
       el.style.position = "fixed";
       el.style.top = `${vv.offsetTop}px`;
       el.style.left = `${vv.offsetLeft}px`;
       el.style.width = `${vv.width}px`;
       el.style.height = `${vv.height}px`;
     };
-    const onResize = () => {
-      applyViewport();
-      setTimeout(applyViewport, 1000);
+    const scheduleApply = () => {
+      if (debounceId) clearTimeout(debounceId);
+      debounceId = setTimeout(() => {
+        debounceId = null;
+        applyViewport();
+        if (lateId) clearTimeout(lateId);
+        lateId = setTimeout(applyViewport, LATE_APPLY_MS);
+      }, DEBOUNCE_MS);
     };
     const onScrollLock = () => {
       window.scrollTo(0, 0);
     };
 
     applyViewport();
-    vv.addEventListener("resize", onResize);
-    vv.addEventListener("scroll", onResize);
+    vv.addEventListener("resize", scheduleApply);
+    vv.addEventListener("scroll", scheduleApply);
     window.addEventListener("scroll", onScrollLock, { passive: true });
 
     return () => {
-      vv.removeEventListener("resize", onResize);
-      vv.removeEventListener("scroll", onResize);
+      vv.removeEventListener("resize", scheduleApply);
+      vv.removeEventListener("scroll", scheduleApply);
       window.removeEventListener("scroll", onScrollLock);
+      if (debounceId) clearTimeout(debounceId);
+      if (lateId) clearTimeout(lateId);
       el.style.position = "";
       el.style.top = "";
       el.style.left = "";
