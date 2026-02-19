@@ -656,14 +656,13 @@ export function ChallengeClient({
           </div>
         </div>
         </div>
-        {/* 헤더+도전목표 높이만큼 공간 확보 */}
-        <div className="shrink-0" style={{ height: "calc(150px + env(safe-area-inset-top, 0px))" }} aria-hidden />
 
+        {/* 스크롤 영역 = 도전목표 라운드박스 바로 밑부터 */}
         <main
           ref={scrollRef}
-          className="chat-scrollbar mx-auto w-full max-w-[420px] flex-1 min-h-0 overflow-y-auto px-5 pb-4 pt-4"
+          className="chat-scrollbar mx-auto w-full max-w-[420px] flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-5 pb-4 pt-3"
           style={{
-            paddingTop: "16px",
+            minHeight: 120,
             paddingBottom: challengeSuccess
               ? "320px"
               : `${Math.max(0, keyboardHeight) + Math.max(0, composerHeight) + 12}px`,
