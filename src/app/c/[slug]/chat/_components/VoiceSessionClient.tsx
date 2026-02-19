@@ -952,11 +952,18 @@ export function VoiceSessionClient({
 
   const fullScreenZ = "z-[100]";
   const portalTarget = typeof document !== "undefined" ? document.body : null;
-  const overlayPosition = "fixed left-0 right-0 bottom-0 top-14";
+  const headerClearHeight = "calc(44px + env(safe-area-inset-top, 0px))";
+  /** 채팅이 안 보이게 전체 덮되, 상단만 투명해 헤더(이전/이름/전화)만 비치. 44px로 해서 헤더 아래 바·빨간 영역까지 가림 */
+  const overlayWrap = (content: React.ReactNode) => (
+    <div className={`fixed inset-0 ${fullScreenZ} flex flex-col`}>
+      <div style={{ height: headerClearHeight, flexShrink: 0 }} className="bg-transparent" aria-hidden />
+      <div className="flex-1 min-h-0 flex flex-col bg-[#0B0C10]">{content}</div>
+    </div>
+  );
 
   if (closingWithHangupSound) {
-    const closingUI = (
-      <div className={`${overlayPosition} ${fullScreenZ} flex items-center justify-center bg-[#0B0C10]`}>
+    const closingUI = overlayWrap(
+      <div className="flex flex-1 items-center justify-center">
         <p className="text-sm text-white/70">통화 종료 중...</p>
       </div>
     );
@@ -980,8 +987,8 @@ export function VoiceSessionClient({
 
   // idle: 연결 중 + 취소 (iOS는 전화 아이콘 탭 시 startOnOpen으로 즉시 통화 시작)
   if (phase === "idle") {
-    const idleUI = (
-      <div className={`${overlayPosition} ${fullScreenZ} flex flex-col items-center justify-center bg-[#0B0C10] gap-6`}>
+    const idleUI = overlayWrap(
+      <div className="flex flex-1 flex-col items-center justify-center gap-6">
         {voiceBounceStyle}
         <p className="text-sm text-white/70">
           연결 중{bouncingDots}
@@ -1006,8 +1013,8 @@ export function VoiceSessionClient({
       setPhase("idle");
       onClose();
     };
-    const ringingUI = (
-      <div className={`${overlayPosition} ${fullScreenZ} flex flex-col items-center justify-center bg-[#0B0C10] gap-6`}>
+    const ringingUI = overlayWrap(
+      <div className="flex flex-1 flex-col items-center justify-center gap-6">
         {voiceBounceStyle}
         <p className="text-sm text-white/70">
           연결 중{bouncingDots}
@@ -1046,23 +1053,25 @@ export function VoiceSessionClient({
 @keyframes voice-ring-spin{to{transform:rotate(360deg)}}
 @keyframes voice-ring-spin-rev{to{transform:rotate(-360deg)}}
 `;
-    const connectedUI = (
-      <div className={`${overlayPosition} ${fullScreenZ} flex flex-col items-center bg-[#0B0C10] pt-6 pb-6`}>
+    const connectedUI = overlayWrap(
+      <div className="flex flex-1 flex-col items-center min-h-0 pt-8">
         <style dangerouslySetInnerHTML={{ __html: callScreenKeyframes }} />
-        <div
-          className="overflow-hidden rounded-full ring-2 ring-white/20 shrink-0"
-          style={{ width: 80, height: 80, animation: "voice-profile-blink 2.5s ease-in-out infinite" }}
-        >
-          {characterAvatarUrl ? (
-            /* eslint-disable-next-line @next/next/no-img-element */
-            <img src={characterAvatarUrl} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" loading="eager" />
-          ) : (
-            <div className="h-full w-full bg-panana-pink/40" />
-          )}
+        <div className="flex shrink-0 flex-col items-center">
+          <div
+            className="overflow-hidden rounded-full ring-2 ring-white/20 shrink-0"
+            style={{ width: 80, height: 80, animation: "voice-profile-blink 2.5s ease-in-out infinite" }}
+          >
+            {characterAvatarUrl ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img src={characterAvatarUrl} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" loading="eager" />
+            ) : (
+              <div className="h-full w-full bg-panana-pink/40" />
+            )}
+          </div>
+          <p className="mt-3 text-base font-medium text-white/90">{characterName || "캐릭터"}</p>
+          <p className="mt-1 text-sm text-white/60">{formatCallDuration(callDurationSec)}</p>
         </div>
-        <p className="mt-3 text-base font-medium text-white/90">{characterName || "캐릭터"}</p>
-        <p className="mt-1 text-sm text-white/60">{formatCallDuration(callDurationSec)}</p>
-        <div className="relative mt-14 h-56 w-56 shrink-0" aria-hidden>
+        <div className="relative mt-10 h-56 w-56 shrink-0" aria-hidden>
           <div className="absolute left-1/2 top-1/2 h-56 w-56 -translate-x-1/2 -translate-y-1/2">
             <div
               className="relative h-full w-full"
@@ -1096,7 +1105,14 @@ export function VoiceSessionClient({
             </div>
           </div>
         </div>
-        <button type="button" onClick={handleHangupClick} className="mt-auto mb-24 flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-transparent" aria-label="전화 끊기">
+        {/* 하단 스페이서 */}
+        <div className="min-h-0 flex-1 shrink-0" aria-hidden />
+        <button
+          type="button"
+          onClick={handleHangupClick}
+          className="mb-[max(2rem,env(safe-area-inset-bottom))] flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-transparent"
+          aria-label="전화 끊기"
+        >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/call_end.png" alt="" width={56} height={56} className="opacity-90 hover:opacity-100" />
         </button>
@@ -1119,9 +1135,7 @@ export function VoiceSessionClient({
 
   // connected이지만 아직 started 전 (iOS는 전화 아이콘 탭 시 startOnOpen으로 이미 시작됨)
   if (phase === "connected" && !started) {
-    const connectingUI = (
-      <div className={`${overlayPosition} ${fullScreenZ} bg-[#0B0C10]`} aria-hidden />
-    );
+    const connectingUI = overlayWrap(<div className="flex-1" aria-hidden />);
     return portalTarget ? createPortal(connectingUI, portalTarget) : connectingUI;
   }
 
