@@ -143,16 +143,15 @@ export function ChallengeClient({
     };
   }, []);
 
-  // Visual Viewport API: 도전 채팅 키보드 시 컨테이너 맞춤. iOS 여러 번 resize 시 떨림 방지 위해 디바운스 적용.
+  // Visual Viewport API: 도전 채팅 키보드 시 컨테이너 맞춤. rAF로 같은 프레임 내 한 번만 적용.
   useEffect(() => {
     if (view !== "chat" || !challengeChatContainerRef.current) return;
     const el = challengeChatContainerRef.current;
     const vv = window.visualViewport;
     if (!vv) return;
 
-    let debounceId: ReturnType<typeof setTimeout> | null = null;
+    let rafId: number | null = null;
     let lateId: ReturnType<typeof setTimeout> | null = null;
-    const DEBOUNCE_MS = 80;
     const LATE_APPLY_MS = 350;
 
     const applyViewport = () => {
@@ -164,13 +163,13 @@ export function ChallengeClient({
       el.style.height = `${vv.height}px`;
     };
     const scheduleApply = () => {
-      if (debounceId) clearTimeout(debounceId);
-      debounceId = setTimeout(() => {
-        debounceId = null;
+      if (rafId != null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
         applyViewport();
         if (lateId) clearTimeout(lateId);
         lateId = setTimeout(applyViewport, LATE_APPLY_MS);
-      }, DEBOUNCE_MS);
+      });
     };
     const onScrollLock = () => {
       window.scrollTo(0, 0);
@@ -185,7 +184,7 @@ export function ChallengeClient({
       vv.removeEventListener("resize", scheduleApply);
       vv.removeEventListener("scroll", scheduleApply);
       window.removeEventListener("scroll", onScrollLock);
-      if (debounceId) clearTimeout(debounceId);
+      if (rafId != null) cancelAnimationFrame(rafId);
       if (lateId) clearTimeout(lateId);
       el.style.position = "";
       el.style.top = "";

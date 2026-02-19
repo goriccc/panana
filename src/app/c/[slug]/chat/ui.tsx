@@ -1370,16 +1370,15 @@ export function CharacterChatClient({
     );
   }
 
-  // Visual Viewport API: 키보드 시 보이는 영역에 컨테이너 맞춤. iOS는 resize를 여러 번(73/259/591ms 등) 보내 중간값 적용 시 떨림 → 디바운스로 마지막 값만 적용.
+  // Visual Viewport API: 키보드 시 보이는 영역에 컨테이너 맞춤. rAF로 같은 프레임 내 여러 이벤트는 한 번만 적용(지연 없이).
   useEffect(() => {
     if (needsAdultGate || !chatContainerRef.current) return;
     const el = chatContainerRef.current;
     const vv = window.visualViewport;
     if (!vv) return;
 
-    let debounceId: ReturnType<typeof setTimeout> | null = null;
+    let rafId: number | null = null;
     let lateId: ReturnType<typeof setTimeout> | null = null;
-    const DEBOUNCE_MS = 80;
     const LATE_APPLY_MS = 350;
 
     const applyViewport = () => {
@@ -1391,13 +1390,13 @@ export function CharacterChatClient({
       el.style.height = `${vv.height}px`;
     };
     const scheduleApply = () => {
-      if (debounceId) clearTimeout(debounceId);
-      debounceId = setTimeout(() => {
-        debounceId = null;
+      if (rafId != null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
         applyViewport();
         if (lateId) clearTimeout(lateId);
         lateId = setTimeout(applyViewport, LATE_APPLY_MS);
-      }, DEBOUNCE_MS);
+      });
     };
     const onScrollLock = () => {
       window.scrollTo(0, 0);
@@ -1412,7 +1411,7 @@ export function CharacterChatClient({
       vv.removeEventListener("resize", scheduleApply);
       vv.removeEventListener("scroll", scheduleApply);
       window.removeEventListener("scroll", onScrollLock);
-      if (debounceId) clearTimeout(debounceId);
+      if (rafId != null) cancelAnimationFrame(rafId);
       if (lateId) clearTimeout(lateId);
       el.style.position = "";
       el.style.top = "";
