@@ -65,6 +65,11 @@ function defaultHangupSoundUrlFromSupabase(): string | null {
   return `${base}/storage/v1/object/public/panana-characters/voice/hangup.mp3`;
 }
 
+function setInlinePlaybackAttributes(audio: HTMLAudioElement) {
+  audio.setAttribute("playsinline", "true");
+  audio.setAttribute("webkit-playsinline", "true");
+}
+
 export function VoiceSessionClient({
   characterSlug,
   characterName,
@@ -166,7 +171,7 @@ export function VoiceSessionClient({
           const pre = new Audio(normalized);
           pre.preload = "auto";
           pre.crossOrigin = "anonymous";
-          pre.playsInline = true;
+          setInlinePlaybackAttributes(pre);
           pre.load();
           hangupPreloadAudioRef.current = pre;
         }
@@ -715,7 +720,7 @@ export function VoiceSessionClient({
         const audio = hangupPreloadAudioRef.current || new Audio(resolvedUrl);
         audio.preload = "auto";
         audio.crossOrigin = "anonymous";
-        audio.playsInline = true;
+        setInlinePlaybackAttributes(audio);
         audio.currentTime = 0;
         audio.volume = 1;
         hangupAudioRef.current = audio;
@@ -744,7 +749,7 @@ export function VoiceSessionClient({
           const retry = new Audio(`${resolvedUrl}${resolvedUrl.includes("?") ? "&" : "?"}t=${Date.now()}`);
           retry.preload = "auto";
           retry.crossOrigin = "anonymous";
-          retry.playsInline = true;
+          setInlinePlaybackAttributes(retry);
           retry.volume = 1;
           hangupAudioRef.current = retry;
           retry.onended = () => {
