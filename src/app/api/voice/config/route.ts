@@ -34,6 +34,25 @@ function getSupabaseAuthed(req: Request) {
   });
 }
 
+function getHangupFallbackPublicUrl(): string | null {
+  const base = String(process.env.NEXT_PUBLIC_SUPABASE_URL || "").trim();
+  if (!base) return null;
+  return `${base}/storage/v1/object/public/panana-characters/voice/hangup.mp3`;
+}
+
+async function resolveHangupUrlWithFallback(raw: unknown): Promise<string | null> {
+  const explicit = raw != null ? String(raw).trim() : "";
+  if (explicit) return explicit;
+  const fallback = getHangupFallbackPublicUrl();
+  if (!fallback) return null;
+  try {
+    const res = await fetch(fallback, { method: "HEAD", cache: "no-store" });
+    return res.ok ? fallback : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function GET() {
   try {
     const supabase = getSupabaseAnon();
@@ -54,6 +73,7 @@ export async function GET() {
       ringtone_url: null as string | null,
       hangup_sound_url: null as string | null,
     };
+    const resolvedHangupUrl = await resolveHangupUrlWithFallback((data as any)?.hangup_sound_url);
     return NextResponse.json({
       ok: true,
       data: data
@@ -61,9 +81,9 @@ export async function GET() {
             ...fallback,
             ...data,
             ringtone_url: (data as any).ringtone_url ?? null,
-            hangup_sound_url: (data as any).hangup_sound_url ?? null,
+            hangup_sound_url: resolvedHangupUrl,
           }
-        : fallback,
+        : { ...fallback, hangup_sound_url: resolvedHangupUrl },
     });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Unknown error";

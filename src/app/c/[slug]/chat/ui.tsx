@@ -1634,6 +1634,7 @@ export function CharacterChatClient({
               }}
               characterAvatarUrl={characterAvatarUrl}
               userAvatarUrl={userAvatarUrl}
+              startOnOpen
             />
           ) : null}
           {showNeedAdultVerifyBanner ? (

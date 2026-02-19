@@ -139,11 +139,11 @@ export default function AdminLlmSettingsPage() {
 
   const modelPlaceholder =
     selectedProvider === "anthropic"
-      ? "예: auto, claude-haiku-4-5, claude-sonnet-4-5"
+      ? "예: auto, claude-haiku-4-5, claude-sonnet-4-6"
       : "예: auto, gemini-2.5-flash, gemini-2.5-pro";
 
   const MODEL_NAMES_COPY: Record<string, string[]> = {
-    anthropic: ["auto", "claude-haiku-4-5", "claude-sonnet-4-5"],
+    anthropic: ["auto", "claude-haiku-4-5", "claude-sonnet-4-6"],
     gemini: ["auto", "gemini-2.5-flash", "gemini-2.5-pro"],
   };
 

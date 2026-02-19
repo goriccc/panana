@@ -301,7 +301,12 @@ function isRefusalLike(text: string): boolean {
     "can't roleplay",
     "cannot roleplay",
     "won't roleplay",
+    "i can't roleplay",
+    "i cannot roleplay",
     "sexual or erotic",
+    "power imbalance",
+    "manipulative relationship",
+    "i appreciate your",
     "저는 ai",
     "저는 인공지능",
     "ai라서",
@@ -340,6 +345,14 @@ function getEnvKey(provider: "anthropic" | "gemini" | "deepseek") {
   return process.env.DEEPSEEK_API_KEY || "";
 }
 
+/** 응답에 "auto"가 나가지 않도록 실제 모델명으로 치환 (대화창 표기용) */
+function modelForResponse(provider: string, model: string): string {
+  if (!model || String(model).toLowerCase() === "auto") {
+    return provider === "anthropic" ? "claude-sonnet-4-6" : provider === "gemini" ? "gemini-2.5-flash" : model || "unknown";
+  }
+  return model;
+}
+
 /** 대화 깊이/맥락 복잡도에 따라 Gemini Flash(가벼운 대화) vs Pro(복잡·정교한 서사) 자동 선택 */
 function selectGeminiModel(
   messages: Array<{ role: string; content: string }>,
@@ -368,7 +381,7 @@ function selectAnthropicModel(
     .reverse()
     .find((m) => m.role === "assistant")
     ?.content?.length || 0;
-  if (totalChars > 12000 || msgCount > 10 || lastAssistant > 400) return "claude-sonnet-4-5";
+  if (totalChars > 12000 || msgCount > 10 || lastAssistant > 400) return "claude-sonnet-4-6";
   return "claude-haiku-4-5";
 }
 
@@ -778,13 +791,13 @@ export async function POST(req: Request) {
       body.model ||
       settings?.model ||
       (body.provider === "anthropic"
-        ? "claude-sonnet-4-5"
+        ? "claude-sonnet-4-6"
         : body.provider === "gemini"
           ? "gemini-2.5-pro"
           : "DeepSeek V3");
     // Anthropic deprecated/legacy Sonnet IDs → 현재 지원 모델 (404 방지)
     if (body.provider === "anthropic" && /claude-3-5-sonnet-(20241022|latest)/i.test(model)) {
-      model = "claude-sonnet-4-5";
+      model = "claude-sonnet-4-6";
     }
     // "auto"는 아래에서 system 확정 후 selectAnthropicModel로 치환됨
     const temperature = body.temperature ?? settings?.temperature ?? 0.7;
@@ -1072,6 +1085,9 @@ export async function POST(req: Request) {
       );
     }
 
+    // auto 해석 후 실제 사용 모델을 응답용 outModel에 반영 (대화창에 실제 모델명 표기)
+    outModel = model;
+
     if (body.provider === "anthropic") {
       try {
         out = await callAnthropic({
@@ -1181,10 +1197,10 @@ export async function POST(req: Request) {
       text = removeParenthesisBlocks(text);
     }
 
-    // Claude 캐릭터 이탈/거절 응답 시: 19금 허용이면 Gemini로 재시도, 아니면 성인 인증 유도
+    // Claude 캐릭터 이탈/거절 응답(시스템 프롬프트 유출) 시: Gemini로 재시도. 성공하면 그대로 반환, 실패 시 19금이 아니면 그냥 반환·19금이면 성인 인증 유도
     if (body.provider === "anthropic" && body.characterSlug && isRefusalLike(text)) {
       const fallback = await loadFallbackProvider();
-      if (allowUnsafe && fallback === "gemini") {
+      if (fallback === "gemini") {
         const geminiKey = getEnvKey("gemini");
         const geminiSettings = await loadSettings("gemini").catch(() => null);
         if (geminiKey) {
@@ -1209,11 +1225,12 @@ export async function POST(req: Request) {
             outModel = fallbackModel;
           }
         }
-      } else if (!allowUnsafe) {
+      }
+      if (isRefusalLike(text) && !allowUnsafe) {
         return NextResponse.json({
           ok: true,
           provider: body.provider,
-          model,
+          model: modelForResponse(outProvider, outModel),
           text,
           needAdultVerify: true,
           ...(body.challengeId ? { challengeSuccess: false } : {}),
@@ -1294,7 +1311,7 @@ export async function POST(req: Request) {
         });
         const retryText = sanitizeAssistantText(String(retryOut.text || ""), tvars);
         if (retryText) {
-          return NextResponse.json({ ok: true, provider: body.provider, model, text: retryText });
+          return NextResponse.json({ ok: true, provider: body.provider, model: modelForResponse(body.provider, outModel), text: retryText });
         }
 
         const meta = out.meta || {};
@@ -1312,7 +1329,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: true,
       provider: outProvider,
-      model: outModel,
+      model: modelForResponse(outProvider, outModel),
       text,
       ...(body.challengeId ? { challengeSuccess } : {}),
       runtime: {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AudioRecorder } from "@/lib/voice/genai-live/audio-recorder";
 import { AudioStreamer } from "@/lib/voice/genai-live/audio-streamer";
@@ -81,6 +81,7 @@ export function VoiceSessionClient({
   characterAvatarUrl,
   userAvatarUrl,
   onPhaseChange,
+  startOnOpen = false,
 }: {
   characterSlug: string;
   characterName: string;
@@ -94,6 +95,8 @@ export function VoiceSessionClient({
   userAvatarUrl?: string;
   /** 링 중일 때 부모(헤더 아이콘)에서 흔들림 등 표시용 */
   onPhaseChange?: (phase: "idle" | "ringing" | "connected") => void;
+  /** true면 모달이 열릴 때(전화 아이콘 탭과 동일 제스처) iOS에서 즉시 통화 시작 */
+  startOnOpen?: boolean;
 }) {
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -197,6 +200,7 @@ export function VoiceSessionClient({
   useEffect(() => {
     if (phase !== "ringing" || !ringtoneUrl) return;
     const audio = new Audio(ringtoneUrl);
+    if (isIOSDevice()) setInlinePlaybackAttributes(audio);
     ringAudioRef.current = audio;
     let earlyTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -573,6 +577,45 @@ export function VoiceSessionClient({
     };
   }, [ensurePlaybackResumed]);
 
+  /** iOS 전용: 전화 아이콘 탭(사용자 제스처) 시점에 마이크/레코더만 준비. 링 종료 후 startVoice()가 같은 리소스로 연결. */
+  const prepareIOSVoice = useCallback(async () => {
+    if (!isIOSDevice()) return;
+    if (recorderRef.current && streamerRef.current) return;
+    try {
+      if (!iosRecorderContextRef.current) {
+        iosRecorderContextRef.current = new AudioContext({ sampleRate: 16000 });
+      }
+      if (typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia && !iosMicStreamPromiseRef.current) {
+        iosMicStreamPromiseRef.current = navigator.mediaDevices.getUserMedia({ audio: true });
+      }
+      if (typeof window !== "undefined") {
+        const unlock = new Audio();
+        unlock.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
+        void unlock.play().catch(() => {});
+      }
+      const outCtx = new AudioContext({ sampleRate: 24000 });
+      await outCtx.resume();
+      const streamer = new AudioStreamer(outCtx, { mergeChunkSamples: 48000 });
+      await streamer.addWorklet("vumeter-out", VolMeterWorklet, (d: unknown) => {
+        const ev = d as MessageEvent;
+        const vol = (ev?.data as { volume?: number })?.volume;
+        if (typeof vol === "number") setOutVolume(vol);
+      });
+      streamerRef.current = streamer;
+      await streamer.resume();
+      const recorder = new AudioRecorder(16000);
+      recorder.on("data", (base64: string) => {
+        if (wsRef.current?.readyState === WebSocket.OPEN && initSentRef.current) {
+          wsRef.current.send(JSON.stringify({ type: "audio", data: base64, mimeType: "audio/pcm;rate=16000" }));
+        }
+      });
+      recorder.on("volume", (v: number) => setInVolume(v));
+      recorderRef.current = recorder;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "오디오 초기화 실패");
+    }
+  }, []);
+
   const startVoice = useCallback(async () => {
     setPhase("connected");
     if (isIOSDevice()) {
@@ -591,8 +634,7 @@ export function VoiceSessionClient({
       void unlock.play().catch(() => {});
     }
 
-    // iOS 전용: 사용자 클릭 제스처 내에서 오디오/마이크 초기화
-    // 리서치: iOS Safari는 getUserMedia + AudioContext + createMediaStreamSource를 같은 제스처에서 해야 함.
+    // iOS 전용: 사용자 클릭 제스처 내에서 오디오/마이크 초기화 (prepareIOSVoice로 미리 해둔 경우 스킵)
     if (isIOSDevice() && (!recorderRef.current || !streamerRef.current)) {
       try {
         const outCtx = new AudioContext({ sampleRate: 24000 });
@@ -654,19 +696,27 @@ export function VoiceSessionClient({
     setStarted(true);
   }, [clearReconnectTimer, connect, ensurePlaybackResumed, micSensitivity]);
 
-  // 링 종료 후 자동으로 통화 시작
+  // 링 종료 후 자동으로 통화 시작 (iOS는 전화 아이콘 탭 시 prepareIOSVoice로 마이크 확보해 둠)
   useEffect(() => {
     if (phase !== "connected" || started || !ringEndedRef.current) return;
     ringEndedRef.current = false;
     void startVoice();
   }, [phase, started, startVoice]);
 
-  // 링톤 없을 때 자동 통화 시작 ("음성 통화를 시작할까요?" 화면 스킵)
+  // 링톤 없을 때 자동 통화 시작 (iOS는 전화 아이콘 탭 시 prepareIOSVoice로 마이크 확보해 둠)
   useEffect(() => {
     if (!shouldAutoStart || phase !== "idle") return;
     setShouldAutoStart(false);
     void startVoice();
   }, [shouldAutoStart, phase, startVoice]);
+
+  // iOS: 전화 아이콘 탭 시 사용자 제스처 안에서 마이크/레코더만 준비 → 링톤 재생 후 동일 UX로 자동 연결
+  const startedByOpenRef = useRef(false);
+  useLayoutEffect(() => {
+    if (!startOnOpen || !isIOSDevice() || startedByOpenRef.current) return;
+    startedByOpenRef.current = true;
+    void prepareIOSVoice();
+  }, [startOnOpen, prepareIOSVoice]);
 
   const stopVoiceCore = useCallback((opts?: { closeUi?: boolean; setIdle?: boolean }) => {
     const closeUi = opts?.closeUi !== false;
@@ -820,7 +870,7 @@ export function VoiceSessionClient({
     </span>
   );
 
-  // idle: 연결 중 + 취소 동시 표시
+  // idle: 연결 중 + 취소 (iOS는 전화 아이콘 탭 시 startOnOpen으로 즉시 통화 시작)
   if (phase === "idle") {
     const idleUI = (
       <div className={`${overlayPosition} ${fullScreenZ} flex flex-col items-center justify-center bg-[#0B0C10] gap-6`}>
@@ -959,8 +1009,8 @@ export function VoiceSessionClient({
     return portalTarget ? createPortal(connectedUI, portalTarget) : connectedUI;
   }
 
-  // connected이지만 아직 started 전 (링톤 끝난 직후, 통화 화면 전 대기) — 메시지 없이 대기
-  if (phase === "connected") {
+  // connected이지만 아직 started 전 (iOS는 전화 아이콘 탭 시 startOnOpen으로 이미 시작됨)
+  if (phase === "connected" && !started) {
     const connectingUI = (
       <div className={`${overlayPosition} ${fullScreenZ} bg-[#0B0C10]`} aria-hidden />
     );
