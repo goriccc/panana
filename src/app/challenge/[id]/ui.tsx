@@ -143,15 +143,32 @@ export function ChallengeClient({
     };
   }, []);
 
-  // 도전 채팅 화면에서 키보드 올라와도 헤더가 밀리지 않도록 body 스크롤 잠금
+  // 도전 채팅 화면에서 키보드 올라와도 헤더가 밀리지 않도록 body 완전 고정 (스크롤 방지)
   useEffect(() => {
     if (view !== "chat") return;
-    const prev = { body: document.body.style.overflow, html: document.documentElement.style.overflow };
-    document.body.style.overflow = "hidden";
-    document.documentElement.style.overflow = "hidden";
+    const b = document.body;
+    const html = document.documentElement;
+    const prev = {
+      bodyOverflow: b.style.overflow,
+      bodyPosition: b.style.position,
+      bodyInset: b.style.inset,
+      bodyWidth: b.style.width,
+      bodyHeight: b.style.height,
+      htmlOverflow: html.style.overflow,
+    };
+    b.style.overflow = "hidden";
+    b.style.position = "fixed";
+    b.style.inset = "0";
+    b.style.width = "100%";
+    b.style.height = "100%";
+    html.style.overflow = "hidden";
     return () => {
-      document.body.style.overflow = prev.body;
-      document.documentElement.style.overflow = prev.html;
+      b.style.overflow = prev.bodyOverflow;
+      b.style.position = prev.bodyPosition;
+      b.style.inset = prev.bodyInset;
+      b.style.width = prev.bodyWidth;
+      b.style.height = prev.bodyHeight;
+      html.style.overflow = prev.htmlOverflow;
     };
   }, [view]);
 
