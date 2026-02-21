@@ -83,6 +83,7 @@ export function VoiceSessionClient({
   onPhaseChange,
   startOnOpen = false,
   preloadedRingtoneUrl = null,
+  recentMessages = [],
 }: {
   characterSlug: string;
   characterName: string;
@@ -100,6 +101,8 @@ export function VoiceSessionClient({
   startOnOpen?: boolean;
   /** iOS: 부모가 미리 로드한 링톤 URL → 제스처 직후 재생 가능 */
   preloadedRingtoneUrl?: string | null;
+  /** 통화 연결 시 첫 인사에 반영할 최근 채팅 (이전 대화 맥락) */
+  recentMessages?: Array<{ from: "user" | "bot"; text: string }>;
 }) {
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -118,6 +121,21 @@ export function VoiceSessionClient({
   const [ringtoneUrl, setRingtoneUrl] = useState<string | null>(null);
   const [hangupSoundUrl, setHangupSoundUrl] = useState<string | null>(null);
   const [closingWithHangupSound, setClosingWithHangupSound] = useState(false);
+  const [safetyOn, setSafetyOn] = useState(false);
+  useEffect(() => {
+    const read = () => {
+      try {
+        const v = document.cookie.split("; ").find((r) => r.startsWith("panana_safety_on="));
+        setSafetyOn(v ? v.split("=")[1] === "1" : localStorage.getItem("panana_safety_on") === "1");
+      } catch {
+        setSafetyOn(false);
+      }
+    };
+    read();
+    window.addEventListener("panana-safety-change", read as EventListener);
+    return () => window.removeEventListener("panana-safety-change", read as EventListener);
+  }, []);
+  const cancelButtonBg = safetyOn ? "bg-panana-pink2 hover:bg-panana-pink2/90" : "bg-[#ffa9d6] hover:bg-[#ffa9d6]/90";
   const [callDurationSec, setCallDurationSec] = useState(0);
   const [started, setStarted] = useState(false);
   const ringAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -315,9 +333,17 @@ export function VoiceSessionClient({
     setError(null);
     setReconnectGaveUp(false);
 
-    const res = await fetch(
-      `/api/voice/prompt?characterSlug=${encodeURIComponent(characterSlug)}&callSign=${encodeURIComponent(callSign)}`
-    );
+    const params = new URLSearchParams({
+      characterSlug,
+      callSign: callSign || "",
+    });
+    if (recentMessages.length > 0) {
+      params.set(
+        "recentChat",
+        JSON.stringify(recentMessages.slice(-10).map((m) => ({ from: m.from, text: (m.text || "").slice(0, 200) })))
+      );
+    }
+    const res = await fetch(`/api/voice/prompt?${params.toString()}`);
     const data = await res.json().catch(() => ({}));
     if (!data?.ok || !data?.systemPrompt) {
       setError(data?.error || "프롬프트를 불러올 수 없어요.");
@@ -381,6 +407,12 @@ export function VoiceSessionClient({
             setReconnectGaveUp(false);
             initSentRef.current = true;
             setConnected(true);
+            // 통화 연결 직후 음성 모델이 먼저 인사하도록 첫 응답 요청 (프롬프트의 [통화 연결 시] 지시에 따라 인사말 생성)
+            try {
+              ws.send(JSON.stringify({ type: "response.create" }));
+            } catch {
+              // ignore
+            }
             return;
           }
           if (msg.type === "response.output_audio.delta" && msg.delta) {
@@ -541,9 +573,18 @@ export function VoiceSessionClient({
       try {
         const msg = JSON.parse(String(event.data || "{}"));
         if (msg.type === "ready") {
+          const isFirstConnect = reconnectAttemptRef.current === 0;
           reconnectAttemptRef.current = 0;
           setReconnectGaveUp(false);
           setConnected(true);
+          // 링톤 종료 후 첫 연결 시 Gemini가 먼저 인사하도록 발화 유도
+          if (isFirstConnect) {
+            try {
+              ws.send(JSON.stringify({ type: "text", text: "." }));
+            } catch {
+              // ignore
+            }
+          }
           return;
         }
         if (msg.type === "audio" && msg.data) {
@@ -1206,7 +1247,7 @@ export function VoiceSessionClient({
         <button
           type="button"
           onClick={onClose}
-          className="rounded-full bg-panana-pink px-6 py-3 text-sm font-bold text-[#0B0C10] hover:bg-panana-pink/90"
+          className={`rounded-full px-6 py-3 text-sm font-bold text-[#0B0C10] ${cancelButtonBg}`}
         >
           취소
         </button>
@@ -1232,7 +1273,7 @@ export function VoiceSessionClient({
         <button
           type="button"
           onClick={cancelRinging}
-          className="rounded-full bg-panana-pink px-6 py-3 text-sm font-bold text-[#0B0C10] hover:bg-panana-pink/90"
+          className={`rounded-full px-6 py-3 text-sm font-bold text-[#0B0C10] ${cancelButtonBg}`}
         >
           취소
         </button>
@@ -1275,7 +1316,7 @@ export function VoiceSessionClient({
               /* eslint-disable-next-line @next/next/no-img-element */
               <img src={characterAvatarUrl} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" loading="eager" />
             ) : (
-              <div className="h-full w-full bg-panana-pink/40" />
+              <div className="h-full w-full bg-panana-pink2/40" />
             )}
           </div>
           <p className="mt-3 text-base font-medium text-white/90">{characterName || "캐릭터"}</p>
@@ -1351,7 +1392,7 @@ export function VoiceSessionClient({
 
   // 대기/컴팩트 바 (폴백)
   return (
-    <div className="flex items-center justify-between gap-2 rounded-xl border border-panana-pink/30 bg-panana-pink/10 px-4 py-3">
+    <div className="flex items-center justify-between gap-2 rounded-xl border border-panana-pink2/30 bg-panana-pink2/10 px-4 py-3">
       <div className="flex min-w-[2.5rem] justify-start">
         <div
           className="overflow-hidden rounded-full ring-1 ring-white/10 transition-transform"
@@ -1371,7 +1412,7 @@ export function VoiceSessionClient({
               referrerPolicy="no-referrer"
             />
           ) : (
-            <div className="h-full w-full bg-panana-pink/40" />
+            <div className="h-full w-full bg-panana-pink2/40" />
           )}
         </div>
       </div>
@@ -1393,7 +1434,7 @@ export function VoiceSessionClient({
                 setMicSensitivity(v);
                 recorderRef.current?.setGain(v);
               }}
-              className="h-1.5 flex-1 accent-panana-pink"
+              className="h-1.5 flex-1 accent-panana-pink2"
               aria-label="마이크 민감도"
             />
             <span className="w-7 text-right text-[11px] text-white/80">{micSensitivity.toFixed(1)}</span>
@@ -1459,7 +1500,7 @@ export function VoiceSessionClient({
               referrerPolicy="no-referrer"
             />
           ) : (
-            <div className="h-full w-full bg-panana-pink/40" />
+            <div className="h-full w-full bg-panana-pink2/40" />
           )}
         </div>
       </div>

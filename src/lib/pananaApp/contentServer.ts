@@ -48,6 +48,20 @@ type PublicCharacterRow = {
   posts_count: number;
 };
 
+/** 공백/콤마로 이어진 한 덩어리 문자열도 개별 태그 배열로 통일 (admin 저장 형식 차이 대응) */
+function normalizeTags(raw: string[] | string | null | undefined): string[] {
+  if (raw == null) return [];
+  const arr = Array.isArray(raw) ? raw : [raw];
+  const out: string[] = [];
+  for (const t of arr) {
+    const s = String(t ?? "").trim();
+    if (!s) continue;
+    const parts = s.split(/[\s,]+/).map((p) => p.trim()).filter(Boolean);
+    for (const p of parts) out.push(p.startsWith("#") ? p : `#${p}`);
+  }
+  return out;
+}
+
 export async function fetchHomeCategoriesFromDb(): Promise<Category[] | null> {
   const supabase = getSupabaseServer();
 
@@ -109,7 +123,7 @@ export async function fetchHomeCategoriesFromDb(): Promise<Category[] | null> {
       author: r.author_handle ? (r.author_handle.startsWith("@") ? r.author_handle : `@${r.author_handle}`) : "@panana",
       title: r.title,
       description: r.description || "",
-      tags: (r.tags || []).map((t) => (t.startsWith("#") ? t : `#${t}`)),
+      tags: normalizeTags(r.tags),
       imageUrl: r.character_profile_image_url || undefined,
       safetySupported: Boolean((r as any)?.safety_supported),
       gender: (r as any)?.gender ?? null,
@@ -146,7 +160,7 @@ export async function fetchHomeCategoriesFromDb(): Promise<Category[] | null> {
         author: r.handle ? (r.handle.startsWith("@") ? r.handle : `@${r.handle}`) : "@panana",
         title: r.name || "",
         description: r.tagline || "",
-        tags: (r.hashtags || []).map((t: string) => (t.startsWith("#") ? t : `#${t}`)),
+        tags: normalizeTags(r.hashtags),
         imageUrl: r.profile_image_url || undefined,
         safetySupported: Boolean(r.safety_supported),
         gender: (r as any)?.gender ?? null,
@@ -199,7 +213,7 @@ export async function fetchCategoryFromDb(slug: string): Promise<Category | null
         author: r.handle ? (r.handle.startsWith("@") ? r.handle : `@${r.handle}`) : "@panana",
         title: r.name || "",
         description: r.tagline || "",
-        tags: (r.hashtags || []).map((t: string) => (t.startsWith("#") ? t : `#${t}`)),
+        tags: normalizeTags(r.hashtags),
         imageUrl: r.profile_image_url || undefined,
         safetySupported: Boolean(r.safety_supported),
         gender: (r as any)?.gender ?? null,
@@ -250,7 +264,7 @@ export async function fetchCategoryFromDb(slug: string): Promise<Category | null
     author: r.author_handle ? (r.author_handle.startsWith("@") ? r.author_handle : `@${r.author_handle}`) : "@panana",
     title: r.title,
     description: r.description || "",
-    tags: (r.tags || []).map((t) => (t.startsWith("#") ? t : `#${t}`)),
+    tags: normalizeTags(r.tags),
     imageUrl: r.character_profile_image_url || undefined,
     safetySupported: Boolean((r as any)?.safety_supported),
     gender: (r as any)?.gender ?? null,

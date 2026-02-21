@@ -2,22 +2,37 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { signIn } from "next-auth/react";
 
 export function LoginClient({ returnTo }: { returnTo: string }) {
   const backHref = useMemo(() => returnTo || "/my", [returnTo]);
+  const [safetyOn, setSafetyOn] = useState(false);
+  useEffect(() => {
+    const read = () => {
+      try {
+        const v = document.cookie.split("; ").find((row) => row.startsWith("panana_safety_on="));
+        setSafetyOn(v ? v.split("=")[1] === "1" : localStorage.getItem("panana_safety_on") === "1");
+      } catch {
+        setSafetyOn(false);
+      }
+    };
+    read();
+    window.addEventListener("panana-safety-change", read as EventListener);
+    return () => window.removeEventListener("panana-safety-change", read as EventListener);
+  }, []);
 
   const login = async (provider: "kakao" | "naver" | "google") => {
     // Auth.js(NextAuth) OAuth 로그인
     await signIn(provider, { callbackUrl: backHref });
   };
 
+  const titleClass = safetyOn ? "text-panana-pink2" : "text-[#ffa9d6]";
   return (
     <div className="min-h-dvh bg-[linear-gradient(#07070B,#0B0C10)] text-white">
       <header className="mx-auto w-full max-w-[420px] px-5 pt-3">
         <div className="relative flex h-11 items-center">
-          <div className="mx-auto text-[16px] font-semibold tracking-[-0.01em] text-[#ffa9d6]">로그인</div>
+          <div className={`mx-auto text-[16px] font-semibold tracking-[-0.01em] ${titleClass}`}>로그인</div>
           <Link href={backHref} aria-label="닫기" className="absolute right-0 p-2">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path

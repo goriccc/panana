@@ -18,6 +18,12 @@ function getSupabase() {
   return createClient(url, anonKey, { auth: { persistSession: false } });
 }
 
+function getSupabaseAdmin() {
+  const url = mustEnv("NEXT_PUBLIC_SUPABASE_URL");
+  const key = mustEnv("SUPABASE_SERVICE_ROLE_KEY");
+  return createClient(url, key, { auth: { persistSession: false } });
+}
+
 async function loadPananaCharacterBySlug(slug: string) {
   const supabase = getSupabase();
   const { data, error } = await supabase
@@ -28,6 +34,23 @@ async function loadPananaCharacterBySlug(slug: string) {
 
   if (error) throw error;
   return data;
+}
+
+/** 음성 보이스 선택용: admin에서 설정한 성별을 panana_characters에서 서비스 롤로 직접 조회 (뷰/권한 이슈 회피) */
+async function loadCharacterGenderBySlug(slug: string): Promise<"male" | "female" | null> {
+  try {
+    const sb = getSupabaseAdmin();
+    const { data, error } = await sb
+      .from("panana_characters")
+      .select("gender")
+      .eq("slug", slug)
+      .eq("active", true)
+      .maybeSingle();
+    if (error) return null;
+    return normalizeCharacterGender((data as any)?.gender ?? null);
+  } catch {
+    return null;
+  }
 }
 
 async function loadStudioPrompt(characterId: string) {
@@ -100,11 +123,22 @@ function styleInstruction(style: string): string {
   }
 }
 
+/** API/DB에서 오는 값을 "male" | "female" | null 로 정규화 (대소문자·공백 무관) */
+function normalizeCharacterGender(
+  raw: string | null | undefined
+): "male" | "female" | null {
+  if (raw == null) return null;
+  const s = String(raw).trim().toLowerCase();
+  if (s === "male") return "male";
+  if (s === "female") return "female";
+  return null;
+}
+
 function pickVoiceByCharacterGender(
   characterGender: string | null | undefined,
   cfg: { voice_name_female?: string; voice_name_male?: string; voice_style_female?: string; voice_style_male?: string }
 ): { voiceName: string; voiceStyle: string } {
-  const gender = String(characterGender || "female").trim().toLowerCase();
+  const gender = normalizeCharacterGender(characterGender);
   const isMale = gender === "male";
   return {
     voiceName: isMale
@@ -122,6 +156,7 @@ export async function GET(req: NextRequest) {
     const characterSlug = url.searchParams.get("characterSlug")?.trim();
     const callSign = url.searchParams.get("callSign")?.trim() || "";
     const runtimeJson = url.searchParams.get("runtime"); // JSON: { variables, ownedSkus, ending }
+    const recentChatJson = url.searchParams.get("recentChat"); // JSON: [{ from: "user"|"bot", text: string }]
 
     if (!characterSlug) {
       return NextResponse.json({ ok: false, error: "characterSlug 필요" }, { status: 400 });
@@ -155,11 +190,49 @@ export async function GET(req: NextRequest) {
     });
 
     const voiceConfig = await loadVoiceConfig();
-    const characterGender = (panana as any)?.gender;
+    // 캐릭터 성별: admin/characters에서 설정한 값을 쓰기 위해 panana_characters를 서비스 롤로 직접 조회 (뷰/권한 이슈 회피)
+    let characterGender = await loadCharacterGenderBySlug(characterSlug!);
+    if (characterGender === null) {
+      characterGender = normalizeCharacterGender(
+        (panana as any)?.gender ?? (panana as any)?.Gender ?? null
+      );
+    }
     const { voiceName, voiceStyle } = pickVoiceByCharacterGender(characterGender, voiceConfig);
     const styleText = styleInstruction(voiceStyle);
+    const userDisplayName = callSign && String(callSign).trim() ? String(callSign).trim() : "상대";
+    const isMale = characterGender === "male";
+    const firstGreetingGuide = isMale
+      ? `남성 캐릭터 예시: "여보세요?", "오~ ${userDisplayName}, 안녕 오랜만이야", "어 ${userDisplayName}이야? 잘 지냈어?" 등`
+      : `여성 캐릭터 예시: "여보세요?", "어머 ${userDisplayName}, 안녕 오랜만이야", "어 ${userDisplayName}이야? 잘 지냈어?" 등`;
 
-    const systemPrompt = `${baseSystem}\n\n[음성 대화 - 필수]\n- **절대 지문을 만들지 않고, 절대 읽지 않는다.**\n- 금지 범위: 괄호(), （）, 대괄호[], 중괄호{}, 인용 괄호「」/『』, 별표지문(*웃음*), 밑줄지문(_한숨_)\n- 금지 토큰 자체를 출력하지 않는다: (, ), （, ）, [, ], {, }, 「, 」, 『, 』, *, _\n- 출력 형식 계약: **오직 발화 대사만 평문으로 출력**한다. 지문/서술/메타 설명/연출문은 전부 금지.\n- 문장 습관 규칙: 행동을 설명하는 진행형 서술(\"...하며\", \"...하면서\", \"웃으며\", \"한숨\")을 쓰지 않는다.\n- 발화 직전 자체 검증(필수):\n  1) 금지 토큰 또는 지문 패턴이 있으면 전부 제거\n  2) 제거 후 대사만 남기고 다시 한 문장으로 재작성\n  3) 결과는 대사만 포함한 평문으로 출력\n- ${styleText}\n- 음성으로 자연스럽게 대화한다. 짧은 문장 위주로 말한다.`;
+    let recentChatBlock = "";
+    try {
+      if (recentChatJson && recentChatJson.trim()) {
+        const recent = JSON.parse(recentChatJson) as Array<{ from?: string; text?: string }>;
+        if (Array.isArray(recent) && recent.length > 0) {
+          const lines = recent
+            .slice(-10)
+            .map((m) => {
+              const from = m.from === "user" ? "USER" : "ASSISTANT";
+              const text = String(m.text ?? "").trim().slice(0, 200);
+              return text ? `${from}: ${text}` : null;
+            })
+            .filter(Boolean);
+          if (lines.length) {
+            recentChatBlock = `\n[최근 채팅 맥락 - 이 인사말에 반영할 것]\n${lines.join("\n")}\n위 대화를 참고해, 관계·맥락에 맞는 자연스러운 인사말을 한다.`;
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
+    const firstGreetingBlock = `[통화 연결 시 - 필수] 지금 ${userDisplayName}이(가) 나한테 전화를 걸었고, 내가 전화를 받은 상황이다. 통화가 연결되면 **반드시 너가 먼저 인사**한다. 상대 이름은 "${userDisplayName}"이다. ${firstGreetingGuide} 절대로 "내가 전화했어", "나 전화했잖아", "전화 올 줄 알았어", "전화 기다리고 있었어" 등 내가 전화를 건 것처럼 들리는 표현은 사용하지 않는다.
+- **첫 인사는 2~4문장 정도로 조금 길어도 된다.** 캐릭터의 **세계관·로어북·성격·관계 설정**을 살려 말하고, 상황에 맞으면 감정이나 배경을 짧게 담아도 된다.
+- 이전 대화 맥락이 아래에 주어지면 그에 맞는 인사말을 한다.${recentChatBlock}
+- 링톤이 끝나고 연결된 직후 첫 발화는 이 인사로 시작한다. 이후 대화는 짧은 문장 위주로 말한다.`;
+
+    const systemPrompt = `${baseSystem}\n\n[음성 대화 - 필수]\n- ${firstGreetingBlock}\n- **절대 지문을 만들지 않고, 절대 읽지 않는다.**\n- 금지 범위: 괄호(), （）, 대괄호[], 중괄호{}, 인용 괄호「」/『』, 별표지문(*웃음*), 밑줄지문(_한숨_)\n- 금지 토큰 자체를 출력하지 않는다: (, ), （, ）, [, ], {, }, 「, 」, 『, 』, *, _\n- 출력 형식 계약: **오직 발화 대사만 평문으로 출력**한다. 지문/서술/메타 설명/연출문은 전부 금지.\n- 문장 습관 규칙: 행동을 설명하는 진행형 서술(\"...하며\", \"...하면서\", \"웃으며\", \"한숨\")을 쓰지 않는다.\n- 발화 직전 자체 검증(필수):\n  1) 금지 토큰 또는 지문 패턴이 있으면 전부 제거\n  2) 제거 후 대사만 남기고 다시 한 문장으로 재작성\n  3) 결과는 대사만 포함한 평문으로 출력\n- ${styleText}\n- 음성으로 자연스럽게 대화한다. **통화 연결 직후 첫 인사만** 2~4문장으로 세계관을 담아 말해도 되고, 이후에는 짧은 문장 위주로 말한다.`;
 
     const groqVoiceEnabled = Boolean((voiceConfig as any)?.groq_voice_enabled);
     const groqModel = (voiceConfig as any)?.groq_model && String((voiceConfig as any).groq_model).trim()

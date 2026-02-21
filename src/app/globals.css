@@ -2,6 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
+/* 테마핑크: ThemePinkSync에서 스파이시 ON/OFF에 따라 런타임 갱신
+   짙은: OFF=#FF4F9A, ON=#C8326F
+   옅은: OFF=#FFA1CC, ON=#FF4F9A */
+:root {
+  --panana-pink: #FF4F9A;
+  --panana-pink2: #FFA1CC;
+}
+
 html,
 body {
   height: 100%;

@@ -20,8 +20,8 @@ const config: Config = {
       },
       colors: {
         panana: {
-          pink: "#FF4DA7",
-          pink2: "#FF5BB6",
+          pink: "var(--panana-pink, #FF4F9A)",
+          pink2: "var(--panana-pink2, #FFA1CC)",
           bg: "#0B0C10",
           card: "#101117",
           card2: "#141624",

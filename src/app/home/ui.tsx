@@ -172,45 +172,22 @@ export function HomeClient({
   initialTab?: string | null;
 }) {
   const router = useRouter();
-  // 클라이언트에서는 localStorage를 우선해 즉시 렌더링 (뒤로가기 시 깜빡임 방지)
+  // 한 번 켜면 고정: 클라이언트에서는 쿠키/로컬 기준 초기값 사용해 복귀 시 슬라이더가 OFF→ON으로 슬라이딩되지 않도록 함.
   const [safetyOn, setSafetyOn] = useState(() => {
-    if (typeof window !== "undefined") {
-      try {
-        return localStorage.getItem("panana_safety_on") === "1";
-      } catch {}
+    if (typeof window === "undefined") return initialSafetyOn ?? false;
+    if (initialSafetyOn !== undefined) return initialSafetyOn;
+    try {
+      const c = document.cookie.split("; ").find((r) => r.startsWith("panana_safety_on="));
+      if (c) return c.split("=")[1] === "1";
+      return localStorage.getItem("panana_safety_on") === "1";
+    } catch {
+      return false;
     }
-    return initialSafetyOn ?? false;
   });
   const [adultVerified, setAdultVerified] = useState(false);
   const [adultLoading, setAdultLoading] = useState(true);
-  const [userGender, setUserGender] = useState<Gender | null>(() => {
-    if (typeof window === "undefined") return null;
-    try {
-      const raw = localStorage.getItem("panana_user_gender");
-      if (raw === "female" || raw === "male" || raw === "both" || raw === "private") return raw;
-      const draftRaw = localStorage.getItem("panana_airport_draft");
-      if (draftRaw) {
-        const draft = JSON.parse(draftRaw);
-        const g = String(draft?.gender || "");
-        if (g === "female" || g === "male" || g === "both" || g === "private") return g as Gender;
-      }
-    } catch {}
-    return null;
-  });
-  const [userGenderLoading, setUserGenderLoading] = useState(() => {
-    if (typeof window === "undefined") return true;
-    try {
-      const raw = localStorage.getItem("panana_user_gender");
-      if (raw === "female" || raw === "male" || raw === "both" || raw === "private") return false;
-      const draftRaw = localStorage.getItem("panana_airport_draft");
-      if (draftRaw) {
-        const draft = JSON.parse(draftRaw);
-        const g = String(draft?.gender || "");
-        if (g === "female" || g === "male" || g === "both" || g === "private") return false;
-      }
-    } catch {}
-    return true;
-  });
+  const [userGender, setUserGender] = useState<Gender | null>(null);
+  const [userGenderLoading, setUserGenderLoading] = useState(true);
   const [resetGenderHold, setResetGenderHold] = useState(false);
   const [newGenderLoading, setNewGenderLoading] = useState(false);
   const [genderSeed, setGenderSeed] = useState(1);
@@ -224,6 +201,32 @@ export function HomeClient({
       }
     } catch {}
   }, [initialSafetyOn]);
+
+  // Hydration 이후 localStorage와 동기화 (서버와 동일한 초기 렌더 유지 후 한 번만)
+  useEffect(() => {
+    try {
+      if (typeof window === "undefined") return;
+      const v = localStorage.getItem("panana_safety_on") === "1";
+      setSafetyOn((prev) => (prev !== v ? v : prev));
+      const raw = localStorage.getItem("panana_user_gender");
+      if (raw === "female" || raw === "male" || raw === "both" || raw === "private") {
+        setUserGender(raw);
+        setUserGenderLoading(false);
+        return;
+      }
+      const draftRaw = localStorage.getItem("panana_airport_draft");
+      if (draftRaw) {
+        const draft = JSON.parse(draftRaw);
+        const g = String(draft?.gender || "");
+        if (g === "female" || g === "male" || g === "both" || g === "private") {
+          setUserGender(g as Gender);
+          setUserGenderLoading(false);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
 
   // 스파이시 ON일 때 adultVerified 확정 전까지 콘텐츠 숨김 (OFF→ON 깜빡임 완전 방지)
   const safetyReady = !safetyOn || !adultLoading;
@@ -899,7 +902,7 @@ export function HomeClient({
           setNewGenderLoading(false);
         } else {
           setNewGenderLoading(true);
-          if (!preferredGender) setCategoryItemsBySlug((prev) => ({ ...prev, new: [] }));
+          // new: [] 로 덮어쓰지 않음 → 서버/소스의 cat.items 를 그대로 쓰고, API 응답 시에만 갱신 (플레이스홀더 노출 시간 최소화)
         }
         const params = new URLSearchParams({
           slug: "new",
@@ -1131,9 +1134,9 @@ export function HomeClient({
     <div
       className={[
         "min-h-dvh text-white",
-        activeTab === "search"
-          ? "bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.10),transparent_60%),linear-gradient(#07070B,#0B0C10)]"
-          : "bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.18),transparent_60%),linear-gradient(#07070B,#0B0C10)]",
+        safetyOn
+          ? "bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.18),transparent_60%),linear-gradient(#07070B,#0B0C10)]"
+          : "bg-[linear-gradient(#07070B,#0B0C10)]",
       ].join(" ")}
     >
       <header className="sticky top-0 z-20 w-full bg-[#07070B]/95 pb-4 backdrop-blur-sm">
@@ -1155,6 +1158,11 @@ export function HomeClient({
           try {
             localStorage.setItem("panana_safety_on", next ? "1" : "0");
             setSafetyCookie(next);
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(
+                new CustomEvent("panana-safety-change", { detail: { on: next } })
+              );
+            }
           } catch {}
         }}
         menuVisibility={menuVisibility}
@@ -1167,16 +1175,14 @@ export function HomeClient({
             <div
               className={[
                 "h-[46px] rounded-full border bg-white/[0.03] px-4 ring-1 transition",
-                // 스샷처럼: 기본 상태에서도 테마 핑크가 살짝 보이고, 포커스 때 더 강하게
-                "border-panana-pink/25 ring-panana-pink/15",
-                "focus-within:border-panana-pink/60 focus-within:ring-panana-pink/40",
+                "border-panana-pink2 ring-panana-pink2/30",
+                "focus-within:border-panana-pink2 focus-within:ring-panana-pink2/50",
               ].join(" ")}
             >
-              <div className="flex h-full items-center gap-3">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <div className="flex h-full items-center gap-3 text-panana-pink2">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className="shrink-0 stroke-current">
                   <path
                     d="M21 21l-4.3-4.3m1.8-5.2a7 7 0 11-14 0 7 7 0 0114 0z"
-                    stroke="rgba(255,77,167,0.92)"
                     strokeWidth="2"
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -1187,7 +1193,7 @@ export function HomeClient({
                   value={searchQ}
                   onChange={(e) => setSearchQ(e.target.value)}
                   placeholder="어떤 만남을 찾아볼까요?"
-                  className="h-full w-full bg-transparent text-[14px] font-semibold leading-none text-white/85 outline-none placeholder:text-white/25"
+                  className="h-full w-full bg-transparent text-[14px] font-semibold leading-none text-white/85 outline-none placeholder:text-panana-pink2/70"
                 />
                 {/* 높이 고정: clear 버튼 공간을 항상 확보 */}
                 <div className="h-7 w-7">
@@ -1213,7 +1219,7 @@ export function HomeClient({
                 <div className="text-[14px] font-extrabold text-white/80">무엇을 찾을지 고민된다면</div>
                 <div className="mt-2 text-[12px] font-semibold text-white/45">추천 검색어로 시작해보세요!</div>
 
-                <div className="mt-8 space-y-4 text-[12px] font-extrabold text-panana-pink/90">
+                <div className="mt-8 space-y-4 text-[12px] font-extrabold text-panana-pink2">
                   {recommendedTags.map((t) => (
                     <button
                       key={t}
@@ -1256,8 +1262,8 @@ export function HomeClient({
                             )}
                           </Link>
                           <div className="min-w-0">
-                            <div className="truncate text-[14px] font-semibold text-white/85">{name}</div>
-                            <div className="mt-1 text-[11px] font-semibold text-[#ff8fc3]">
+                            <div className="truncate text-[14px] font-semibold text-white">{name}</div>
+                            <div className="mt-1 text-[11px] font-semibold text-panana-pink2">
                               {(tags.length ? tags : ["#추천"]).join("  ")}
                             </div>
                           </div>
@@ -1265,7 +1271,7 @@ export function HomeClient({
 
                         <Link
                           href={slug ? `/c/${slug}/chat` : "/home"}
-                          className="flex-none rounded-xl border border-panana-pink/60 bg-white px-3 py-2 text-[12px] font-extrabold text-panana-pink"
+                          className="flex-none rounded-xl border border-panana-pink2/60 bg-white px-3 py-2 text-[12px] font-extrabold text-panana-pink2"
                           prefetch={true}
                           onMouseEnter={() => slug && router.prefetch(`/c/${slug}/chat`)}
                           onClick={() => {
@@ -1283,7 +1289,7 @@ export function HomeClient({
                   <div className="mt-10 text-center">
                     <button
                       type="button"
-                      className="text-[13px] font-extrabold text-panana-pink/90"
+                      className="text-[13px] font-extrabold text-panana-pink2"
                       onClick={() => setSearchLimit((v) => v + 8)}
                     >
                       더 보기
@@ -1320,9 +1326,13 @@ export function HomeClient({
         ) : null}
 
         {activeTab === "my" ? (() => {
+          const slugToHandle = new Map(allItems.map((it) => [it.characterSlug, (it as any).author ?? (it as any).handle ?? null]));
           return myTabFiltered.length > 0 ? (
             <div className="mb-6 overflow-hidden rounded-[16px] border border-white/10 bg-white/[0.03]">
-              {myTabFiltered.slice(0, 20).map((it) => (
+              {myTabFiltered.slice(0, 20).map((it) => {
+                const handle = slugToHandle.get(it.characterSlug);
+                const displayHandle = handle ? (String(handle).startsWith("@") ? handle : `@${handle}`) : `@${it.characterSlug}`;
+                return (
               <Link
                 key={it.characterSlug}
                 href={`/c/${it.characterSlug}/chat?from=my`}
@@ -1340,16 +1350,16 @@ export function HomeClient({
                     )}
                   </div>
                   <div className="min-w-0">
-                    <div className="truncate text-[14px] font-semibold text-white/85">{it.characterName}</div>
-                    <div className="mt-1 text-[11px] font-semibold text-white/35">@{it.characterSlug}</div>
+                    <div className="truncate text-[14px] font-semibold text-white/90">{it.characterName}</div>
+                    <div className="mt-1 text-[11px] font-semibold text-white/35">{displayHandle}</div>
                   </div>
                 </div>
                 {/* unread UI는 추후 연결. 지금은 진입 버튼 느낌만 유지 */}
-                <div className="flex-none rounded-full bg-panana-pink/20 px-3 py-1 text-[11px] font-extrabold text-[#ffa9d6] ring-1 ring-panana-pink/30">
+                <div className="flex-none rounded-full bg-[#432036] px-3 py-1 text-[11px] font-extrabold text-panana-pink2">
                   대화
                 </div>
               </Link>
-              ))}
+              ); })}
             </div>
           ) : null;
         })() : null}
@@ -1381,11 +1391,11 @@ export function HomeClient({
         {activeTab === "challenge" ? (
           <div className="space-y-6 pb-10">
             {challengeLoading ? (
-              <div className="mt-6 space-y-6">
+              <div className="space-y-6">
                 {Array.from({ length: 3 }).map((_, i) => (
                   <div key={i} className="overflow-hidden border border-white/10 bg-white/[0.03]">
                     <div className="aspect-[16/9] w-full animate-pulse bg-white/[0.06]" />
-                    <div className="space-y-2 p-4">
+                    <div className="space-y-2 p-3">
                       <div className="h-3 w-40 rounded-full bg-white/10 animate-pulse" />
                       <div className="h-5 w-full rounded-full bg-white/10 animate-pulse" />
                       <div className="h-3 w-full rounded-full bg-white/10 animate-pulse" />
@@ -1397,7 +1407,7 @@ export function HomeClient({
             ) : challengeItems.length === 0 ? (
               <div className="mt-10 text-center text-[13px] font-semibold text-white/50">등록된 도전이 없어요.</div>
             ) : (
-              <div className="mt-6 space-y-6">
+              <div className="space-y-6">
                 {challengeItems.map((it) => {
                   const allTags = (it.hashtags || []).map((t) => (t.startsWith("#") ? t : `#${t}`));
                   const displayTags = allTags.slice(0, 5);
@@ -1424,23 +1434,22 @@ export function HomeClient({
                           </div>
                         )}
                       </div>
-                      <div className="bg-white/[0.02] p-4">
-                        {it.characterSlug ? <div className="text-[11px] font-semibold text-white/45">@{it.characterSlug}</div> : null}
-                        <div className="mt-1 text-[16px] font-extrabold leading-snug text-white/95">{it.title}</div>
+                      <div className="bg-white/[0.02] p-3">
+                        <div className="text-[16px] font-extrabold leading-snug text-white/95">{it.title}</div>
                         {it.challengeSituation ? (
                           <div className="mt-2 line-clamp-2 text-[12px] font-semibold leading-relaxed text-white/60">
                             {it.challengeSituation}
                           </div>
                         ) : null}
                         {(displayTags.length > 0 || extraCount > 0) ? (
-                          <div className="mt-3 flex flex-nowrap gap-x-2 text-[12px] font-semibold leading-[18px] text-[#ffa9d6]">
+                          <div className="mt-3 flex flex-nowrap gap-x-2 text-[12px] font-semibold leading-[18px] text-panana-pink2">
                             {displayTags.map((t) => (
                               <span key={t} className="max-w-[10rem] truncate">
                                 {t}
                               </span>
                             ))}
                             {extraCount > 0 ? (
-                              <span className="shrink-0 text-[#ffa9d6]/70">+{extraCount}</span>
+                              <span className="shrink-0 text-panana-pink2/70">+{extraCount}</span>
                             ) : null}
                           </div>
                         ) : null}
@@ -1454,11 +1463,11 @@ export function HomeClient({
         ) : activeTab === "ranking" ? (
           <div className="space-y-6 pb-10">
             {rankingLoading ? (
-              <div className="mt-6 space-y-6">
+              <div className="space-y-6">
                 {Array.from({ length: 4 }).map((_, i) => (
                   <div key={i} className="overflow-hidden border border-white/10 bg-white/[0.03]">
                     <div className="relative aspect-square w-full animate-pulse bg-white/[0.06]" />
-                    <div className="space-y-2 p-4">
+                    <div className="space-y-2 p-3">
                       <div className="h-3 w-16 rounded-full bg-white/10 animate-pulse" />
                       <div className="h-5 w-32 rounded-full bg-white/10 animate-pulse" />
                       <div className="h-3 w-full rounded-full bg-white/10 animate-pulse" />
@@ -1471,9 +1480,8 @@ export function HomeClient({
               <div className="mt-10 text-center text-[13px] font-semibold text-white/50">순위 데이터가 없어요.</div>
             ) : (
               <>
-                <div className="mt-6 space-y-6">
+                <div className="space-y-6">
                   {rankingItems.map((it, idx) => {
-                    const handle = it.handle ? (it.handle.startsWith("@") ? it.handle : `@${it.handle}`) : it.slug ? `@${it.slug}` : null;
                     const allTags = (it.hashtags || []).map((t) => (t.startsWith("#") ? t : `#${t}`));
                     const displayTags = allTags.slice(0, 5);
                     const extraCount = allTags.length - 5;
@@ -1485,7 +1493,10 @@ export function HomeClient({
                         prefetch={true}
                       >
                         <div className="relative aspect-square w-full">
-                          <span className="absolute left-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-panana-pink/90 text-[13px] font-extrabold text-white shadow-lg">
+                          <span
+                            className="absolute left-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full text-[13px] font-extrabold text-white shadow-lg"
+                            style={{ backgroundColor: "color-mix(in srgb, var(--panana-pink2) 82%, transparent)" }}
+                          >
                             #{idx + 1}
                           </span>
                           {it.profileImageUrl ? (
@@ -1502,21 +1513,20 @@ export function HomeClient({
                             </div>
                           )}
                         </div>
-                        <div className="bg-white/[0.02] p-4">
-                          {handle ? <div className="text-[11px] font-semibold text-white/45">{handle}</div> : null}
-                          <div className="mt-1 text-[16px] font-extrabold leading-snug text-white/95">{it.name}</div>
+                        <div className="bg-white/[0.02] p-3">
+                          <div className="text-[16px] font-extrabold leading-snug text-white/95">{it.name}</div>
                           {it.tagline ? (
                             <div className="mt-2 line-clamp-2 text-[12px] font-semibold leading-relaxed text-white/60">{it.tagline}</div>
                           ) : null}
                           {(displayTags.length > 0 || extraCount > 0) ? (
-                            <div className="mt-2 flex flex-nowrap gap-x-2 text-[12px] font-semibold leading-[18px] text-[#ffa9d6]">
+                            <div className="mt-2 flex flex-nowrap gap-x-2 text-[12px] font-semibold leading-[18px] text-panana-pink2">
                               {displayTags.map((t) => (
                                 <span key={t} className="max-w-[10rem] truncate">
                                   {t}
                                 </span>
                               ))}
                               {extraCount > 0 ? (
-                                <span className="shrink-0 text-[#ffa9d6]/70">+{extraCount}</span>
+                                <span className="shrink-0 text-panana-pink2/70">+{extraCount}</span>
                               ) : null}
                             </div>
                           ) : null}
@@ -1588,14 +1598,13 @@ export function HomeClient({
             ) : null}
           </div>
           <div className="p-4">
-            <div className="text-[12px] font-semibold text-white/40">{hero?.author || "@panana"}</div>
-            <div className="mt-1 text-[18px] font-extrabold tracking-[-0.02em] text-white/90">
+            <div className="text-[18px] font-extrabold tracking-[-0.02em] text-white/90">
               {hero?.title || "추천 콘텐츠"}
             </div>
-            <div className="mt-1 text-[12px] leading-[1.55] text-white/55">
+            <div className="mt-1 h-[3.1em] shrink-0 line-clamp-2 text-[12px] leading-[1.55] text-white/55">
               {hero?.description || "지금 바로 확인해보세요."}
             </div>
-            <div className="mt-3 flex flex-wrap gap-x-2 gap-y-1 text-[12px] font-semibold text-[#ffa9d6]">
+            <div className="mt-3 flex flex-wrap gap-x-2 gap-y-1 text-[12px] font-semibold text-panana-pink2">
               {(hero?.tags || []).slice(0, 4).map((t) => (
                 <span key={t}>{t}</span>
               ))}
@@ -1623,11 +1632,6 @@ export function HomeClient({
               {topCategories.map((cat) => {
                 const displayItems = getDisplayItems(cat);
                 const paging = categoryPagingBySlug[cat.slug];
-                const baseItems = categoryItemsBySlug[cat.slug] || cat.items || [];
-                const showNewGenderSkeleton = cat.slug === "new" && newGenderLoading;
-                const showPopularGenderSkeleton =
-                  isPopular(cat.slug, cat.name) &&
-                  ((!popularReady) || (preferredGender && !hasGenderData(baseItems)));
                 return (
                 <section key={cat.slug} className="pt-5 first:pt-0">
                   <div className="flex items-center justify-between">
@@ -1652,14 +1656,7 @@ export function HomeClient({
                   </div>
 
                   <div className="mt-4">
-                    {showNewGenderSkeleton || showPopularGenderSkeleton ? (
-                      <div className="grid grid-cols-2 gap-3">
-                        {Array.from({ length: 4 }).map((_, j) => (
-                          <div key={j} className="h-[280px] animate-pulse rounded-[8px] bg-white/[0.04]" />
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="hide-scrollbar flex snap-x snap-mandatory gap-0 overflow-x-auto pb-2">
+                    <div className="hide-scrollbar flex snap-x snap-mandatory gap-0 overflow-x-auto pb-2">
                       {chunkItems(displayItems, 4).map((group, idx) => (
                         <div key={`${cat.slug}-${idx}`} className="w-full shrink-0 snap-start">
                           <div className="grid grid-cols-2 gap-3">
@@ -1671,10 +1668,16 @@ export function HomeClient({
                                   author={it.author}
                                   title={it.title}
                                   description={it.description}
-                                  tags={it.tags}
+                                  tags={
+                                    Array.isArray(it.tags)
+                                      ? it.tags
+                                      : Array.isArray((it as any).hashtags)
+                                        ? ((it as any).hashtags as string[]).map((h) => (String(h).startsWith("#") ? h : `#${h}`))
+                                        : []
+                                  }
                                   imageUrl={it.imageUrl}
                                   href={`/c/${it.characterSlug}`}
-                                  onClick={() => trackBehavior("click", it.tags || [])}
+                                  onClick={() => trackBehavior("click", it.tags || (it as any).hashtags || [])}
                                 priority={isPriority}
                                 />
                               );
@@ -1682,8 +1685,7 @@ export function HomeClient({
                           </div>
                         </div>
                       ))}
-                      </div>
-                    )}
+                    </div>
                   </div>
                   {!isForYou(cat.slug, cat.name) && !isPopular(cat.slug, cat.name) && !isNew(cat.slug, cat.name) ? (
                     <div ref={setCategorySentinel(cat.slug)} data-slug={cat.slug} className="h-1 w-full" />

@@ -108,6 +108,21 @@ export function CharacterClient({
     return recommendedTalkCards.filter((it) => getCharacterGender(it) === preferredGender);
   }, [preferredGender, recommendedTalkCards]);
 
+  const [safetyOn, setSafetyOn] = useState(false);
+  useEffect(() => {
+    const read = () => {
+      try {
+        const v = document.cookie.split("; ").find((r) => r.startsWith("panana_safety_on="));
+        setSafetyOn(v ? v.split("=")[1] === "1" : localStorage.getItem("panana_safety_on") === "1");
+      } catch {
+        setSafetyOn(false);
+      }
+    };
+    read();
+    window.addEventListener("panana-safety-change", read as EventListener);
+    return () => window.removeEventListener("panana-safety-change", read as EventListener);
+  }, []);
+  const headerAccent = safetyOn ? "text-panana-pink2" : "text-[#ffa9d6]";
 
   return (
     <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.12),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">
@@ -133,11 +148,10 @@ export function CharacterClient({
       {/* top bar */}
       <header className="mx-auto w-full max-w-[420px] px-5 pt-3">
         <div className="relative flex h-11 items-center">
-          <Link href="/home" aria-label="뒤로가기" className="absolute left-0 p-2">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <Link href="/home" aria-label="뒤로가기" className={`absolute left-0 p-2 ${headerAccent}`}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="stroke-current">
               <path
                 d="M15 6l-6 6 6 6"
-                stroke="rgba(255,169,214,0.98)"
                 strokeWidth="2.6"
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -145,7 +159,7 @@ export function CharacterClient({
             </svg>
           </Link>
 
-          <div className="mx-auto text-[18px] font-semibold tracking-[-0.01em] text-[#ffa9d6]">
+          <div className={`mx-auto text-[18px] font-semibold tracking-[-0.01em] ${headerAccent}`}>
             {character.name}
           </div>
         </div>
@@ -174,7 +188,7 @@ export function CharacterClient({
             </Link>
 
             <div className="min-w-0 flex-1">
-              <div className="text-[14px] font-bold text-white/85">{character.name}</div>
+              <div className="text-[14px] font-bold text-white">{character.name}</div>
               <div className="mt-1 flex items-center gap-5">
                 <Link 
                   href={`/c/${character.slug}/follows?tab=followers`} 
@@ -196,7 +210,7 @@ export function CharacterClient({
             </div>
           </div>
 
-          <div className="mt-3 flex flex-wrap gap-x-2 gap-y-1 text-[12px] font-semibold text-[#ffa9d6]">
+          <div className="mt-3 flex flex-wrap gap-x-2 gap-y-1 text-[12px] font-semibold text-panana-pink2">
             {character.hashtags.map((t) => (
               <span key={t}>{t}</span>
             ))}
@@ -211,7 +225,7 @@ export function CharacterClient({
             </button>
             <Link
               href={`/c/${character.slug}/chat`}
-              className="group relative overflow-hidden rounded-xl px-4 py-3 text-center text-[14px] font-extrabold text-white ring-1 ring-white/10 transition active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-[#ff4da7]/40"
+              className="group relative overflow-hidden rounded-xl bg-panana-pink2 px-4 py-3 text-center text-[14px] font-extrabold text-white ring-2 ring-panana-pink2/25 transition active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-panana-pink2/40"
               prefetch={true}
               onMouseEnter={() => router.prefetch(`/c/${character.slug}/chat`)}
               onClick={() => {
@@ -224,20 +238,9 @@ export function CharacterClient({
                 }
               }}
               style={{
-                backgroundImage:
-                  "linear-gradient(110deg, rgba(255,77,167,1) 0%, rgba(255,126,201,1) 40%, rgba(255,77,167,1) 100%)",
-                backgroundSize: "200% 200%",
-                animation: "pananaCtaFloat 2.8s ease-in-out infinite, pananaCtaGradient 4.6s ease-in-out infinite",
-                boxShadow: "0 18px 46px rgba(255,77,167,0.26)",
+                boxShadow: "0 18px 46px color-mix(in srgb, var(--panana-pink2) 26%, transparent)",
               }}
             >
-              {/* glow blob */}
-              <span
-                className="pointer-events-none absolute left-1/2 top-1/2 h-[140%] w-[140%] -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/40 blur-2xl"
-                style={{ animation: "pananaCtaGlow 2.6s ease-in-out infinite" }}
-              />
-              {/* subtle ring */}
-              <span className="pointer-events-none absolute inset-0 rounded-xl ring-2 ring-[#ff4da7]/25" />
 
               <span className="relative z-10 inline-flex items-center justify-center gap-2">
                 메시지

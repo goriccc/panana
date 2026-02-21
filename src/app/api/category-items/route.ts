@@ -109,6 +109,20 @@ export async function GET(req: Request) {
       }
     }
 
+    /** 공백/콤마로 이어진 한 덩어리 문자열도 개별 태그 배열로 통일 (admin 저장 형식 차이 대응) */
+    function normalizeTags(raw: string[] | string | null | undefined): string[] {
+      if (raw == null) return [];
+      const arr = Array.isArray(raw) ? raw : [raw];
+      const out: string[] = [];
+      for (const t of arr) {
+        const s = String(t ?? "").trim();
+        if (!s) continue;
+        const parts = s.split(/[\s,]+/).map((p) => p.trim()).filter(Boolean);
+        for (const p of parts) out.push(p.startsWith("#") ? p : `#${p}`);
+      }
+      return out;
+    }
+
     const normalized = (rows as any[] | null || []) as PublicCategoryCardRow[];
     const hasMore = normalized.length > limit;
     const sliced = normalized.slice(0, limit);
@@ -119,7 +133,7 @@ export async function GET(req: Request) {
       author: r.author_handle ? (r.author_handle.startsWith("@") ? r.author_handle : `@${r.author_handle}`) : "@panana",
       title: r.title,
       description: r.description || "",
-      tags: (r.tags || []).map((t) => (t.startsWith("#") ? t : `#${t}`)),
+      tags: normalizeTags(r.tags),
       imageUrl: r.character_profile_image_url || undefined,
       safetySupported: Boolean((r as any)?.safety_supported),
       gender: (r as any)?.gender ?? null,

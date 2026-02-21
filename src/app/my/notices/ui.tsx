@@ -1,15 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { notices } from "@/lib/notices";
 
 function BackIcon() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="stroke-current">
       <path
         d="M15 6l-6 6 6 6"
-        stroke="rgba(255,169,214,0.98)"
+        stroke="currentColor"
         strokeWidth="2.6"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -20,15 +20,30 @@ function BackIcon() {
 
 export function NoticesClient() {
   const list = useMemo(() => notices, []);
+  const [safetyOn, setSafetyOn] = useState(false);
+  useEffect(() => {
+    const read = () => {
+      try {
+        const v = document.cookie.split("; ").find((row) => row.startsWith("panana_safety_on="));
+        setSafetyOn(v ? v.split("=")[1] === "1" : localStorage.getItem("panana_safety_on") === "1");
+      } catch {
+        setSafetyOn(false);
+      }
+    };
+    read();
+    window.addEventListener("panana-safety-change", read as EventListener);
+    return () => window.removeEventListener("panana-safety-change", read as EventListener);
+  }, []);
 
+  const headerAccent = safetyOn ? "text-panana-pink2" : "text-[#ffa9d6]";
   return (
     <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.10),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">
       <header className="mx-auto w-full max-w-[420px] px-5 pt-3">
         <div className="relative flex h-11 items-center">
-          <Link href="/my" aria-label="뒤로가기" className="absolute left-0 p-2">
+          <Link href="/my" aria-label="뒤로가기" className={`absolute left-0 p-2 ${headerAccent}`}>
             <BackIcon />
           </Link>
-          <div className="mx-auto text-[18px] font-semibold tracking-[-0.01em] text-[#ffa9d6]">공지사항</div>
+          <div className={`mx-auto text-[18px] font-semibold tracking-[-0.01em] ${headerAccent}`}>공지사항</div>
         </div>
       </header>
 

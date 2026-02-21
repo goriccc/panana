@@ -3,6 +3,7 @@ import "./globals.css";
 import { ConditionalFooter } from "@/app/_components/ConditionalFooter";
 import { AuthSessionProvider } from "@/app/_components/AuthSessionProvider";
 import { PananaIdentityInit } from "@/app/_components/PananaIdentityInit";
+import { ThemePinkSync } from "@/app/_components/ThemePinkSync";
 import { VisitTracker } from "@/app/_components/VisitTracker";
 
 const siteUrl =
@@ -73,6 +74,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         <AuthSessionProvider>
+          <ThemePinkSync />
           <PananaIdentityInit />
           <VisitTracker />
           {children}

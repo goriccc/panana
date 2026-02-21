@@ -237,7 +237,7 @@ function Bubble({
                     setImgLoadError(false);
                     onGenerateImage(prevUserMsg ?? "", text);
                   }}
-                  className="rounded-full border border-panana-pink/40 bg-panana-pink/15 px-3 py-1.5 text-[11px] font-bold text-panana-pink"
+                  className="rounded-full border border-panana-pink2/40 bg-panana-pink2/15 px-3 py-1.5 text-[11px] font-bold text-panana-pink2"
                   aria-label="장면 이미지 다시 생성"
                 >
                   다시 생성
@@ -427,6 +427,26 @@ export function CharacterChatClient({
     fallbackModel: string;
     settings: Array<{ provider: string; model: string }>;
   } | null>(null);
+
+  const [safetyOn, setSafetyOn] = useState(false);
+  useEffect(() => {
+    const read = () => {
+      try {
+        const v = document.cookie.split("; ").find((r) => r.startsWith("panana_safety_on="));
+        setSafetyOn(v ? v.split("=")[1] === "1" : localStorage.getItem("panana_safety_on") === "1");
+      } catch {
+        setSafetyOn(false);
+      }
+    };
+    read();
+    window.addEventListener("panana-safety-change", read as EventListener);
+    return () => window.removeEventListener("panana-safety-change", read as EventListener);
+  }, []);
+  const headerAccent = safetyOn ? "text-panana-pink2" : "text-[#ffa9d6]";
+  const composerBorderStyle = safetyOn
+    ? { borderColor: "color-mix(in srgb, var(--panana-pink2, #FFA1CC) 50%, transparent)" }
+    : undefined;
+  const composerBorderClass = safetyOn ? "" : "border-[#ffa9d6]/50";
 
   useEffect(() => {
     fetch("/api/llm/config")
@@ -1427,25 +1447,25 @@ export function CharacterChatClient({
   }, [needsAdultGate]);
 
   return (
-    <div
-      ref={chatContainerRef}
-      className="fixed inset-0 flex flex-col overflow-hidden bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.12),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white"
-    >
-      <style>{`@keyframes pananaDot{0%,100%{transform:translateY(0);opacity:.55}50%{transform:translateY(-4px);opacity:1}}`}</style>
-      <>
+    <div className="min-h-dvh">
+      <div
+        ref={chatContainerRef}
+        className="fixed inset-0 flex flex-col overflow-hidden bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.12),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white"
+      >
+        <style>{`@keyframes pananaDot{0%,100%{transform:translateY(0);opacity:.55}50%{transform:translateY(-4px);opacity:1}}`}</style>
+        <>
       {/* 키보드 올라와도 헤더가 밀리지 않도록 상단 고정(스크롤 영역 밖) */}
       <header className="shrink-0 z-20 bg-[#07070B]/95 backdrop-blur-sm pt-[env(safe-area-inset-top)]">
         <div className="relative flex h-11 items-center mx-auto w-full max-w-[420px] px-5 pb-3 pt-3">
           <Link 
             href={backHref} 
             aria-label="뒤로가기" 
-            className="absolute left-0 p-2"
+            className={`absolute left-0 p-2 ${headerAccent}`}
             prefetch={true}
           >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="stroke-current">
               <path
                 d="M15 6l-6 6 6 6"
-                stroke="rgba(255,169,214,0.98)"
                 strokeWidth="2.6"
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -1454,7 +1474,7 @@ export function CharacterChatClient({
           </Link>
 
           <div className="mx-auto flex flex-col items-center">
-            <span className="text-[18px] font-semibold tracking-[-0.01em] text-[#ffa9d6]">
+            <span className={`text-[18px] font-semibold tracking-[-0.01em] ${headerAccent}`}>
               {characterName}
             </span>
             {(() => {
@@ -1474,7 +1494,7 @@ export function CharacterChatClient({
           <button
             type="button"
             onClick={() => setVoiceModalOpen(true)}
-            className="absolute right-0 p-2 text-white/70 hover:text-panana-pink transition"
+            className="absolute right-0 p-2 text-white/70 hover:text-panana-pink2 transition"
             aria-label="음성 대화"
           >
             <style
@@ -1498,16 +1518,16 @@ export function CharacterChatClient({
 
       {!onboardingDismissed ? (
         <div className="mx-auto w-full max-w-[420px] shrink-0 px-5 pt-2">
-          <div className="flex items-center gap-2 rounded-xl border border-panana-pink/30 bg-panana-pink/10 px-3 py-2.5">
+          <div className="flex items-center gap-2 rounded-xl border border-panana-pink2/30 bg-panana-pink2/10 px-3 py-2.5">
             <div className="flex-1 text-[11px] font-semibold leading-snug text-white/90">
               <span>
-                <span className="font-extrabold text-panana-pink">지문</span>: 입력창 왼쪽{" "}
+                <span className="font-extrabold text-panana-pink2">지문</span>: 입력창 왼쪽{" "}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src="/jimun.png" alt="" width={16} height={16} className="inline h-4 w-4 align-middle opacity-90" aria-hidden />
                 {" "}버튼으로 상황·행동 묘사를 넣을 수 있어요.
               </span>
               <span className="mt-1 block">
-                <span className="font-extrabold text-panana-pink">장면 이미지</span>: 이미지생성 버튼을 눌러 생성할 수 있어요.
+                <span className="font-extrabold text-panana-pink2">장면 이미지</span>: 이미지생성 버튼을 눌러 생성할 수 있어요.
               </span>
             </div>
             <button
@@ -1703,10 +1723,15 @@ export function CharacterChatClient({
               userAvatarUrl={userAvatarUrl}
               startOnOpen
               preloadedRingtoneUrl={preloadedVoiceRingtoneUrl}
+              recentMessages={messages
+                .filter((m): m is Msg & { from: "user" | "bot" } =>
+                  (m.from === "user" || m.from === "bot") && !isVoiceMessage(m))
+                .slice(-10)
+                .map((m) => ({ from: m.from, text: m.text || "" }))}
             />
           ) : null}
           {showNeedAdultVerifyBanner ? (
-            <div className="mb-3 rounded-xl border border-panana-pink/40 bg-white/[0.06] p-3">
+            <div className="mb-3 rounded-xl border border-panana-pink2/40 bg-white/[0.06] p-3">
               <p className="text-[12px] font-semibold text-white/80">
                 성인인증이 필요합니다!
               </p>
@@ -1725,7 +1750,10 @@ export function CharacterChatClient({
               </button>
             </div>
           ) : null}
-          <div className={`relative w-full rounded-full border border-panana-pink/35 bg-white/[0.04] py-2 pl-11 pr-11 ${voiceModalOpen ? "mt-3" : ""}`}>
+          <div
+            className={`relative w-full rounded-full border bg-white/[0.04] py-2 pl-11 pr-11 ${composerBorderClass} ${voiceModalOpen ? "mt-3" : ""}`}
+            style={composerBorderStyle}
+          >
             <button
               type="button"
               aria-label={scriptMode ? "지문 입력 끝내기 (일반 대화)" : "지문 입력"}
@@ -1925,6 +1953,7 @@ export function CharacterChatClient({
           </div>
         </div>
       ) : null}
+      </div>
     </div>
   );
 }

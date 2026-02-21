@@ -73,7 +73,7 @@ export function HomeHeader({
                 className="h-4 w-4 select-none"
                 aria-hidden
               />
-              <div className="text-[12px] font-extrabold tracking-[-0.01em] text-[#ffa1cc]">스파이시</div>
+              <div className="text-[12px] font-extrabold tracking-[-0.01em] text-panana-pink2">스파이시</div>
             </div>
             <Switch checked={safetyOn} onChange={onSafetyChange} ariaLabel="스파이시 토글" />
           </div>
@@ -102,7 +102,7 @@ export function HomeHeader({
             className={[
               "rounded-full px-4 py-2 text-[12px] font-semibold ring-1",
               active === "my"
-                ? "bg-panana-pink text-white shadow-[0_10px_24px_rgba(255,77,167,0.18)] ring-panana-pink/40"
+                ? "bg-panana-pink text-white shadow-[0_10px_24px_rgba(255,77,167,0.18)] ring-transparent"
                 : "bg-white/5 text-white/70 ring-white/10",
             ].join(" ")}
           >
@@ -117,7 +117,7 @@ export function HomeHeader({
             className={[
               "rounded-full px-4 py-2 text-[12px] font-semibold ring-1",
               active === "home"
-                ? "bg-panana-pink text-white shadow-[0_10px_24px_rgba(255,77,167,0.18)] ring-panana-pink/40"
+                ? "bg-panana-pink text-white shadow-[0_10px_24px_rgba(255,77,167,0.18)] ring-transparent"
                 : "bg-white/5 text-white/70 ring-white/10",
             ].join(" ")}
           >
@@ -125,50 +125,54 @@ export function HomeHeader({
           </button>
         )}
 
-        {menuVisibility.challenge && (
-          <button
-            type="button"
-            onClick={() => onChange("challenge")}
-            className={[
-              "rounded-full px-4 py-2 text-[12px] font-semibold ring-1",
-              active === "challenge"
-                ? "bg-panana-pink text-white shadow-[0_10px_24px_rgba(255,77,167,0.18)] ring-panana-pink/40"
-                : "bg-white/5 text-white/70 ring-white/10",
-            ].join(" ")}
-          >
-            도전
-          </button>
-        )}
+        <div
+          className={`flex items-center gap-2 rounded-2xl px-2 py-1 ${safetyOn ? "bg-panana-pink/10" : "bg-transparent"}`}
+        >
+          {menuVisibility.challenge && (
+            <button
+              type="button"
+              onClick={() => onChange("challenge")}
+              className={[
+                "rounded-full px-4 py-2 text-[12px] font-semibold ring-1",
+                active === "challenge"
+                  ? "bg-panana-pink text-white shadow-[0_10px_24px_rgba(255,77,167,0.18)] ring-transparent"
+                  : "bg-white/5 text-white/70 ring-white/10",
+              ].join(" ")}
+            >
+              도전
+            </button>
+          )}
 
-        {menuVisibility.ranking && (
-          <button
-            type="button"
-            onClick={() => onChange("ranking")}
-            className={[
-              "rounded-full px-4 py-2 text-[12px] font-semibold ring-1",
-              active === "ranking"
-                ? "bg-panana-pink text-white shadow-[0_10px_24px_rgba(255,77,167,0.18)] ring-panana-pink/40"
-                : "bg-white/5 text-white/70 ring-white/10",
-            ].join(" ")}
-          >
-            순위
-          </button>
-        )}
+          {menuVisibility.ranking && (
+            <button
+              type="button"
+              onClick={() => onChange("ranking")}
+              className={[
+                "rounded-full px-4 py-2 text-[12px] font-semibold ring-1",
+                active === "ranking"
+                  ? "bg-panana-pink text-white shadow-[0_10px_24px_rgba(255,77,167,0.18)] ring-transparent"
+                  : "bg-white/5 text-white/70 ring-white/10",
+              ].join(" ")}
+            >
+              순위
+            </button>
+          )}
 
-        {menuVisibility.search && (
-          <button
-            type="button"
-            onClick={() => onChange("search")}
-            className={[
-              "rounded-full px-4 py-2 text-[12px] font-semibold ring-1 transition",
-              active === "search"
-                ? "bg-panana-pink text-white shadow-[0_10px_24px_rgba(255,77,167,0.18)] ring-panana-pink/40"
-                : "bg-white/5 text-white/70 ring-white/10",
-            ].join(" ")}
-          >
-            찾기
-          </button>
-        )}
+          {menuVisibility.search && (
+            <button
+              type="button"
+              onClick={() => onChange("search")}
+              className={[
+                "rounded-full px-4 py-2 text-[12px] font-semibold ring-1 transition",
+                active === "search"
+                  ? "bg-panana-pink text-white shadow-[0_10px_24px_rgba(255,77,167,0.18)] ring-transparent"
+                  : "bg-white/5 text-white/70 ring-white/10",
+              ].join(" ")}
+            >
+              찾기
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
