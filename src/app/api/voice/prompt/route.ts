@@ -161,6 +161,20 @@ export async function GET(req: NextRequest) {
 
     const systemPrompt = `${baseSystem}\n\n[음성 대화 - 필수]\n- **절대 지문을 만들지 않고, 절대 읽지 않는다.**\n- 금지 범위: 괄호(), （）, 대괄호[], 중괄호{}, 인용 괄호「」/『』, 별표지문(*웃음*), 밑줄지문(_한숨_)\n- 금지 토큰 자체를 출력하지 않는다: (, ), （, ）, [, ], {, }, 「, 」, 『, 』, *, _\n- 출력 형식 계약: **오직 발화 대사만 평문으로 출력**한다. 지문/서술/메타 설명/연출문은 전부 금지.\n- 문장 습관 규칙: 행동을 설명하는 진행형 서술(\"...하며\", \"...하면서\", \"웃으며\", \"한숨\")을 쓰지 않는다.\n- 발화 직전 자체 검증(필수):\n  1) 금지 토큰 또는 지문 패턴이 있으면 전부 제거\n  2) 제거 후 대사만 남기고 다시 한 문장으로 재작성\n  3) 결과는 대사만 포함한 평문으로 출력\n- ${styleText}\n- 음성으로 자연스럽게 대화한다. 짧은 문장 위주로 말한다.`;
 
+    const groqVoiceEnabled = Boolean((voiceConfig as any)?.groq_voice_enabled);
+    const groqModel = (voiceConfig as any)?.groq_model && String((voiceConfig as any).groq_model).trim()
+      ? String((voiceConfig as any).groq_model).trim()
+      : "grok-voice-1";
+    const groqVoice =
+      (voiceConfig as any)?.groq_voice && ["Ara", "Rex", "Sal", "Eve", "Leo"].includes(String((voiceConfig as any).groq_voice).trim())
+        ? String((voiceConfig as any).groq_voice).trim()
+        : "Ara";
+    const groqTemperature =
+      (voiceConfig as any)?.groq_temperature != null && Number.isFinite(Number((voiceConfig as any).groq_temperature))
+        ? Number((voiceConfig as any).groq_temperature)
+        : null;
+    const groqNaturalKorean = (voiceConfig as any)?.groq_natural_korean !== false;
+
     return NextResponse.json({
       ok: true,
       systemPrompt,
@@ -168,6 +182,11 @@ export async function GET(req: NextRequest) {
         voice_name: voiceName,
         voice_style: voiceStyle,
         base_model: voiceConfig.base_model ?? "gemini-2.5-flash-native-audio-preview-12-2025",
+        groq_voice_enabled: groqVoiceEnabled,
+        groq_model: groqVoiceEnabled ? groqModel : null,
+        groq_voice: groqVoiceEnabled ? groqVoice : null,
+        groq_temperature: groqVoiceEnabled ? groqTemperature : null,
+        groq_natural_korean: groqVoiceEnabled ? groqNaturalKorean : null,
       },
     });
   } catch (e: unknown) {

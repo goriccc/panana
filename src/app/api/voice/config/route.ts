@@ -72,19 +72,27 @@ export async function GET() {
       base_model: "gemini-2.5-flash-native-audio-preview-12-2025",
       ringtone_url: null as string | null,
       hangup_sound_url: null as string | null,
+      groq_voice_enabled: false,
+      groq_model: null as string | null,
+      groq_voice: null as string | null,
+      groq_temperature: null as number | null,
+      groq_natural_korean: true,
     };
     const resolvedHangupUrl = await resolveHangupUrlWithFallback((data as any)?.hangup_sound_url);
-    return NextResponse.json({
-      ok: true,
-      data: data
-        ? {
-            ...fallback,
-            ...data,
-            ringtone_url: (data as any).ringtone_url ?? null,
-            hangup_sound_url: resolvedHangupUrl,
-          }
-        : { ...fallback, hangup_sound_url: resolvedHangupUrl },
-    });
+    const merged = data
+      ? {
+          ...fallback,
+          ...data,
+          ringtone_url: (data as any).ringtone_url ?? null,
+          hangup_sound_url: resolvedHangupUrl,
+          groq_voice_enabled: (data as any).groq_voice_enabled ?? false,
+          groq_model: (data as any).groq_model ?? null,
+          groq_voice: (data as any).groq_voice ?? null,
+          groq_temperature: (data as any).groq_temperature != null ? Number((data as any).groq_temperature) : null,
+          groq_natural_korean: (data as any).groq_natural_korean !== false,
+        }
+      : { ...fallback, hangup_sound_url: resolvedHangupUrl };
+    return NextResponse.json({ ok: true, data: merged });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Unknown error";
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });
@@ -134,6 +142,15 @@ export async function POST(req: NextRequest) {
     if (typeof body.hangup_sound_url === "string" || body.hangup_sound_url === null) {
       updateData.hangup_sound_url = body.hangup_sound_url;
     }
+    if (typeof body.groq_voice_enabled === "boolean") updateData.groq_voice_enabled = body.groq_voice_enabled;
+    if (typeof body.groq_model === "string" || body.groq_model === null) updateData.groq_model = body.groq_model;
+    if (typeof body.groq_voice === "string" || body.groq_voice === null) updateData.groq_voice = body.groq_voice;
+    if (body.groq_temperature !== undefined) {
+      const t = typeof body.groq_temperature === "number" ? body.groq_temperature : Number(body.groq_temperature);
+      if (body.groq_temperature === null) updateData.groq_temperature = null;
+      else if (Number.isFinite(t) && t >= 0 && t <= 2) updateData.groq_temperature = t;
+    }
+    if (typeof body.groq_natural_korean === "boolean") updateData.groq_natural_korean = body.groq_natural_korean;
 
     const { data: existing } = await sb
       .from("panana_voice_config")
@@ -165,6 +182,11 @@ export async function POST(req: NextRequest) {
       base_model: updateData.base_model ?? "gemini-2.5-flash-native-audio-preview-12-2025",
       ringtone_url: updateData.ringtone_url ?? null,
       ...(includeHangup ? { hangup_sound_url: updateData.hangup_sound_url ?? null } : {}),
+      groq_voice_enabled: updateData.groq_voice_enabled ?? false,
+      groq_model: updateData.groq_model ?? null,
+      groq_voice: updateData.groq_voice ?? null,
+      groq_temperature: updateData.groq_temperature ?? null,
+      groq_natural_korean: updateData.groq_natural_korean !== false,
       updated_at: updateData.updated_at,
     });
 

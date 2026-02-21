@@ -643,9 +643,9 @@ export function HomeClient({
   }, [myChats.length]);
 
   const searchCandidates = useMemo(() => {
-    // heroCandidates는 이미 slug dedupe가 되어있음
-    return heroCandidates;
-  }, [heroCandidates]);
+    // 검색은 전체 캐릭터(allItems) 대상으로 해야 최근 캐릭터 등 이름 검색 가능 (기존: heroCandidates=상위 12개만이라 최근 캐릭터 검색 안 됨)
+    return allItems;
+  }, [allItems]);
 
   const recommendedTags = useMemo(() => ["#현실연애", "#롤플주의", "#고백도전", "#연애감정", "#환승연애"], []);
 

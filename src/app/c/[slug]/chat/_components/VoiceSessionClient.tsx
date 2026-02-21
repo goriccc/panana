@@ -145,6 +145,8 @@ export function VoiceSessionClient({
   /** iOS: 마이크 권한이 이미 허용되었는지 확인 (한 번 확인 후 캐시) */
   const iosMicPermissionGrantedRef = useRef<boolean | null>(null);
   const ringEndedRef = useRef(false);
+  /** Grok(xAI) 세션일 때 true. connect()에서 설정되며, 오디오 전송 시 input_audio_buffer.append 사용 */
+  const isGrokSessionRef = useRef(false);
 
   useEffect(() => {
     onPhaseChange?.(phase);
@@ -312,11 +314,6 @@ export function VoiceSessionClient({
   const connect = useCallback(async () => {
     setError(null);
     setReconnectGaveUp(false);
-    const wsUrl = resolveWsUrl();
-    if (!wsUrl) {
-      setError("NEXT_PUBLIC_VERTEX_LIVE_PROXY_URL이 설정되지 않았어요.");
-      return;
-    }
 
     const res = await fetch(
       `/api/voice/prompt?characterSlug=${encodeURIComponent(characterSlug)}&callSign=${encodeURIComponent(callSign)}`
@@ -328,6 +325,189 @@ export function VoiceSessionClient({
     }
 
     const { systemPrompt, voiceConfig } = data;
+    const groqVoiceEnabled = Boolean(voiceConfig?.groq_voice_enabled);
+    const groqModel = (voiceConfig?.groq_model && String(voiceConfig.groq_model).trim()) || "grok-voice-1";
+
+    if (groqVoiceEnabled) {
+      isGrokSessionRef.current = true;
+      onVoiceModelReady?.(`Grok · ${groqModel}`);
+
+      let token: string;
+      try {
+        const tokenRes = await fetch("/api/voice/grok-ephemeral-token", { method: "POST" });
+        const tokenData = await tokenRes.json().catch(() => ({}));
+        if (!tokenData?.ok || !tokenData?.client_secret) {
+          setError(tokenData?.error || "Grok 토큰을 받지 못했어요.");
+          return;
+        }
+        token = tokenData.client_secret;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Grok 토큰 요청 실패");
+        return;
+      }
+
+      const ws = new WebSocket("wss://api.x.ai/v1/realtime", [`xai-client-secret.${token}`]);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        const grokVoice =
+          (voiceConfig?.groq_voice && ["Ara", "Rex", "Sal", "Eve", "Leo"].includes(String(voiceConfig.groq_voice).trim()))
+            ? String(voiceConfig.groq_voice).trim()
+            : "Ara";
+        const naturalKoreanPrefix =
+          voiceConfig?.groq_natural_korean !== false
+            ? "[필수] 반드시 자연스러운 한국어로만 말하세요. 한국어 원어민처럼 또렷하고 자연스럽게 발음하고, 어눌하거나 로봇 같은 억양을 피하세요. 짧은 문장으로 말하세요.\n\n"
+            : "";
+        const sessionPayload: Record<string, unknown> = {
+          instructions: naturalKoreanPrefix + systemPrompt,
+          voice: grokVoice,
+          turn_detection: { type: "server_vad" },
+          audio: {
+            input: { format: { type: "audio/pcm", rate: 24000 } },
+            output: { format: { type: "audio/pcm", rate: 24000 } },
+          },
+        };
+        if (typeof voiceConfig?.groq_temperature === "number" && voiceConfig.groq_temperature >= 0 && voiceConfig.groq_temperature <= 2) {
+          sessionPayload.temperature = voiceConfig.groq_temperature;
+        }
+        ws.send(JSON.stringify({ type: "session.update", session: sessionPayload }));
+      };
+
+      ws.onmessage = async (event: MessageEvent) => {
+        try {
+          const msg = JSON.parse(String(event.data || "{}"));
+          if (msg.type === "session.updated") {
+            reconnectAttemptRef.current = 0;
+            setReconnectGaveUp(false);
+            initSentRef.current = true;
+            setConnected(true);
+            return;
+          }
+          if (msg.type === "response.output_audio.delta" && msg.delta) {
+            const buf = base64ToArrayBuffer(msg.delta);
+            const pcm = new Uint8Array(buf);
+            const streamer = streamerRef.current;
+            const doPlay = async () => {
+              if (!streamer) return;
+              if (isIOSDevice() && !iosContextWorkaroundDoneRef.current) {
+                iosContextWorkaroundDoneRef.current = true;
+                const ctx = streamer.context;
+                try {
+                  if (ctx.state === "running") {
+                    await ctx.suspend();
+                    await ctx.resume();
+                  } else {
+                    await ctx.resume();
+                  }
+                } catch {
+                  // ignore
+                }
+              }
+              await ensurePlaybackResumed();
+              streamer.addPCM16(pcm);
+            };
+            void doPlay();
+            return;
+          }
+          if (msg.type === "response.output_audio_transcript.delta" && typeof msg.delta === "string") {
+            assistantBufferRef.current += msg.delta;
+            if (assistantDebounceRef.current) clearTimeout(assistantDebounceRef.current);
+            assistantDebounceRef.current = setTimeout(() => {
+              flushAssistant();
+            }, 1200);
+            return;
+          }
+          if (msg.type === "response.output_audio_transcript.done") {
+            if (assistantDebounceRef.current) clearTimeout(assistantDebounceRef.current);
+            assistantDebounceRef.current = null;
+            flushAssistant();
+            return;
+          }
+          if (msg.type === "conversation.item.input_audio_transcription.completed" && typeof msg.transcript === "string") {
+            const raw = msg.transcript.trim();
+            if (raw) {
+              let toShow = raw;
+              try {
+                const tr = await fetch("/api/translate-to-korean", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ text: raw }),
+                });
+                const trData = await tr.json().catch(() => ({}));
+                if (trData?.ok && typeof trData.text === "string" && trData.text.trim()) {
+                  toShow = trData.text.trim();
+                }
+              } catch {
+                // keep raw
+              }
+              userBufferRef.current += (userBufferRef.current ? " " : "") + toShow;
+              if (userDebounceRef.current) clearTimeout(userDebounceRef.current);
+              userDebounceRef.current = setTimeout(() => {
+                flushUser();
+              }, 1200);
+            }
+            return;
+          }
+          if (msg.type === "error" || (msg.error && msg.error?.message)) {
+            setError(msg.error?.message || msg.message || "Grok 음성 연결 오류");
+          }
+        } catch {
+          // ignore parse errors
+        }
+      };
+
+      ws.onerror = () => {
+        if (!userStoppedRef.current) setError("WebSocket 연결 오류");
+      };
+
+      ws.onclose = () => {
+        flushAssistant();
+        flushUser();
+        setConnected(false);
+        initSentRef.current = false;
+        if (wsRef.current === ws) wsRef.current = null;
+        if (!userStoppedRef.current && startedRef.current) {
+          clearReconnectTimer();
+          const attempt = reconnectAttemptRef.current + 1;
+          reconnectAttemptRef.current = attempt;
+          if (attempt > MAX_RECONNECT_ATTEMPTS) {
+            setReconnectGaveUp(true);
+            setError("연결을 유지할 수 없어요. 아래 '다시 연결'로 재시도해 보세요.");
+            return;
+          }
+          setReconnectGaveUp(false);
+          setError("연결이 잠시 끊겼어요. 자동 재연결 중...");
+          reconnectTimerRef.current = setTimeout(async () => {
+            if (userStoppedRef.current || !startedRef.current) return;
+            await connect();
+            if (!wsRef.current && !userStoppedRef.current && startedRef.current) {
+              clearReconnectTimer();
+              const nextAttempt = reconnectAttemptRef.current + 1;
+              reconnectAttemptRef.current = nextAttempt;
+              if (nextAttempt > MAX_RECONNECT_ATTEMPTS) {
+                setReconnectGaveUp(true);
+                setError("연결을 유지할 수 없어요. 아래 '다시 연결'로 재시도해 보세요.");
+                return;
+              }
+              const nextRetryInMs = Math.min(1000 * 2 ** nextAttempt, 5000);
+              reconnectTimerRef.current = setTimeout(async () => {
+                if (userStoppedRef.current || !startedRef.current) return;
+                await connect();
+              }, nextRetryInMs);
+            }
+          }, Math.min(1000 * 2 ** (attempt - 1), 5000));
+        }
+      };
+      return;
+    }
+
+    isGrokSessionRef.current = false;
+    const wsUrl = resolveWsUrl();
+    if (!wsUrl) {
+      setError("NEXT_PUBLIC_VERTEX_LIVE_PROXY_URL이 설정되지 않았어요.");
+      return;
+    }
+
     const model = voiceConfig?.base_model || LIVE_MODEL;
     const voiceName = voiceConfig?.voice_name || "Aoede";
     onVoiceModelReady?.(`Gemini · ${model}`);
@@ -517,7 +697,16 @@ export function VoiceSessionClient({
 
     const setup = async () => {
       try {
-        // 서버 PCM 24kHz와 동일한 context → 리샘플링 노이즈 완화(iOS 등)
+        let groqEnabled = false;
+        try {
+          const configRes = await fetch("/api/voice/config");
+          const configData = await configRes.json().catch(() => ({}));
+          groqEnabled = Boolean((configData?.data as any)?.groq_voice_enabled);
+        } catch {
+          // 기본값 Gemini
+        }
+        const sampleRate = groqEnabled ? 24000 : 16000;
+
         const outCtx = await audioContext({ id: "voice-panana-out", sampleRate: 24000 });
         const streamer = new AudioStreamer(outCtx);
         await streamer.addWorklet("vumeter-out", VolMeterWorklet, (d: unknown) => {
@@ -528,9 +717,12 @@ export function VoiceSessionClient({
         streamerRef.current = streamer;
         await streamer.resume();
 
-        const recorder = new AudioRecorder(16000);
+        const recorder = new AudioRecorder(sampleRate);
         recorder.on("data", (base64: string) => {
-          if (wsRef.current?.readyState === WebSocket.OPEN && initSentRef.current) {
+          if (wsRef.current?.readyState !== WebSocket.OPEN || !initSentRef.current) return;
+          if (isGrokSessionRef.current) {
+            wsRef.current.send(JSON.stringify({ type: "input_audio_buffer.append", audio: base64 }));
+          } else {
             wsRef.current.send(JSON.stringify({ type: "audio", data: base64, mimeType: "audio/pcm;rate=16000" }));
           }
         });
@@ -589,12 +781,14 @@ export function VoiceSessionClient({
     if (!isIOSDevice()) return;
     if (recorderRef.current && streamerRef.current) return;
     try {
-      // iOS: 사용자 제스처 안에서 config를 먼저 fetch해 링톤 URL 확보
+      // iOS: 사용자 제스처 안에서 config를 먼저 fetch해 링톤 URL 확보 및 Grok 여부로 샘플레이트 결정
       let ringUrl: string | null = null;
+      let groqEnabled = false;
       try {
         const res = await fetch("/api/voice/config");
         const data = await res.json().catch(() => ({}));
         const cfg = (data?.data as any) || {};
+        groqEnabled = Boolean(cfg?.groq_voice_enabled);
         ringUrl = cfg?.ringtone_url && typeof cfg.ringtone_url === "string" && cfg.ringtone_url.trim() ? cfg.ringtone_url.trim() : null;
         const hangupUrl = cfg?.hangup_sound_url;
         if (hangupUrl && typeof hangupUrl === "string" && hangupUrl.trim()) {
@@ -610,9 +804,10 @@ export function VoiceSessionClient({
       } catch {
         // config fetch 실패 시 무시
       }
-      
+
+      const iosSampleRate = groqEnabled ? 24000 : 16000;
       if (!iosRecorderContextRef.current) {
-        iosRecorderContextRef.current = new AudioContext({ sampleRate: 16000 });
+        iosRecorderContextRef.current = new AudioContext({ sampleRate: iosSampleRate });
       }
       // iOS: 마이크 권한이 이미 허용되었는지 확인 (한 번만 확인)
       if (typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia && !iosMicStreamPromiseRef.current) {
@@ -642,15 +837,18 @@ export function VoiceSessionClient({
       });
       streamerRef.current = streamer;
       await streamer.resume();
-      const recorder = new AudioRecorder(16000);
+      const recorder = new AudioRecorder(iosSampleRate);
       recorder.on("data", (base64: string) => {
-        if (wsRef.current?.readyState === WebSocket.OPEN && initSentRef.current) {
+        if (wsRef.current?.readyState !== WebSocket.OPEN || !initSentRef.current) return;
+        if (isGrokSessionRef.current) {
+          wsRef.current.send(JSON.stringify({ type: "input_audio_buffer.append", audio: base64 }));
+        } else {
           wsRef.current.send(JSON.stringify({ type: "audio", data: base64, mimeType: "audio/pcm;rate=16000" }));
         }
       });
       recorder.on("volume", (v: number) => setInVolume(v));
       recorderRef.current = recorder;
-      
+
       // iOS: 사용자 제스처 안에서 링톤 재생 시작
       if (ringUrl && !ringAudioRef.current) {
         setRingtoneUrl(ringUrl);
@@ -689,11 +887,6 @@ export function VoiceSessionClient({
 
   const startVoice = useCallback(async () => {
     setPhase("connected");
-    if (isIOSDevice()) {
-      if (!iosRecorderContextRef.current) {
-        iosRecorderContextRef.current = new AudioContext({ sampleRate: 16000 });
-      }
-    }
     if (isIOSDevice() && typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia && !iosMicStreamPromiseRef.current) {
       // iOS: 마이크 권한이 이미 허용되었는지 확인 (한 번만 확인)
       if (iosMicPermissionGrantedRef.current === null && typeof navigator.permissions !== "undefined" && navigator.permissions.query) {
@@ -718,6 +911,20 @@ export function VoiceSessionClient({
     // iOS 전용: 사용자 클릭 제스처 내에서 오디오/마이크 초기화 (prepareIOSVoice로 미리 해둔 경우 스킵)
     if (isIOSDevice() && (!recorderRef.current || !streamerRef.current)) {
       try {
+        let groqEnabled = false;
+        try {
+          const configRes = await fetch("/api/voice/config");
+          const configData = await configRes.json().catch(() => ({}));
+          groqEnabled = Boolean((configData?.data as any)?.groq_voice_enabled);
+        } catch {
+          // 기본값 Gemini
+        }
+        const iosSampleRate = groqEnabled ? 24000 : 16000;
+
+        if (!iosRecorderContextRef.current) {
+          iosRecorderContextRef.current = new AudioContext({ sampleRate: iosSampleRate });
+        }
+
         const outCtx = new AudioContext({ sampleRate: 24000 });
         await outCtx.resume();
 
@@ -730,9 +937,12 @@ export function VoiceSessionClient({
         streamerRef.current = streamer;
         await streamer.resume();
 
-        const recorder = new AudioRecorder(16000);
+        const recorder = new AudioRecorder(iosSampleRate);
         recorder.on("data", (base64: string) => {
-          if (wsRef.current?.readyState === WebSocket.OPEN && initSentRef.current) {
+          if (wsRef.current?.readyState !== WebSocket.OPEN || !initSentRef.current) return;
+          if (isGrokSessionRef.current) {
+            wsRef.current.send(JSON.stringify({ type: "input_audio_buffer.append", audio: base64 }));
+          } else {
             wsRef.current.send(JSON.stringify({ type: "audio", data: base64, mimeType: "audio/pcm;rate=16000" }));
           }
         });

@@ -20,6 +20,14 @@ const VOICE_NAMES = [
   { value: "Puck", label: "Puck (남성향)" },
 ];
 
+const GROK_VOICES = [
+  { value: "Ara", label: "Ara (여성, 따뜻·친근)" },
+  { value: "Rex", label: "Rex (남성, 자신감·명확)" },
+  { value: "Sal", label: "Sal (중성, 부드럽고 균형)" },
+  { value: "Eve", label: "Eve (여성, 활기·밝음)" },
+  { value: "Leo", label: "Leo (남성, 권위적·강함)" },
+];
+
 type VoiceConfig = {
   voice_style_female: string;
   voice_style_male: string;
@@ -28,6 +36,11 @@ type VoiceConfig = {
   base_model?: string;
   ringtone_url?: string | null;
   hangup_sound_url?: string | null;
+  groq_voice_enabled?: boolean;
+  groq_model?: string | null;
+  groq_voice?: string | null;
+  groq_temperature?: number | null;
+  groq_natural_korean?: boolean;
 };
 
 export default function AdminVoicePage() {
@@ -39,6 +52,11 @@ export default function AdminVoicePage() {
     base_model: "gemini-2.5-flash-native-audio-preview-12-2025",
     ringtone_url: null,
     hangup_sound_url: null,
+    groq_voice_enabled: false,
+    groq_model: null,
+    groq_voice: null,
+    groq_temperature: null,
+    groq_natural_korean: true,
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -62,6 +80,11 @@ export default function AdminVoicePage() {
             base_model: c.base_model || "gemini-2.5-flash-native-audio-preview-12-2025",
             ringtone_url: c.ringtone_url ?? null,
             hangup_sound_url: c.hangup_sound_url ?? null,
+            groq_voice_enabled: Boolean(c.groq_voice_enabled),
+            groq_model: c.groq_model ?? null,
+            groq_voice: c.groq_voice ?? null,
+            groq_temperature: c.groq_temperature != null ? Number(c.groq_temperature) : null,
+            groq_natural_korean: c.groq_natural_korean !== false,
           });
         }
       })
@@ -316,89 +339,185 @@ export default function AdminVoicePage() {
         </section>
 
         <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-6">
-          <h2 className="mb-2 font-semibold">음성대화 설정</h2>
+          <h2 className="mb-2 font-semibold">음성대화 모델</h2>
           <p className="mb-4 text-sm text-white/50">
-            캐릭터의 성별 속성에 따라 여성/남성 설정이 각각 적용됩니다.
+            통화 시 사용할 음성 대화 엔진을 선택하세요.
           </p>
-          <div className="space-y-6">
-            <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-              <h3 className="mb-3 text-sm font-medium text-panana-pink/90">여성 캐릭터</h3>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="block text-sm text-white/60 mb-1">말투/성향</label>
-                  <select
-                    value={config.voice_style_female}
-                    onChange={(e) => setConfig((c) => ({ ...c, voice_style_female: e.target.value }))}
-                    className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-white"
-                  >
-                    {VOICE_STYLES.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm text-white/60 mb-1">보이스 이름</label>
-                  <select
-                    value={config.voice_name_female}
-                    onChange={(e) => setConfig((c) => ({ ...c, voice_name_female: e.target.value }))}
-                    className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-white"
-                  >
-                    {VOICE_NAMES.filter((v) => ["Aoede", "Kore", "Charon"].includes(v.value)).map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
-            <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-              <h3 className="mb-3 text-sm font-medium text-panana-pink/90">남성 캐릭터</h3>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="block text-sm text-white/60 mb-1">말투/성향</label>
-                  <select
-                    value={config.voice_style_male}
-                    onChange={(e) => setConfig((c) => ({ ...c, voice_style_male: e.target.value }))}
-                    className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-white"
-                  >
-                    {VOICE_STYLES.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm text-white/60 mb-1">보이스 이름</label>
-                  <select
-                    value={config.voice_name_male}
-                    onChange={(e) => setConfig((c) => ({ ...c, voice_name_male: e.target.value }))}
-                    className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-white"
-                  >
-                    {VOICE_NAMES.filter((v) => ["Fenrir", "Puck"].includes(v.value)).map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm text-white/60 mb-1">Gemini Live 모델 (공통)</label>
+          <div className="flex gap-6">
+            <label className="flex cursor-pointer items-center gap-2">
               <input
-                type="text"
-                value={config.base_model || ""}
-                onChange={(e) => setConfig((c) => ({ ...c, base_model: e.target.value }))}
-                className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-white"
-                placeholder="gemini-2.5-flash-native-audio-preview-12-2025"
+                type="radio"
+                name="voice-provider"
+                checked={!config.groq_voice_enabled}
+                onChange={() => setConfig((c) => ({ ...c, groq_voice_enabled: false }))}
+                className="h-4 w-4 border-white/30 accent-panana-pink"
               />
-            </div>
+              <span className="text-sm font-medium text-white/90">Gemini</span>
+            </label>
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                type="radio"
+                name="voice-provider"
+                checked={Boolean(config.groq_voice_enabled)}
+                onChange={() => setConfig((c) => ({ ...c, groq_voice_enabled: true }))}
+                className="h-4 w-4 border-white/30 accent-panana-pink"
+              />
+              <span className="text-sm font-medium text-white/90">Grok (xAI)</span>
+            </label>
           </div>
         </section>
+
+        {!config.groq_voice_enabled && (
+          <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-6">
+            <h2 className="mb-2 font-semibold">Gemini 음성대화 설정</h2>
+            <p className="mb-4 text-sm text-white/50">
+              캐릭터의 성별 속성에 따라 여성/남성 설정이 각각 적용됩니다.
+            </p>
+            <div className="space-y-6">
+              <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+                <h3 className="mb-3 text-sm font-medium text-panana-pink/90">여성 캐릭터</h3>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-sm text-white/60 mb-1">말투/성향</label>
+                    <select
+                      value={config.voice_style_female}
+                      onChange={(e) => setConfig((c) => ({ ...c, voice_style_female: e.target.value }))}
+                      className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-white"
+                    >
+                      {VOICE_STYLES.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm text-white/60 mb-1">보이스 이름</label>
+                    <select
+                      value={config.voice_name_female}
+                      onChange={(e) => setConfig((c) => ({ ...c, voice_name_female: e.target.value }))}
+                      className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-white"
+                    >
+                      {VOICE_NAMES.filter((v) => ["Aoede", "Kore", "Charon"].includes(v.value)).map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+                <h3 className="mb-3 text-sm font-medium text-panana-pink/90">남성 캐릭터</h3>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-sm text-white/60 mb-1">말투/성향</label>
+                    <select
+                      value={config.voice_style_male}
+                      onChange={(e) => setConfig((c) => ({ ...c, voice_style_male: e.target.value }))}
+                      className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-white"
+                    >
+                      {VOICE_STYLES.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm text-white/60 mb-1">보이스 이름</label>
+                    <select
+                      value={config.voice_name_male}
+                      onChange={(e) => setConfig((c) => ({ ...c, voice_name_male: e.target.value }))}
+                      className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-white"
+                    >
+                      {VOICE_NAMES.filter((v) => ["Fenrir", "Puck"].includes(v.value)).map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm text-white/60 mb-1">Gemini Live 모델</label>
+                <input
+                  type="text"
+                  value={config.base_model || ""}
+                  onChange={(e) => setConfig((c) => ({ ...c, base_model: e.target.value }))}
+                  className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-white"
+                  placeholder="gemini-2.5-flash-native-audio-preview-12-2025"
+                />
+              </div>
+            </div>
+          </section>
+        )}
+
+        {config.groq_voice_enabled && (
+          <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-6">
+            <h2 className="mb-2 font-semibold">Grok 음성대화 설정 (xAI)</h2>
+            <p className="mb-4 text-sm text-white/50">
+              Grok Voice Agent 전용 설정입니다. API 키는 환경변수 <code className="rounded bg-white/10 px-1">XAI_API_KEY</code> 로 설정하세요.
+            </p>
+            <div className="space-y-4">
+              <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-white/10 bg-white/[0.02] p-4">
+                <input
+                  type="checkbox"
+                  checked={config.groq_natural_korean !== false}
+                  onChange={(e) => setConfig((c) => ({ ...c, groq_natural_korean: e.target.checked }))}
+                  className="h-4 w-4 rounded border-white/30 accent-panana-pink"
+                />
+                <div>
+                  <span className="text-sm font-medium text-white/90">한국어 자연스럽게 말하기 (권장)</span>
+                  <p className="mt-0.5 text-xs text-white/50">Gemini처럼 또렷하고 자연스러운 한국어 발음으로 말하게 합니다. 어눌함을 줄일 수 있어요.</p>
+                </div>
+              </label>
+              <div>
+                <label className="block text-sm text-white/60 mb-1">Grok 전용 음성</label>
+                <select
+                  value={config.groq_voice ?? "Ara"}
+                  onChange={(e) => setConfig((c) => ({ ...c, groq_voice: e.target.value || null }))}
+                  className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-white"
+                >
+                  {GROK_VOICES.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm text-white/60 mb-1">Temperature (0 ~ 2)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={2}
+                  step={0.1}
+                  value={config.groq_temperature ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    const n = v === "" ? null : Number(v);
+                    setConfig((c) => ({ ...c, groq_temperature: n }));
+                  }}
+                  className="w-full max-w-[8rem] rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-white"
+                  placeholder="0.7"
+                />
+                <p className="mt-1 text-xs text-white/40">응답 다양성 (비우면 기본값 사용)</p>
+              </div>
+              <div>
+                <label className="block text-sm text-white/60 mb-1">Grok Voice 모델</label>
+                <input
+                  type="text"
+                  value={config.groq_model ?? ""}
+                  onChange={(e) => setConfig((c) => ({ ...c, groq_model: e.target.value || null }))}
+                  className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-white"
+                  placeholder="grok-voice-1"
+                />
+              </div>
+            </div>
+          </section>
+        )}
 
         <div className="mt-6 flex justify-end gap-3">
           <button
