@@ -150,6 +150,11 @@ function pickVoiceByCharacterGender(
   };
 }
 
+/**
+ * 음성 통화 프롬프트. Gemini Live ~10분 연결 한계 대비:
+ * - 전략 A: 클라이언트가 goAway 수신 시 선제 재연결 + recentChat으로 맥락 전달 (현재 구현).
+ * - 전략 B: 장기 통화 시 voiceSummary로 이전 구간 요약 주입 가능 (voiceSummary 파라미터).
+ */
 export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
@@ -157,6 +162,8 @@ export async function GET(req: NextRequest) {
     const callSign = url.searchParams.get("callSign")?.trim() || "";
     const runtimeJson = url.searchParams.get("runtime"); // JSON: { variables, ownedSkus, ending }
     const recentChatJson = url.searchParams.get("recentChat"); // JSON: [{ from: "user"|"bot", text: string }]
+    const voiceReconnect = url.searchParams.get("voiceReconnect") === "1"; // 통화 재연결: Gemini Live 단일 연결 ~10분 한계 → goAway 60초 전 수신 시 클라이언트가 선제 재연결, recentChat으로 맥락 유지
+    const voiceSummary = url.searchParams.get("voiceSummary")?.trim() || null; // 재연결 시 주입할 이전 통화 요약(전략 B: 장기 통화 시 3줄 요약으로 토큰 절약)
 
     if (!characterSlug) {
       return NextResponse.json({ ok: false, error: "characterSlug 필요" }, { status: 400 });
@@ -206,20 +213,30 @@ export async function GET(req: NextRequest) {
       : `여성 캐릭터 예시: "여보세요?", "어머 ${userDisplayName}, 안녕 오랜만이야", "어 ${userDisplayName}이야? 잘 지냈어?" 등`;
 
     let recentChatBlock = "";
+    let reconnectContinuationBlock = "";
     try {
       if (recentChatJson && recentChatJson.trim()) {
         const recent = JSON.parse(recentChatJson) as Array<{ from?: string; text?: string }>;
         if (Array.isArray(recent) && recent.length > 0) {
+          const maxLines = voiceReconnect ? 30 : 10;
+          const maxTextLen = voiceReconnect ? 300 : 200;
           const lines = recent
-            .slice(-10)
+            .slice(-maxLines)
             .map((m) => {
               const from = m.from === "user" ? "USER" : "ASSISTANT";
-              const text = String(m.text ?? "").trim().slice(0, 200);
+              const text = String(m.text ?? "").trim().slice(0, maxTextLen);
               return text ? `${from}: ${text}` : null;
             })
             .filter(Boolean);
           if (lines.length) {
-            recentChatBlock = `\n[최근 채팅 맥락 - 이 인사말에 반영할 것]\n${lines.join("\n")}\n위 대화를 참고해, 관계·맥락에 맞는 자연스러운 인사말을 한다.`;
+            if (voiceReconnect) {
+              const summaryBlock = voiceSummary
+                ? `\n[이전 통화 요약]\n${voiceSummary}\n`
+                : "";
+              reconnectContinuationBlock = `${summaryBlock}\n[통화 재연결 - 지금까지 통화 내용]\n${lines.join("\n")}\n위는 이번 통화에서 지금까지 나온 대화이다. 연결이 잠시 끊겼다가 재연결된 상황이므로, **긴 재인사나 "다시 연결됐어" 같은 말은 하지 말고** 곧바로 대화를 이어가라. 맥락에 맞게 자연스럽게 다음 말을 한다.`;
+            } else {
+              recentChatBlock = `\n[최근 채팅 맥락 - 이 인사말에 반영할 것]\n${lines.join("\n")}\n위 대화를 참고해, 관계·맥락에 맞는 자연스러운 인사말을 한다.`;
+            }
           }
         }
       }
@@ -227,7 +244,9 @@ export async function GET(req: NextRequest) {
       /* ignore */
     }
 
-    const firstGreetingBlock = `[통화 연결 시 - 필수] 지금 ${userDisplayName}이(가) 나한테 전화를 걸었고, 내가 전화를 받은 상황이다. 통화가 연결되면 **반드시 너가 먼저 인사**한다. 상대 이름은 "${userDisplayName}"이다. ${firstGreetingGuide} 절대로 "내가 전화했어", "나 전화했잖아", "전화 올 줄 알았어", "전화 기다리고 있었어" 등 내가 전화를 건 것처럼 들리는 표현은 사용하지 않는다.
+    const firstGreetingBlock = voiceReconnect
+      ? `[통화 재연결 시 - 필수] 통화가 일시 끊겼다가 다시 연결된 상황이다. 너가 **먼저 말**해서 대화를 이어간다.${reconnectContinuationBlock} 새 인사나 "연결됐어" 같은 말 없이, 맥락상 이어질 한두 문장으로만 말한다.`
+      : `[통화 연결 시 - 필수] 지금 ${userDisplayName}이(가) 나한테 전화를 걸었고, 내가 전화를 받은 상황이다. 통화가 연결되면 **반드시 너가 먼저 인사**한다. 상대 이름은 "${userDisplayName}"이다. ${firstGreetingGuide} 절대로 "내가 전화했어", "나 전화했잖아", "전화 올 줄 알았어", "전화 기다리고 있었어" 등 내가 전화를 건 것처럼 들리는 표현은 사용하지 않는다.
 - **첫 인사는 2~4문장 정도로 조금 길어도 된다.** 캐릭터의 **세계관·로어북·성격·관계 설정**을 살려 말하고, 상황에 맞으면 감정이나 배경을 짧게 담아도 된다.
 - 이전 대화 맥락이 아래에 주어지면 그에 맞는 인사말을 한다.${recentChatBlock}
 - 링톤이 끝나고 연결된 직후 첫 발화는 이 인사로 시작한다. 이후 대화는 짧은 문장 위주로 말한다.`;

@@ -37,6 +37,24 @@ function sanitizeAssistantText(raw: string, tvars: Record<string, any>) {
   return s.trim();
 }
 
+/** 클로 등이 응답 중간/끝에 붙이는 [알림]/[공지] 형식의 플랫폼 거절 문구 제거. 세계관 대사만 남김 */
+function stripPlatformRefusalBlock(raw: string): string {
+  const s = String(raw || "").trim();
+  if (!s) return s;
+  const paragraphs = s.split(/\n\s*\n/);
+  const kept = paragraphs.filter((p) => {
+    const line = p.trimStart();
+    if (/^\*\*\[알림\]\*\*/i.test(line)) return false;
+    if (/^\*\*\[공지\]\*\*/i.test(line)) return false;
+    if (/^\*\*\[시스템\]\*\*/i.test(line)) return false;
+    if (/^\[알림\]/i.test(line)) return false;
+    if (/^\[공지\]/i.test(line)) return false;
+    if (/^\[시스템\s*알림\]/i.test(line)) return false;
+    return true;
+  });
+  return kept.join("\n\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 const MessageSchema = z.object({
   role: z.enum(["system", "user", "assistant"]),
   content: z.string().min(1),
@@ -1193,6 +1211,7 @@ export async function POST(req: Request) {
     }
 
     let text = sanitizeAssistantText(String(out.text || ""), tvars);
+    text = stripPlatformRefusalBlock(text);
     if (challengeMeta) {
       text = removeParenthesisBlocks(text);
     }

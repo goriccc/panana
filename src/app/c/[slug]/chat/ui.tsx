@@ -1123,6 +1123,22 @@ export function CharacterChatClient({
     }
   };
 
+  /** 캐릭터 응답이 "사진 보내 주겠다"는 동의인지 판별. 동의할 때만 fal.ai 가동 */
+  const classifyPhotoAssent = async (assistantMessage: string): Promise<boolean> => {
+    if (!assistantMessage.trim()) return false;
+    try {
+      const res = await fetch("/api/classify-photo-assent", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ assistantMessage: assistantMessage.trim() }),
+      });
+      const d = await res.json().catch(() => ({}));
+      return Boolean(d?.agreed);
+    } catch {
+      return false;
+    }
+  };
+
   // 공통: 메시지 목록(마지막이 유저 메시지)으로 LLM 요청 후 봇 응답 반영. 재시도 시 사용.
   const requestChat = async (messagesIncludingLastUser: Msg[], userScript: string | null) => {
     const history = messagesIncludingLastUser.filter((m) => m.from !== "system");
@@ -1234,7 +1250,8 @@ export function CharacterChatClient({
       if (characterAvatarUrl) {
         const isPhotoRequest =
           isClearPhotoRequest(text) || (await classifyPhotoRequest(text));
-        if (isPhotoRequest) {
+        const characterAgreedToSend = isPhotoRequest && (await classifyPhotoAssent(reply));
+        if (isPhotoRequest && characterAgreedToSend) {
           setMessages((prev) =>
             prev.map((x) =>
               x.id === botId ? { ...x, sceneImageLoading: true } : x

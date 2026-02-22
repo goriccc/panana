@@ -149,6 +149,8 @@ export function VoiceSessionClient({
   const userStoppedRef = useRef(true);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptRef = useRef(0);
+  /** 통화 중 발화 누적 (재연결 시 대화 맥락 유지용). 사용자가 끊기 전까지 유지 */
+  const voiceCallTranscriptRef = useRef<Array<{ from: "user" | "bot"; text: string }>>([]);
   const startedRef = useRef(false);
   const onUserRef = useRef(onUserTranscript);
   const onAssistantRef = useRef(onAssistantTranscript);
@@ -165,6 +167,8 @@ export function VoiceSessionClient({
   const ringEndedRef = useRef(false);
   /** Grok(xAI) 세션일 때 true. connect()에서 설정되며, 오디오 전송 시 input_audio_buffer.append 사용 */
   const isGrokSessionRef = useRef(false);
+  /** Vertex 세션 재개용 핸들. sessionResumptionUpdate 수신 시 저장, 재연결 init 시 전달. 통화 끊기 시 초기화 */
+  const sessionResumptionHandleRef = useRef<string | null>(null);
 
   useEffect(() => {
     onPhaseChange?.(phase);
@@ -298,7 +302,10 @@ export function VoiceSessionClient({
       clearTimeout(userDebounceRef.current);
       userDebounceRef.current = null;
     }
-    if (buf) onUserRef.current?.(buf);
+    if (buf) {
+      voiceCallTranscriptRef.current.push({ from: "user", text: buf });
+      onUserRef.current?.(buf);
+    }
   }, []);
 
   const flushAssistant = useCallback(() => {
@@ -309,7 +316,10 @@ export function VoiceSessionClient({
       clearTimeout(assistantDebounceRef.current);
       assistantDebounceRef.current = null;
     }
-    if (buf) onAssistantRef.current?.(buf);
+    if (buf) {
+      voiceCallTranscriptRef.current.push({ from: "bot", text: buf });
+      onAssistantRef.current?.(buf);
+    }
   }, [flushUser]);
 
   const clearReconnectTimer = useCallback(() => {
@@ -337,12 +347,39 @@ export function VoiceSessionClient({
       characterSlug,
       callSign: callSign || "",
     });
-    if (recentMessages.length > 0) {
-      params.set(
-        "recentChat",
-        JSON.stringify(recentMessages.slice(-10).map((m) => ({ from: m.from, text: (m.text || "").slice(0, 200) })))
-      );
+    const isReconnect = reconnectAttemptRef.current > 0;
+    const voiceTranscript = voiceCallTranscriptRef.current;
+    const recentChatPayload =
+      isReconnect && voiceTranscript.length > 0
+        ? voiceTranscript.slice(-30).map((m) => ({ from: m.from, text: (m.text || "").slice(0, 300) }))
+        : recentMessages.length > 0
+          ? recentMessages.slice(-10).map((m) => ({ from: m.from, text: (m.text || "").slice(0, 200) }))
+          : null;
+
+    if (isReconnect && voiceTranscript.length > 0) {
+      params.set("recentChat", JSON.stringify(recentChatPayload));
+      params.set("voiceReconnect", "1");
+      // 장기 통화 재연결 시 Gemini 2.5 Flash로 3줄 요약 생성 후 프롬프트에 주입 (전략 B)
+      const MIN_TURNS_FOR_SUMMARY = 6;
+      if (voiceTranscript.length >= MIN_TURNS_FOR_SUMMARY && Array.isArray(recentChatPayload) && recentChatPayload.length > 0) {
+        try {
+          const sumRes = await fetch("/api/voice/summarize", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ recentChat: recentChatPayload }),
+          });
+          const sumData = await sumRes.json().catch(() => ({}));
+          if (sumData?.ok && typeof sumData.summary === "string" && sumData.summary.trim()) {
+            params.set("voiceSummary", sumData.summary.trim());
+          }
+        } catch {
+          // 요약 실패 시 voiceSummary 없이 recentChat만으로 재연결
+        }
+      }
+    } else if (recentChatPayload && recentChatPayload.length > 0) {
+      params.set("recentChat", JSON.stringify(recentChatPayload));
     }
+
     const res = await fetch(`/api/voice/prompt?${params.toString()}`);
     const data = await res.json().catch(() => ({}));
     if (!data?.ok || !data?.systemPrompt) {
@@ -508,7 +545,7 @@ export function VoiceSessionClient({
             return;
           }
           setReconnectGaveUp(false);
-          setError("연결이 잠시 끊겼어요. 자동 재연결 중...");
+          setError(null);
           reconnectTimerRef.current = setTimeout(async () => {
             if (userStoppedRef.current || !startedRef.current) return;
             await connect();
@@ -521,6 +558,7 @@ export function VoiceSessionClient({
                 setError("연결을 유지할 수 없어요. 아래 '다시 연결'로 재시도해 보세요.");
                 return;
               }
+              setError(null);
               const nextRetryInMs = Math.min(1000 * 2 ** nextAttempt, 5000);
               reconnectTimerRef.current = setTimeout(async () => {
                 if (userStoppedRef.current || !startedRef.current) return;
@@ -564,7 +602,12 @@ export function VoiceSessionClient({
       setTimeout(() => {
         if (ws.readyState === WebSocket.OPEN && !initSentRef.current) {
           initSentRef.current = true;
-          ws.send(JSON.stringify({ type: "init", model, config }));
+          const initPayload: Record<string, unknown> = { type: "init", model, config };
+          const handle = sessionResumptionHandleRef.current;
+          if (handle && typeof handle === "string" && handle.trim()) {
+            initPayload.resumptionHandle = handle.trim();
+          }
+          ws.send(JSON.stringify(initPayload));
         }
       }, 100);
     };
@@ -572,18 +615,30 @@ export function VoiceSessionClient({
     ws.onmessage = async (event: MessageEvent) => {
       try {
         const msg = JSON.parse(String(event.data || "{}"));
+        if (msg.type === "sessionResumptionUpdate" && typeof msg.newHandle === "string" && msg.newHandle.trim()) {
+          sessionResumptionHandleRef.current = msg.newHandle.trim();
+          return;
+        }
         if (msg.type === "ready") {
-          const isFirstConnect = reconnectAttemptRef.current === 0;
           reconnectAttemptRef.current = 0;
           setReconnectGaveUp(false);
           setConnected(true);
-          // 링톤 종료 후 첫 연결 시 Gemini가 먼저 인사하도록 발화 유도
-          if (isFirstConnect) {
-            try {
-              ws.send(JSON.stringify({ type: "text", text: "." }));
-            } catch {
-              // ignore
-            }
+          // 첫 연결·재연결 모두 캐릭터가 먼저 말하도록 발화 유도 (프롬프트에서 첫 인사 / 재연결 후 이어말 지시)
+          try {
+            ws.send(JSON.stringify({ type: "text", text: "." }));
+          } catch {
+            // ignore
+          }
+          return;
+        }
+        // Vertex Live API: 연결 종료 약 60초 전에 goAway 전달. 선제적으로 끊고 재연결해 유저는 끊김을 못 느끼게 함.
+        if (msg.type === "goAway" || msg.goAway != null) {
+          flushAssistant();
+          flushUser();
+          try {
+            ws.close();
+          } catch {
+            // ignore
           }
           return;
         }
@@ -696,12 +751,11 @@ export function VoiceSessionClient({
         }
 
         setReconnectGaveUp(false);
-        setError("연결이 잠시 끊겼어요. 자동 재연결 중...");
+        setError(null);
 
         reconnectTimerRef.current = setTimeout(async () => {
           if (userStoppedRef.current || !startedRef.current) return;
           await connect();
-          // fetch/초기화 단계에서 실패해 소켓이 안 만들어진 경우에도 재시도 유지
           if (!wsRef.current && !userStoppedRef.current && startedRef.current) {
             clearReconnectTimer();
             const nextAttempt = reconnectAttemptRef.current + 1;
@@ -711,6 +765,7 @@ export function VoiceSessionClient({
               setError("연결을 유지할 수 없어요. 아래 '다시 연결'로 재시도해 보세요.");
               return;
             }
+            setError(null);
             const nextRetryInMs = Math.min(1000 * 2 ** nextAttempt, 5000);
             reconnectTimerRef.current = setTimeout(async () => {
               if (userStoppedRef.current || !startedRef.current) return;
@@ -1082,6 +1137,8 @@ export function VoiceSessionClient({
     const setIdle = opts?.setIdle !== false;
     userStoppedRef.current = true;
     reconnectAttemptRef.current = 0;
+    voiceCallTranscriptRef.current = [];
+    sessionResumptionHandleRef.current = null;
     iosContextWorkaroundDoneRef.current = false;
     if (iosRecorderContextRef.current) {
       iosRecorderContextRef.current.close().catch(() => {});
