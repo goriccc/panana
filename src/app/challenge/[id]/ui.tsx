@@ -159,23 +159,20 @@ export function ChallengeClient({
 
     const applyViewport = () => {
       if (!el || !vv) return;
-      const top = vv.offsetTop;
-      const left = vv.offsetLeft;
+      // top/left를 0으로 고정해 헤더가 밀려 올라가며 사라지는 현상 방지 (말풍선만 스크린 상단에 보이는 버그 해결)
       const w = vv.width;
       const h = vv.height;
       const changed =
-        Math.abs(top - lastTop) >= THRESHOLD ||
-        Math.abs(left - lastLeft) >= THRESHOLD ||
         Math.abs(w - lastWidth) >= THRESHOLD ||
         Math.abs(h - lastHeight) >= THRESHOLD;
-      if (!changed && lastTop !== -999) return;
-      lastTop = top;
-      lastLeft = left;
+      if (!changed && lastWidth !== -999) return;
+      lastTop = 0;
+      lastLeft = 0;
       lastWidth = w;
       lastHeight = h;
       el.style.position = "fixed";
-      el.style.top = `${top}px`;
-      el.style.left = `${left}px`;
+      el.style.top = "0";
+      el.style.left = "0";
       el.style.width = `${w}px`;
       el.style.height = `${h}px`;
     };
