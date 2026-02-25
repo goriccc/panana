@@ -101,6 +101,7 @@ export function ChallengeClient({
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [timerMs, setTimerMs] = useState(0);
+  const [safetyOn, setSafetyOn] = useState(false);
   const timerRef = useRef<number | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const hasStartedSessionRef = useRef(false);
@@ -250,6 +251,25 @@ export function ChallengeClient({
   const isInputFocusedRef = useRef(false);
   const isAtBottomRef = useRef(true);
 
+  useEffect(() => {
+    const read = () => {
+      try {
+        const v = document.cookie.split("; ").find((r) => r.startsWith("panana_safety_on="));
+        setSafetyOn(v ? v.split("=")[1] === "1" : localStorage.getItem("panana_safety_on") === "1");
+      } catch {
+        setSafetyOn(false);
+      }
+    };
+    read();
+    window.addEventListener("panana-safety-change", read as EventListener);
+    return () => window.removeEventListener("panana-safety-change", read as EventListener);
+  }, []);
+
+  const composerBorderStyle = safetyOn
+    ? { borderColor: "color-mix(in srgb, var(--panana-pink2, #FFA1CC) 50%, transparent)" }
+    : undefined;
+  const composerBorderClass = safetyOn ? "" : "border-[#ffa9d6]/50";
+
   // 일반 대화창과 동일: 메시지/타이핑 변경 시 scrollTop = scrollHeight로 맨 아래 스크롤
   useEffect(() => {
     const el = scrollRef.current;
@@ -260,7 +280,7 @@ export function ChallengeClient({
     return () => cancelAnimationFrame(rafId);
   }, [messages.length, showTyping]);
 
-  // 모바일 키보드 감지 및 레이아웃 조정 (일반 채팅과 동일)
+  // 모바일 키보드 감지 및 레이아웃 조정 (일반 채팅과 동일, contentEditable에 연결)
   useEffect(() => {
     if (typeof window === "undefined") return;
     let initialHeight = window.innerHeight;
@@ -287,7 +307,7 @@ export function ChallengeClient({
       const start = performance.now();
       const tick = () => {
         updateKeyboardHeight();
-        if (performance.now() - start < 400) focusRafId = window.requestAnimationFrame(tick);
+        if (performance.now() - start < 600) focusRafId = window.requestAnimationFrame(tick);
       };
       focusRafId = window.requestAnimationFrame(tick);
       updateKeyboardHeight();
@@ -309,11 +329,21 @@ export function ChallengeClient({
       window.visualViewport.addEventListener("resize", onViewportChange, { passive: true });
       window.visualViewport.addEventListener("scroll", onViewportChange, { passive: true });
     }
-    const input = composerRef.current?.querySelector("input");
-    if (input) {
-      input.addEventListener("focus", handleFocus, { passive: true });
-      input.addEventListener("blur", handleBlur, { passive: true });
-    }
+    let input: HTMLElement | null = null;
+    const attach = () => {
+      const el =
+        composerRef.current?.querySelector<HTMLDivElement>("[contenteditable=\"true\"]") ??
+        composerRef.current?.querySelector("input");
+      if (el && !input) {
+        input = el;
+        input.addEventListener("focus", handleFocus, { passive: true });
+        input.addEventListener("blur", handleBlur, { passive: true });
+      }
+    };
+    attach();
+    const rafId = requestAnimationFrame(() => {
+      if (!input) attach();
+    });
     return () => {
       if (window.visualViewport && onViewportChange) {
         window.visualViewport.removeEventListener("resize", onViewportChange);
@@ -323,6 +353,8 @@ export function ChallengeClient({
         input.removeEventListener("focus", handleFocus);
         input.removeEventListener("blur", handleBlur);
       }
+      window.cancelAnimationFrame(rafId);
+      if (focusRafId != null) window.cancelAnimationFrame(focusRafId);
     };
   }, [view, challengeSuccess]);
 
@@ -338,6 +370,21 @@ export function ChallengeClient({
       ro.observe(el);
     }
     return () => { ro?.disconnect(); };
+  }, [view, challengeSuccess]);
+
+  // iOS 키보드 예측/자동완성 바 완화 (일반 채팅과 동일)
+  useEffect(() => {
+    const apply = () => {
+      const el = challengeInputRef.current;
+      if (el) {
+        el.setAttribute("autocorrect", "off");
+        el.setAttribute("autocapitalize", "off");
+        el.setAttribute("autocomplete", "off");
+      }
+    };
+    apply();
+    const rafId = requestAnimationFrame(apply);
+    return () => cancelAnimationFrame(rafId);
   }, [view, challengeSuccess]);
 
   const startSession = useCallback(async () => {
@@ -843,14 +890,15 @@ export function ChallengeClient({
         /* 대화입력창: 일반 채팅과 동일, 지문 입력 버튼만 제외 */
         <div
           ref={composerRef}
-          className="fixed left-0 right-0 bottom-0 z-40 border-t border-white/10 bg-[#0B0C10]/90 backdrop-blur"
+          className="fixed left-0 right-0 bottom-0 z-40 border-t border-white/10 bg-[#0B0C10]/95 backdrop-blur-sm"
           style={{
             transform: keyboardHeight > 0 ? `translateY(-${keyboardHeight}px)` : "translateY(0)",
-            paddingBottom: keyboardHeight > 0 ? "8px" : "max(env(safe-area-inset-bottom), 16px)",
+            paddingBottom: keyboardHeight > 0 ? "6px" : "max(env(safe-area-inset-bottom), 12px)",
+            paddingTop: keyboardHeight > 0 ? "6px" : "10px",
           }}
         >
-          <div className="mx-auto w-full max-w-[420px] px-5 py-2.5">
-            <div className="relative w-full rounded-full border border-panana-pink/35 bg-white/[0.04] py-2 pl-4 pr-11">
+          <div className="mx-auto w-full max-w-[420px] px-4">
+            <div className={`relative w-full rounded-full border bg-white/[0.04] py-2 pl-4 pr-11 ${composerBorderClass}`} style={composerBorderStyle}>
               <div
                 ref={challengeInputRef}
                 role="textbox"
@@ -858,6 +906,7 @@ export function ChallengeClient({
                 suppressContentEditableWarning
                 data-placeholder="메시지를 입력하세요"
                 aria-label="메시지 입력"
+                spellCheck={false}
                 className="min-h-[1.5rem] w-full bg-transparent text-base font-semibold text-white/70 outline-none empty:before:content-[attr(data-placeholder)] empty:before:text-white/30"
                 style={{ fontSize: "16px" }}
                 onInput={() => {
