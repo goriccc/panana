@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchMyUserProfile } from "@/lib/pananaApp/userProfiles";
 import { loadRuntime, saveRuntime } from "@/lib/pananaApp/chatRuntime";
-import { recordMyChat } from "@/lib/pananaApp/myChats";
+import { recordMyChat, incrementUnread, clearUnread } from "@/lib/pananaApp/myChats";
 import {
   loadChatHistory,
   saveChatHistory,
@@ -553,7 +553,7 @@ export function CharacterChatClient({
       const start = performance.now();
       const tick = () => {
         updateKeyboardHeight();
-        if (performance.now() - start < 400) {
+        if (performance.now() - start < 600) {
           focusRafId = window.requestAnimationFrame(tick);
         } else {
           focusRafId = null;
@@ -590,11 +590,21 @@ export function CharacterChatClient({
       window.addEventListener("resize", updateKeyboardHeight, { passive: true });
     }
 
-    const input = composerRef.current?.querySelector("input");
-    if (input) {
-      input.addEventListener("focus", handleFocus, { passive: true });
-      input.addEventListener("blur", handleBlur, { passive: true });
-    }
+    let input: HTMLElement | null = null;
+    const attach = () => {
+      const el =
+        composerRef.current?.querySelector<HTMLDivElement>("[contenteditable=\"true\"]") ??
+        composerRef.current?.querySelector("input");
+      if (el && !input) {
+        input = el;
+        input.addEventListener("focus", handleFocus, { passive: true });
+        input.addEventListener("blur", handleBlur, { passive: true });
+      }
+    };
+    attach();
+    const raf = window.requestAnimationFrame(() => {
+      if (!input) attach();
+    });
 
     return () => {
       if (window.visualViewport) {
@@ -609,10 +619,26 @@ export function CharacterChatClient({
         input.removeEventListener("focus", handleFocus);
         input.removeEventListener("blur", handleBlur);
       }
+      window.cancelAnimationFrame(raf);
       if (focusRafId != null) {
         window.cancelAnimationFrame(focusRafId);
       }
     };
+  }, []);
+
+  // iOS 키보드 예측/자동완성 바 완화: contentEditable에 autocorrect·autocapitalize 설정 (Safari가 인식하도록 setAttribute 사용)
+  useEffect(() => {
+    const apply = () => {
+      const el = inputRef.current;
+      if (el) {
+        el.setAttribute("autocorrect", "off");
+        el.setAttribute("autocapitalize", "off");
+        el.setAttribute("autocomplete", "off");
+      }
+    };
+    apply();
+    const rafId = requestAnimationFrame(apply);
+    return () => cancelAnimationFrame(rafId);
   }, []);
 
   // composer 높이 측정 (메시지 영역 패딩 보정)
@@ -809,6 +835,7 @@ export function CharacterChatClient({
         const reply = String(data.text || "").trim();
         if (reply) {
           setMessages((prev) => [...prev, { id: `b-${Date.now()}-returning`, from: "bot", text: reply, at: Date.now() }]);
+          incrementUnread(characterSlug);
           try {
             const key = `panana_returning_opener:${pid}:${characterSlug}`;
             const raw = localStorage.getItem(key);
@@ -1075,10 +1102,11 @@ export function CharacterChatClient({
     return () => window.removeEventListener("pagehide", onPageHide);
   }, [currentThreadId, messages]);
 
-  // "MY" 리스트용: 대화 진입만 해도 목록에 기록
+  // "MY" 리스트용: 대화 진입만 해도 목록에 기록 + 미확인 안부 카운트 초기화
   useEffect(() => {
     recordMyChat({ characterSlug, characterName, avatarUrl: characterAvatarUrl });
-  }, [characterAvatarUrl, characterName, characterSlug]);
+    clearUnread(characterSlug);
+  }, [characterSlug, characterName, characterAvatarUrl]);
 
   // ( ) 괄호 안 내용을 지문으로 추출 (첫 번째 쌍만)
   const parseUserScript = (raw: string): { script: string | null; text: string } => {
@@ -1712,16 +1740,17 @@ export function CharacterChatClient({
         </div>
       </main>
 
-      {/* composer */}
+      {/* composer: 키보드 바로 위에 입력창만 배치 (iOS 포함) */}
       <div
         ref={composerRef}
-        className="fixed left-0 right-0 bottom-0 z-40 border-t border-white/10 bg-[#0B0C10]/90 backdrop-blur"
-        style={{ 
-          transform: keyboardHeight > 0 ? `translateY(-${keyboardHeight}px)` : 'translateY(0)',
-          paddingBottom: keyboardHeight > 0 ? '8px' : 'max(env(safe-area-inset-bottom), 16px)'
+        className="fixed left-0 right-0 bottom-0 z-40 border-t border-white/10 bg-[#0B0C10]/95 backdrop-blur-sm"
+        style={{
+          transform: keyboardHeight > 0 ? `translateY(-${keyboardHeight}px)` : "translateY(0)",
+          paddingBottom: keyboardHeight > 0 ? "6px" : "max(env(safe-area-inset-bottom), 12px)",
+          paddingTop: keyboardHeight > 0 ? "6px" : "10px",
         }}
       >
-        <div className="mx-auto w-full max-w-[420px] px-5 py-2.5">
+        <div className="mx-auto w-full max-w-[420px] px-4">
           {voiceModalOpen ? (
             <VoiceSessionClient
               characterSlug={characterSlug}
@@ -1828,6 +1857,7 @@ export function CharacterChatClient({
               suppressContentEditableWarning
               data-placeholder="메시지를 입력하세요"
               aria-label="메시지 입력"
+              spellCheck={false}
               className="min-h-[1.5rem] w-full bg-transparent text-base font-semibold text-white/70 outline-none empty:before:content-[attr(data-placeholder)] empty:before:text-white/30"
               style={{ fontSize: "16px" }}
               onInput={() => {

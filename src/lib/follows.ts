@@ -1,6 +1,7 @@
 export type FollowPerson = {
   id: string;
   name: string;
+  profileImageUrl?: string | null;
   avatarType?: "photo" | "gradient";
   isFollowing: boolean;
 };

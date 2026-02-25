@@ -273,6 +273,37 @@ export async function fetchCategoryFromDb(slug: string): Promise<Category | null
   return { slug: String(cat.slug), name: String((cat as any).title), items };
 }
 
+/** 캐릭터 slug 기준 실시간 팔로워/팔로잉 수 집계 (follow-stats API와 동일 로직). 서버 전용. */
+export async function getCharacterFollowCountsFromDb(slug: string): Promise<{ followers: number; following: number } | null> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return null;
+  const characterSlug = String(slug || "").trim().toLowerCase();
+  if (!characterSlug) return null;
+  try {
+    const [
+      userCountRes,
+      charFollowsMeRes,
+      charIFollowRes,
+      charFollowsUserCountRes,
+    ] = await Promise.all([
+      admin.from("panana_user_follows_character").select("panana_id", { count: "exact", head: true }).eq("character_slug", characterSlug),
+      admin.from("panana_character_follows").select("follower_character_slug", { count: "exact", head: true }).eq("following_character_slug", characterSlug),
+      admin.from("panana_character_follows").select("following_character_slug", { count: "exact", head: true }).eq("follower_character_slug", characterSlug),
+      admin.from("panana_character_follows_user").select("panana_id", { count: "exact", head: true }).eq("character_slug", characterSlug),
+    ]);
+    const userFollowCount = typeof (userCountRes as { count?: number }).count === "number" ? (userCountRes as { count: number }).count : 0;
+    const charFollowsMeCount = typeof (charFollowsMeRes as { count?: number }).count === "number" ? (charFollowsMeRes as { count: number }).count : 0;
+    const charIFollowCount = typeof (charIFollowRes as { count?: number }).count === "number" ? (charIFollowRes as { count: number }).count : 0;
+    const charFollowsUserCount = typeof (charFollowsUserCountRes as { count?: number }).count === "number" ? (charFollowsUserCountRes as { count: number }).count : 0;
+    return {
+      followers: userFollowCount + charFollowsMeCount,
+      following: charIFollowCount + charFollowsUserCount,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchCharacterProfileFromDb(slug: string): Promise<CharacterProfile | null> {
   const supabase = getSupabaseServer();
   const { data, error } = await supabase
@@ -292,13 +323,17 @@ export async function fetchCharacterProfileFromDb(slug: string): Promise<Charact
   const introLines = r.intro_lines?.length ? r.intro_lines : [`${r.name}  ${r.mbti || ""}`.trim(), "", r.name ? `안녕하세요, ${r.name}에요.` : ""].filter(Boolean);
   const moodLines = r.mood_lines?.length ? r.mood_lines : [""];
 
+  const liveCounts = await getCharacterFollowCountsFromDb(r.slug);
+  const followers = liveCounts ? liveCounts.followers : Number(r.followers_count || 0);
+  const following = liveCounts ? liveCounts.following : Number(r.following_count || 0);
+
   return {
     slug: r.slug,
     name: r.name,
     profileImageUrl: r.profile_image_url || undefined,
     mbti: r.mbti || "",
-    followers: Number(r.followers_count || 0),
-    following: Number(r.following_count || 0),
+    followers,
+    following,
     hashtags,
     introTitle: r.intro_title || "소개합니다!",
     introLines,

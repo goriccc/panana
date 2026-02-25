@@ -153,6 +153,41 @@ export async function POST(req: Request) {
       await sb.from("panana_chat_messages").delete().in("id", ids);
     }
 
+    // N회 이상 대화 시 캐릭터가 유저를 팔로우 (조건 달성 시 1회만 추가)
+    try {
+      const { data: settingsRow } = await sb
+        .from("panana_site_settings")
+        .select("character_follows_user_after_messages")
+        .limit(1)
+        .maybeSingle();
+      const n = Math.max(1, Number((settingsRow as any)?.character_follows_user_after_messages ?? 10) || 10);
+
+      const { count: userMsgCount } = await sb
+        .from("panana_chat_messages")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", pananaId)
+        .eq("character_slug", characterSlug)
+        .eq("from_role", "user");
+      const count = userMsgCount ?? 0;
+
+      if (count >= n) {
+        const { data: existing } = await sb
+          .from("panana_character_follows_user")
+          .select("character_slug")
+          .eq("character_slug", characterSlug)
+          .eq("panana_id", pananaId)
+          .maybeSingle();
+        if (!existing) {
+          await sb.from("panana_character_follows_user").upsert(
+            { character_slug: characterSlug, panana_id: pananaId },
+            { onConflict: "character_slug,panana_id" }
+          );
+        }
+      }
+    } catch {
+      // 실패해도 메시지 저장 결과는 그대로 반환
+    }
+
     return NextResponse.json({ ok: true, saved: rows.length });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || "Unknown error" }, { status: 400 });

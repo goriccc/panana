@@ -9,6 +9,7 @@ import type { ContentCardItem } from "@/lib/content";
 import { ContentCard } from "@/components/ContentCard";
 import { defaultRecommendationSettings, trackBehaviorEvent } from "@/lib/pananaApp/recommendation";
 import { fetchMyAccountInfo, type Gender } from "@/lib/pananaApp/accountInfo";
+import { ensurePananaIdentity } from "@/lib/pananaApp/identity";
 
 function Stat({ value, label }: { value: number; label: string }) {
   return (
@@ -109,6 +110,16 @@ export function CharacterClient({
   }, [preferredGender, recommendedTalkCards]);
 
   const [safetyOn, setSafetyOn] = useState(false);
+  const [followStats, setFollowStats] = useState<{
+    followersTotal: number;
+    followingTotal: number;
+    isFollowing: boolean;
+  } | null>(() => ({
+    followersTotal: character.followers,
+    followingTotal: character.following,
+    isFollowing: false,
+  }));
+  const [followLoading, setFollowLoading] = useState(false);
   useEffect(() => {
     const read = () => {
       try {
@@ -122,6 +133,71 @@ export function CharacterClient({
     window.addEventListener("panana-safety-change", read as EventListener);
     return () => window.removeEventListener("panana-safety-change", read as EventListener);
   }, []);
+
+  useEffect(() => {
+    let alive = true;
+    setFollowStats({
+      followersTotal: character.followers,
+      followingTotal: character.following,
+      isFollowing: false,
+    });
+    const pid = ensurePananaIdentity().id;
+    if (!pid || !character.slug) return;
+    fetch(
+      `/api/me/follow-stats?pananaId=${encodeURIComponent(pid)}&characterSlug=${encodeURIComponent(character.slug)}`
+    )
+      .then((r) => r.json())
+      .then((d) => {
+        if (!alive || !d?.ok) return;
+        setFollowStats({
+          followersTotal: typeof d.followersTotal === "number" ? d.followersTotal : character.followers,
+          followingTotal: typeof d.followingTotal === "number" ? d.followingTotal : character.following,
+          isFollowing: Boolean(d.isFollowing),
+        });
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [character.slug, character.followers, character.following]);
+
+  const handleFollowToggle = async () => {
+    const pid = ensurePananaIdentity().id;
+    if (!pid || !character.slug || followLoading) return;
+    setFollowLoading(true);
+    try {
+      const res = await fetch("/api/me/follow", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          pananaId: pid,
+          characterSlug: character.slug,
+          action: followStats?.isFollowing ? "unfollow" : "follow",
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) return;
+      setFollowStats((prev) =>
+        prev
+          ? {
+              ...prev,
+              isFollowing: Boolean(data.isFollowing),
+              followersTotal: Math.max(0, prev.followersTotal + (data.isFollowing ? 1 : -1)),
+            }
+          : {
+              followersTotal: character.followers + (data.isFollowing ? 1 : 0),
+              followingTotal: character.following,
+              isFollowing: Boolean(data.isFollowing),
+            }
+      );
+    } finally {
+      setFollowLoading(false);
+    }
+  };
+
+  const displayFollowers = followStats?.followersTotal ?? character.followers;
+  const displayFollowing = followStats?.followingTotal ?? character.following;
+  const isFollowing = followStats?.isFollowing ?? false;
   const headerAccent = safetyOn ? "text-panana-pink2" : "text-[#ffa9d6]";
 
   return (
@@ -196,7 +272,7 @@ export function CharacterClient({
                   prefetch={true}
                   onMouseEnter={() => router.prefetch(`/c/${character.slug}/follows`)}
                 >
-                  <Stat value={character.followers} label="팔로워" />
+                  <Stat value={displayFollowers} label="팔로워" />
                 </Link>
                 <Link 
                   href={`/c/${character.slug}/follows?tab=following`} 
@@ -204,7 +280,7 @@ export function CharacterClient({
                   prefetch={true}
                   onMouseEnter={() => router.prefetch(`/c/${character.slug}/follows`)}
                 >
-                  <Stat value={character.following} label="팔로잉" />
+                  <Stat value={displayFollowing} label="팔로잉" />
                 </Link>
               </div>
             </div>
@@ -219,9 +295,15 @@ export function CharacterClient({
           <div className="mt-4 grid grid-cols-2 gap-3">
             <button
               type="button"
-              className="rounded-xl bg-[#e5e5eb] px-4 py-3 text-center text-[14px] font-semibold text-[#0B0C10]"
+              disabled={followLoading}
+              onClick={handleFollowToggle}
+              className={
+                isFollowing
+                  ? "rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-center text-[14px] font-semibold text-white/80"
+                  : "rounded-xl bg-[#e5e5eb] px-4 py-3 text-center text-[14px] font-semibold text-[#0B0C10]"
+              }
             >
-              팔로우
+              {followLoading ? "..." : isFollowing ? "팔로잉 중" : "팔로우"}
             </button>
             <Link
               href={`/c/${character.slug}/chat`}

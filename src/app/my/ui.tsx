@@ -113,6 +113,7 @@ export function MyPageClient() {
   const data = useMemo(() => myPageDummy, []);
   const [logoutOpen, setLogoutOpen] = useState(false);
   const localIdt = useMemo(() => ensurePananaIdentity(), []);
+  const [followStats, setFollowStats] = useState<{ followersTotal: number; followingTotal: number } | null>(null);
   // UX: 초기 렌더에서 더미 대신 로컬/세션 값을 즉시 표시하고, 이후 DB 값으로 보정한다.
   const [nickname, setNickname] = useState<string>(() => String(localIdt.nickname || "").trim());
   const [pananaHandle, setPananaHandle] = useState<string>(() => String(localIdt.handle || "").trim().toLowerCase());
@@ -172,6 +173,26 @@ export function MyPageClient() {
     setPananaHandle(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, status]);
+
+  useEffect(() => {
+    if (!loggedIn) return;
+    const pid = localIdt.id;
+    if (!pid) return;
+    let alive = true;
+    fetch(`/api/me/my-follow-stats?pananaId=${encodeURIComponent(pid)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!alive || !d?.ok) return;
+        setFollowStats({
+          followersTotal: typeof d.followersTotal === "number" ? d.followersTotal : 0,
+          followingTotal: typeof d.followingTotal === "number" ? d.followingTotal : 0,
+        });
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [loggedIn, localIdt.id]);
 
   useEffect(() => {
     // 세션이 늦게 로딩될 수 있으니, 들어오는 즉시 UI를 먼저 갱신한다(네트워크 fetch 전에).
@@ -284,7 +305,7 @@ export function MyPageClient() {
                 prefetch={true}
                 onMouseEnter={() => router.prefetch("/my/follows")}
               >
-                <Stat value={data.followers} label="팔로워" />
+                <Stat value={followStats?.followersTotal ?? data.followers} label="팔로워" />
               </Link>
               <Link 
                 href="/my/follows?tab=following" 
@@ -292,7 +313,7 @@ export function MyPageClient() {
                 prefetch={true}
                 onMouseEnter={() => router.prefetch("/my/follows")}
               >
-                <Stat value={data.following} label="팔로잉" />
+                <Stat value={followStats?.followingTotal ?? data.following} label="팔로잉" />
               </Link>
             </div>
 

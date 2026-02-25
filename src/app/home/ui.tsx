@@ -1133,12 +1133,20 @@ export function HomeClient({
   return (
     <div
       className={[
-        "min-h-dvh text-white",
+        "relative min-h-dvh text-white",
         safetyOn
           ? "bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.18),transparent_60%),linear-gradient(#07070B,#0B0C10)]"
           : "bg-[linear-gradient(#07070B,#0B0C10)]",
       ].join(" ")}
     >
+      {/* 도전·순위 탭에서도 스파이시 ON 시 홈/찾기와 동일한 은은한 핑크 배경이 보이도록 고정 레이어 */}
+      {safetyOn && (activeTab === "challenge" || activeTab === "ranking") ? (
+        <div
+          aria-hidden
+          className="fixed inset-0 z-0 pointer-events-none bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.18),transparent_60%),linear-gradient(#07070B,#0B0C10)]"
+        />
+      ) : null}
+
       <header className="sticky top-0 z-20 w-full bg-[#07070B]/95 pb-4 backdrop-blur-sm">
         <HomeHeader
           active={activeTab}
@@ -1169,7 +1177,7 @@ export function HomeClient({
         />
       </header>
 
-      <main className="mx-auto w-full max-w-[420px] px-5 pb-10 pt-5">
+      <main className="relative z-10 mx-auto w-full max-w-[420px] px-5 pb-10 pt-5">
         {activeTab === "search" ? (
           <div className="pb-10">
             <div
@@ -1354,9 +1362,20 @@ export function HomeClient({
                     <div className="mt-1 text-[11px] font-semibold text-white/35">{displayHandle}</div>
                   </div>
                 </div>
-                {/* unread UI는 추후 연결. 지금은 진입 버튼 느낌만 유지 */}
-                <div className="flex-none rounded-full bg-[#432036] px-3 py-1 text-[11px] font-extrabold text-panana-pink2">
-                  대화
+                {/* 미확인 안부 메시지가 있으면 핑크 원형 배지로 카운트 표시 */}
+                <div className="flex min-w-0 items-center justify-end gap-2">
+                  {(it.unread ?? 0) > 0 ? (
+                    <span
+                      className="flex h-6 min-w-6 flex-none items-center justify-center rounded-full bg-panana-pink px-1.5 text-[11px] font-extrabold text-white"
+                      aria-label={`읽지 않은 메시지 ${it.unread ?? 0}건`}
+                    >
+                      {(it.unread ?? 0) > 999 ? "999+" : it.unread ?? 0}
+                    </span>
+                  ) : (
+                    <span className="flex-none rounded-full bg-[#432036] px-3 py-1 text-[11px] font-extrabold text-panana-pink2">
+                      대화
+                    </span>
+                  )}
                 </div>
               </Link>
               ); })}
@@ -1389,7 +1408,18 @@ export function HomeClient({
         ) : null}
 
         {activeTab === "challenge" ? (
-          <div className="space-y-6 pb-10">
+          <div
+            className="space-y-6 pb-10"
+            style={
+              safetyOn
+                ? {
+                    background:
+                      "radial-gradient(1100px 650px at 50% -10%, rgba(255,77,167,0.18), transparent 60%), linear-gradient(#07070B, #0B0C10)",
+                    minHeight: "80vh",
+                  }
+                : undefined
+            }
+          >
             {challengeLoading ? (
               <div className="space-y-6">
                 {Array.from({ length: 3 }).map((_, i) => (

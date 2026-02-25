@@ -91,6 +91,10 @@ export default function AdminCharactersPage() {
   const [moodLinesText, setMoodLinesText] = useState("");
   const [followersCount, setFollowersCount] = useState("0");
   const [followingCount, setFollowingCount] = useState("0");
+  const [followingSlugs, setFollowingSlugs] = useState<string[]>([]);
+  const [followerSlugs, setFollowerSlugs] = useState<string[]>([]);
+  const [followRelationsLoading, setFollowRelationsLoading] = useState(false);
+  const [followToggleSlug, setFollowToggleSlug] = useState<string | null>(null);
   const [profileImageUrl, setProfileImageUrl] = useState("");
   const [postsCount, setPostsCount] = useState("0");
   const [studioCharacterId, setStudioCharacterId] = useState<string>("");
@@ -448,6 +452,72 @@ export default function AdminCharactersPage() {
     setStudioAutofilled({});
   }, [selectedId, selected]);
 
+  // 편집 시 팔로워/팔로잉 수는 프론트와 동일한 집계값 표시, 게시물 개수는 DB에서 조회
+  useEffect(() => {
+    if (!selectedId || !selected?.slug) return;
+
+    const slug = selected.slug;
+
+    // 프론트와 동일한 실시간 집계 (follow-stats API)
+    fetch(`/api/me/follow-stats?characterSlug=${encodeURIComponent(slug)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.ok && typeof data.followersTotal === "number") {
+          setFollowersCount(String(data.followersTotal));
+        }
+        if (data?.ok && typeof data.followingTotal === "number") {
+          setFollowingCount(String(data.followingTotal));
+        }
+      })
+      .catch(() => {});
+
+    // 게시물 개수는 panana_character_posts 테이블 실제 행 수로 표시 (프론트와 동일한 실제 값)
+    if (supabase) {
+      supabase
+        .from("panana_character_posts")
+        .select("id", { count: "exact", head: true })
+        .eq("character_id", selectedId)
+        .eq("active", true)
+        .then(({ count, error }) => {
+          if (!error && typeof count === "number") {
+            setPostsCount(String(count));
+          }
+        });
+    }
+  }, [selectedId, selected?.slug, supabase]);
+
+  // 편집 캐릭터의 팔로잉/팔로워 목록 조회 (스크롤 목록용)
+  useEffect(() => {
+    if (!selected?.slug) {
+      setFollowingSlugs([]);
+      setFollowerSlugs([]);
+      return;
+    }
+    let alive = true;
+    setFollowRelationsLoading(true);
+    const run = async () => {
+      try {
+        const { data: session } = await supabase?.auth.getSession();
+        const token = session?.session?.access_token;
+        if (!token) return;
+        const res = await fetch(
+          `/api/admin/character-follows-sync?characterSlug=${encodeURIComponent(selected.slug)}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const data = await res.json().catch(() => null);
+        if (!alive || !data?.ok) return;
+        setFollowingSlugs(Array.isArray(data.followingSlugs) ? data.followingSlugs : []);
+        setFollowerSlugs(Array.isArray(data.followerSlugs) ? data.followerSlugs : []);
+      } finally {
+        if (alive) setFollowRelationsLoading(false);
+      }
+    };
+    run();
+    return () => {
+      alive = false;
+    };
+  }, [selected?.slug, supabase]);
+
   useEffect(() => {
     setPage((current) => Math.min(Math.max(current, 1), pageCount));
   }, [pageCount]);
@@ -602,6 +672,37 @@ export default function AdminCharactersPage() {
             <>
               <AdminButton variant="ghost" onClick={() => load()}>
                 새로고침
+              </AdminButton>
+              <AdminButton
+                variant="ghost"
+                onClick={async () => {
+                  setErr(null);
+                  try {
+                    const { data: session } = await supabase.auth.getSession();
+                    const token = session?.session?.access_token;
+                    if (!token) {
+                      setErr("로그인이 필요해요.");
+                      return;
+                    }
+                    const res = await fetch("/api/admin/character-follows-sync-all", {
+                      method: "POST",
+                      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+                      body: JSON.stringify({}),
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok || !data?.ok) {
+                      setErr(data?.error || "배치 실행에 실패했어요.");
+                      return;
+                    }
+                    setErr(null);
+                    alert(`맞팔 배치 완료. 캐릭터 ${data.characters}명, 팔로우 관계 ${data.pairsInserted}건 반영됐어요.`);
+                    load();
+                  } catch (e: any) {
+                    setErr(e?.message || "배치 실행 실패");
+                  }
+                }}
+              >
+                전체 맞팔 배치
               </AdminButton>
               <AdminButton
                 variant="ghost"
@@ -885,6 +986,178 @@ export default function AdminCharactersPage() {
                 <AdminInput label="팔로워 수" value={followersCount} onChange={setFollowersCount} placeholder="0" />
                 <AdminInput label="팔로잉 수" value={followingCount} onChange={setFollowingCount} placeholder="0" />
               </div>
+              <div className="rounded border border-white/10 bg-white/[0.02] p-3">
+                <div className="text-[11px] font-extrabold text-white/60">캐릭터 맞팔 수동 지정</div>
+                <p className="mt-1 text-[11px] text-white/40">캐릭터를 선택해 팔로우/언팔하세요. 저장 시 태그 기반 맞팔도 함께 동기화됩니다.</p>
+                {followRelationsLoading ? (
+                  <div className="mt-3 py-6 text-center text-[12px] font-semibold text-white/45">불러오는 중...</div>
+                ) : selected?.slug ? (
+                  <div className="mt-3 grid grid-cols-2 gap-4">
+                    <div>
+                      <div className="text-[11px] font-semibold text-white/50">이 캐릭터가 팔로우하는 캐릭터</div>
+                      <div className="admin-scroll mt-1.5 max-h-40 overflow-y-auto rounded-lg border border-white/10 bg-black/20">
+                        {rows
+                          .filter((r) => r.slug && r.slug !== selected.slug)
+                          .map((r) => {
+                            const slug = r.slug.toLowerCase();
+                            const isFollowing = followingSlugs.includes(slug);
+                            const loading = followToggleSlug === slug;
+                            return (
+                              <div
+                                key={r.id}
+                                className="flex items-center justify-between gap-2 border-b border-white/5 px-3 py-2 last:border-b-0"
+                              >
+                                <div className="flex min-w-0 flex-1 items-center gap-2">
+                                  <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-white/10">
+                                    {r.profileImageUrl ? (
+                                      // eslint-disable-next-line @next/next/no-img-element
+                                      <img src={r.profileImageUrl} alt="" className="h-full w-full object-cover" />
+                                    ) : (
+                                      <div className="flex h-full w-full items-center justify-center text-[11px] font-bold text-white/50">
+                                        {(r.name || r.slug || "?")[0]}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <span className="min-w-0 truncate text-[12px] font-semibold text-white/80">
+                                    {r.name || r.slug}
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  disabled={loading}
+                                  onClick={async () => {
+                                    const token = (await supabase?.auth.getSession())?.data?.session?.access_token;
+                                    if (!token || !selected?.slug) return;
+                                    setFollowToggleSlug(slug);
+                                    try {
+                                      const res = await fetch("/api/admin/character-follows-sync", {
+                                        method: "POST",
+                                        headers: {
+                                          "content-type": "application/json",
+                                          authorization: `Bearer ${token}`,
+                                        },
+                                        body: JSON.stringify({
+                                          characterSlug: selected.slug,
+                                          ...(isFollowing
+                                            ? { removeFollowingSlugs: [slug] }
+                                            : { addFollowingSlugs: [slug] }),
+                                        }),
+                                      });
+                                      const data = await res.json().catch(() => null);
+                                      if (data?.ok) {
+                                        setFollowingSlugs((prev) =>
+                                          isFollowing ? prev.filter((s) => s !== slug) : [...prev, slug]
+                                        );
+                                        const statsRes = await fetch(
+                                          `/api/me/follow-stats?characterSlug=${encodeURIComponent(selected.slug)}`
+                                        );
+                                        const stats = await statsRes.json().catch(() => null);
+                                        if (stats?.ok) {
+                                          setFollowingCount(String(stats.followingTotal ?? 0));
+                                          setFollowersCount(String(stats.followersTotal ?? 0));
+                                        }
+                                      }
+                                    } finally {
+                                      setFollowToggleSlug(null);
+                                    }
+                                  }}
+                                  className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-bold ${
+                                    isFollowing
+                                      ? "bg-white/10 text-white/70"
+                                      : "bg-[#ff4da7] text-white"
+                                  }`}
+                                >
+                                  {loading ? "..." : isFollowing ? "팔로잉" : "팔로우"}
+                                </button>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] font-semibold text-white/50">이 캐릭터를 팔로우하는 캐릭터</div>
+                      <div className="admin-scroll mt-1.5 max-h-40 overflow-y-auto rounded-lg border border-white/10 bg-black/20">
+                        {rows
+                          .filter((r) => r.slug && r.slug !== selected.slug)
+                          .map((r) => {
+                            const slug = r.slug.toLowerCase();
+                            const isFollower = followerSlugs.includes(slug);
+                            const loading = followToggleSlug === `f-${slug}`;
+                            return (
+                              <div
+                                key={r.id}
+                                className="flex items-center justify-between gap-2 border-b border-white/5 px-3 py-2 last:border-b-0"
+                              >
+                                <div className="flex min-w-0 flex-1 items-center gap-2">
+                                  <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-white/10">
+                                    {r.profileImageUrl ? (
+                                      // eslint-disable-next-line @next/next/no-img-element
+                                      <img src={r.profileImageUrl} alt="" className="h-full w-full object-cover" />
+                                    ) : (
+                                      <div className="flex h-full w-full items-center justify-center text-[11px] font-bold text-white/50">
+                                        {(r.name || r.slug || "?")[0]}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <span className="min-w-0 truncate text-[12px] font-semibold text-white/80">
+                                    {r.name || r.slug}
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  disabled={loading}
+                                  onClick={async () => {
+                                    const token = (await supabase?.auth.getSession())?.data?.session?.access_token;
+                                    if (!token || !selected?.slug) return;
+                                    setFollowToggleSlug(`f-${slug}`);
+                                    try {
+                                      const res = await fetch("/api/admin/character-follows-sync", {
+                                        method: "POST",
+                                        headers: {
+                                          "content-type": "application/json",
+                                          authorization: `Bearer ${token}`,
+                                        },
+                                        body: JSON.stringify({
+                                          characterSlug: selected.slug,
+                                          ...(isFollower
+                                            ? { removeFollowerSlugs: [slug] }
+                                            : { addFollowerSlugs: [slug] }),
+                                        }),
+                                      });
+                                      const data = await res.json().catch(() => null);
+                                      if (data?.ok) {
+                                        setFollowerSlugs((prev) =>
+                                          isFollower ? prev.filter((s) => s !== slug) : [...prev, slug]
+                                        );
+                                        const statsRes = await fetch(
+                                          `/api/me/follow-stats?characterSlug=${encodeURIComponent(selected.slug)}`
+                                        );
+                                        const stats = await statsRes.json().catch(() => null);
+                                        if (stats?.ok) {
+                                          setFollowingCount(String(stats.followingTotal ?? 0));
+                                          setFollowersCount(String(stats.followersTotal ?? 0));
+                                        }
+                                      }
+                                    } finally {
+                                      setFollowToggleSlug(null);
+                                    }
+                                  }}
+                                  className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-bold ${
+                                    isFollower
+                                      ? "bg-white/10 text-white/70"
+                                      : "bg-[#ff4da7] text-white"
+                                  }`}
+                                >
+                                  {loading ? "..." : isFollower ? "팔로잉" : "팔로우"}
+                                </button>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
               <AdminInput label="게시물 개수" value={postsCount} onChange={setPostsCount} placeholder="0" />
 
               <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
@@ -1161,8 +1434,32 @@ export default function AdminCharactersPage() {
                           sort_order: idx,
                           active: true,
                         }));
-                        const { error: insErr } = await supabase.from("panana_character_categories").insert(payload as any);
-                        if (insErr) throw insErr;
+                      const { error: insErr } = await supabase.from("panana_character_categories").insert(payload as any);
+                      if (insErr) throw insErr;
+                      }
+
+                      // 동일 태그 맞팔 자동 등록
+                      if (selected?.slug) {
+                        try {
+                          const { data: session } = await supabase.auth.getSession();
+                          const token = session?.session?.access_token;
+                          if (token) {
+                            await fetch("/api/admin/character-follows-sync", {
+                              method: "POST",
+                              headers: {
+                                "content-type": "application/json",
+                                authorization: `Bearer ${token}`,
+                              },
+                              body: JSON.stringify({
+                                characterSlug: selected.slug,
+                                addFollowingSlugs: [],
+                                addFollowerSlugs: [],
+                              }),
+                            });
+                          }
+                        } catch {
+                          // 실패해도 저장은 완료
+                        }
                       }
 
                       await load();

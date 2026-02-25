@@ -47,6 +47,37 @@ export function saveMyChats(items: MyChatItem[]) {
   } catch {}
 }
 
+/** 해당 캐릭터의 미확인(안부) 카운트를 설정. 목록에 없으면 무시. */
+export function setUnreadCount(characterSlug: string, count: number) {
+  if (typeof window === "undefined") return;
+  const slug = String(characterSlug || "").trim().toLowerCase();
+  if (!slug) return;
+  const prev = loadMyChats();
+  const next = prev.map((it) =>
+    it.characterSlug.toLowerCase() === slug ? { ...it, unread: Math.max(0, count) } : it
+  );
+  saveMyChats(next);
+}
+
+/** 미확인 안부 메시지 1건 추가 (마이 목록 배지용) */
+export function incrementUnread(characterSlug: string) {
+  if (typeof window === "undefined") return;
+  const slug = String(characterSlug || "").trim().toLowerCase();
+  if (!slug) return;
+  const prev = loadMyChats();
+  const next = prev.map((it) => {
+    if (it.characterSlug.toLowerCase() !== slug) return it;
+    const cur = typeof it.unread === "number" ? it.unread : 0;
+    return { ...it, unread: cur + 1 };
+  });
+  saveMyChats(next);
+}
+
+/** 해당 캐릭터 대화방 진입 시 미확인 카운트 초기화 */
+export function clearUnread(characterSlug: string) {
+  setUnreadCount(characterSlug, 0);
+}
+
 export function recordMyChat(args: { characterSlug: string; characterName: string; avatarUrl?: string }) {
   if (typeof window === "undefined") return;
   const slug = String(args.characterSlug || "").trim();

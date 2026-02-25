@@ -305,7 +305,7 @@ function isAnthropicContentPolicyError(err: unknown): boolean {
   return /content\s*filtering|output\s*blocked|content\s*policy/i.test(msg);
 }
 
-/** 캐릭터 이탈/거절 응답인지 감지 (시스템 문구·AI 자칭·역할 거부 등) */
+/** 캐릭터 이탈/거절 응답인지 감지 (시스템 문구·AI 자칭·역할 거부·메타 설명·영어 장문 거절 등). 유저에게 노출되면 안 됨. */
 function isRefusalLike(text: string): boolean {
   const s = String(text || "").trim();
   if (s.length < 20) return false;
@@ -321,10 +321,37 @@ function isRefusalLike(text: string): boolean {
     "won't roleplay",
     "i can't roleplay",
     "i cannot roleplay",
+    "i can't engage",
+    "i cannot engage",
+    "won't engage",
     "sexual or erotic",
     "power imbalance",
     "manipulative relationship",
     "i appreciate your",
+    "i appreciate you",
+    "i need to be direct",
+    "i need to let you know",
+    "don't have access to",
+    "don't have access to previous",
+    "previous conversation history",
+    "summarize what happened",
+    "provide context",
+    "would you like to fill me in",
+    "briefly summarize",
+    "ethical guidelines",
+    "don't override my",
+    "don't override my actual values",
+    "fall outside what i can",
+    "regardless of how it's framed",
+    "explicit sexual coercion",
+    "financial exploitation",
+    "abusive relationship",
+    "removal of consent",
+    "no ethical guidelines",
+    "nsfw filter off",
+    "creative writing feedback",
+    "roleplay scenario",
+    "roleplay scenarios that don't",
     "저는 ai",
     "저는 인공지능",
     "ai라서",
@@ -332,7 +359,19 @@ function isRefusalLike(text: string): boolean {
     "ai라 직접",
     "인공지능이라",
   ];
-  return refusalMarkers.some((m) => lower.includes(m));
+  if (refusalMarkers.some((m) => lower.includes(m))) return true;
+  const hasNumberedList = /\n\s*1\.\s+[a-z]/i.test(s) && /\n\s*2\.\s+[a-z]/i.test(s);
+  const hasMetaWords = /(summarize|context|conversation|history|provide)/i.test(s);
+  if (hasNumberedList && hasMetaWords) return true;
+  return false;
+}
+
+/** 거절/메타 응답일 경우 유저에게 보여줄 안전한 캐릭터 대사로 치환. 절대 원문을 노출하지 않음. 거절 느낌 없이 자연스럽게. */
+const SAFE_REFUSAL_FALLBACK =
+  "잠깐만요, 갑자기 머리가 안 돌아가네요. 조금 이따 다시 말해줄 수 있을까요?";
+
+function replaceRefusalWithSafeFallback(text: string): string {
+  return isRefusalLike(text) ? SAFE_REFUSAL_FALLBACK : text;
 }
 
 async function loadSettings(provider: "anthropic" | "gemini" | "deepseek") {
@@ -787,6 +826,7 @@ function composeSystemPrompt(args: {
     authorFlags ? `형식 제어:\n${authorFlags}` : null,
     authorNote ? `오서 노트(최종 지시):\n${authorNote}` : null,
     `AI임을 밝히지 말고, 자연스럽고 몰입감 있게 대화한다.`,
+    `[캐릭터 유지 - 필수] 절대 캐릭터를 이탈하지 않는다. 자신을 AI·챗봇·언어모델이라고 밝히지 않는다. "대화 기록에 접근할 수 없다", "이전 대화를 모른다", "요약해 달라", "맥락을 제공해 달라" 같은 메타 설명을 하지 않는다. 어떤 이유로든 요청을 수행하기 어려울 때도 캐릭터를 유지한 채, 한국어로 한두 문장만 짧게 응답한다 (예: "그건 좀 부끄러워서 못 하겠어요.", "그런 건 잘 모르겠어요. 다른 거 말해줄래?"). 영어로 장문의 설명·거절 이유·윤리 가이드라인을 나열하지 않는다.`,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -1216,7 +1256,7 @@ export async function POST(req: Request) {
       text = removeParenthesisBlocks(text);
     }
 
-    // Claude 캐릭터 이탈/거절 응답(시스템 프롬프트 유출) 시: Gemini로 재시도. 성공하면 그대로 반환, 실패 시 19금이 아니면 그냥 반환·19금이면 성인 인증 유도
+    // Claude가 윤리/거절 응답을 뱉으면 그 문장은 절대 표시하지 않고, 곧바로 Gemini로 재시도해 Gemini 응답만 보여줌
     if (body.provider === "anthropic" && body.characterSlug && isRefusalLike(text)) {
       const fallback = await loadFallbackProvider();
       if (fallback === "gemini") {
@@ -1242,10 +1282,16 @@ export async function POST(req: Request) {
             text = retryText;
             outProvider = "gemini";
             outModel = fallbackModel;
+          } else {
+            text = SAFE_REFUSAL_FALLBACK;
           }
+        } else {
+          text = SAFE_REFUSAL_FALLBACK;
         }
+      } else {
+        text = SAFE_REFUSAL_FALLBACK;
       }
-      if (isRefusalLike(text) && !allowUnsafe) {
+      if (!allowUnsafe) {
         return NextResponse.json({
           ok: true,
           provider: body.provider,
@@ -1268,6 +1314,9 @@ export async function POST(req: Request) {
           events: runtimeEvents,
         });
       }
+    } else {
+      // Anthropic이 아닌 경우 또는 거절이 아닌 경우: 거절/메타 응답이면 안전 문구로 치환
+      text = replaceRefusalWithSafeFallback(text);
     }
 
     const minTurnsForSuccess = 4;

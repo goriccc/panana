@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getCharacter } from "@/lib/characters";
+import { fetchCharacterProfileFromDb } from "@/lib/pananaApp/contentServer";
 import { CharacterFollowsClient } from "./ui";
 
 export function generateMetadata({ params }: { params: { slug: string } }): Metadata {
@@ -13,14 +14,15 @@ export function generateMetadata({ params }: { params: { slug: string } }): Meta
   };
 }
 
-export default function CharacterFollowsPage({
+export default async function CharacterFollowsPage({
   params,
   searchParams,
 }: {
   params: { slug: string };
   searchParams?: { tab?: string };
 }) {
-  const c = getCharacter(params.slug);
+  const fromDb = await fetchCharacterProfileFromDb(params.slug).catch(() => null);
+  const c = fromDb || getCharacter(params.slug);
   if (!c) notFound();
   const tab = searchParams?.tab === "following" ? "following" : "followers";
   return <CharacterFollowsClient title={c.name} slug={c.slug} tab={tab} />;
