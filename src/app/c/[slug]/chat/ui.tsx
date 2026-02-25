@@ -681,8 +681,13 @@ export function CharacterChatClient({
     rafId = window.requestAnimationFrame(() => {
       window.requestAnimationFrame(run);
     });
+    // 키보드/레이아웃 안정 후에도 맨 아래로 스크롤 (말풍선이 화면 밖 위로 나가는 현상 방지)
+    const t1 = window.setTimeout(run, 100);
+    const t2 = window.setTimeout(run, 350);
     return () => {
       if (rafId) window.cancelAnimationFrame(rafId);
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
     };
   }, [messages.length, showTyping]);
 
@@ -1453,20 +1458,24 @@ export function CharacterChatClient({
 
     const applyViewport = () => {
       if (!el || !vv) return;
-      // top/left를 0으로 고정해 헤더가 밀려 올라가며 사라지는 현상 방지 (말풍선만 스크린 상단에 보이는 버그 해결)
+      // 보이는 영역(visual viewport)에 컨테이너를 맞춰 헤더가 항상 화면 상단에 보이게. top은 0 미만이 되지 않도록 클램프.
+      const top = Math.max(0, vv.offsetTop);
+      const left = Math.max(0, vv.offsetLeft);
       const w = vv.width;
       const h = vv.height;
       const changed =
+        Math.abs(top - lastTop) >= THRESHOLD ||
+        Math.abs(left - lastLeft) >= THRESHOLD ||
         Math.abs(w - lastWidth) >= THRESHOLD ||
         Math.abs(h - lastHeight) >= THRESHOLD;
-      if (!changed && lastWidth !== -999) return;
-      lastTop = 0;
-      lastLeft = 0;
+      if (!changed && lastTop !== -999) return;
+      lastTop = top;
+      lastLeft = left;
       lastWidth = w;
       lastHeight = h;
       el.style.position = "fixed";
-      el.style.top = "0";
-      el.style.left = "0";
+      el.style.top = `${top}px`;
+      el.style.left = `${left}px`;
       el.style.width = `${w}px`;
       el.style.height = `${h}px`;
     };
