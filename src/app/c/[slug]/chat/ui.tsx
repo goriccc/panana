@@ -676,8 +676,11 @@ export function CharacterChatClient({
       if (!el) return;
       el.scrollTop = el.scrollHeight;
       forceScrollRef.current = false;
+      endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
     };
-    rafId = window.requestAnimationFrame(run);
+    rafId = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(run);
+    });
     return () => {
       if (rafId) window.cancelAnimationFrame(rafId);
     };
@@ -1592,13 +1595,15 @@ export function CharacterChatClient({
         </div>
       ) : null}
 
-      {/* 스크롤 영역 = 헤더 바로 밑부터. 말풍선이 잘리지 않게 영역만 사용 */}
+      {/* 스크롤 영역 = 헤더 바로 밑부터. 말풍선이 헤더에 가리지 않도록 paddingTop·scrollPaddingTop 적용 */}
       <main
         ref={scrollRef}
         className="chat-scrollbar mx-auto w-full max-w-[420px] min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-5 pb-4 pt-3"
         style={{
           minHeight: 120,
+          paddingTop: 12,
           paddingBottom: `${Math.max(0, keyboardHeight) + Math.max(0, composerHeight) + 12}px`,
+          scrollPaddingTop: 16,
           scrollPaddingBottom: `${Math.max(0, keyboardHeight) + Math.max(0, composerHeight) + 12}px`,
         }}
         onScroll={() => {

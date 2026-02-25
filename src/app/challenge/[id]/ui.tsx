@@ -270,14 +270,21 @@ export function ChallengeClient({
     : undefined;
   const composerBorderClass = safetyOn ? "" : "border-[#ffa9d6]/50";
 
-  // 일반 대화창과 동일: 메시지/타이핑 변경 시 scrollTop = scrollHeight로 맨 아래 스크롤
+  // 일반 대화창과 동일: 메시지/타이핑 변경 시 레이아웃 완료 후 맨 아래로 스크롤 (이중 rAF + endRef)
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const rafId = requestAnimationFrame(() => {
+    let rafId = 0;
+    const run = () => {
+      const el = scrollRef.current;
+      if (!el) return;
       el.scrollTop = el.scrollHeight;
+      endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+    };
+    rafId = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(run);
     });
-    return () => cancelAnimationFrame(rafId);
+    return () => {
+      if (rafId) window.cancelAnimationFrame(rafId);
+    };
   }, [messages.length, showTyping]);
 
   // 모바일 키보드 감지 및 레이아웃 조정 (일반 채팅과 동일, contentEditable에 연결)
@@ -734,15 +741,17 @@ export function ChallengeClient({
         </div>
         </div>
 
-        {/* 스크롤 영역 = 도전목표 라운드박스 바로 밑부터 */}
+        {/* 스크롤 영역 = 도전목표 라운드박스 바로 밑부터. 말풍선이 헤더/도전목표에 가리지 않도록 paddingTop·scrollPaddingTop 적용 */}
         <main
           ref={scrollRef}
           className="chat-scrollbar mx-auto w-full max-w-[420px] flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-5 pb-4 pt-3"
           style={{
             minHeight: 120,
+            paddingTop: 12,
             paddingBottom: challengeSuccess
               ? "320px"
               : `${Math.max(0, keyboardHeight) + Math.max(0, composerHeight) + 12}px`,
+            scrollPaddingTop: 16,
             scrollPaddingBottom: challengeSuccess
               ? "320px"
               : `${Math.max(0, keyboardHeight) + Math.max(0, composerHeight) + 12}px`,
