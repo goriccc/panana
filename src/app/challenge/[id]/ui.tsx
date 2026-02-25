@@ -144,63 +144,6 @@ export function ChallengeClient({
     };
   }, []);
 
-  // Visual Viewport API: 도전 채팅 키보드 시 컨테이너 즉시 맞춤. 2px 이상 변경 시에만 DOM 갱신해 움찔 완화.
-  useEffect(() => {
-    if (view !== "chat" || !challengeChatContainerRef.current) return;
-    const el = challengeChatContainerRef.current;
-    const vv = window.visualViewport;
-    if (!vv) return;
-
-    const THRESHOLD = 2;
-    let lastTop = -999;
-    let lastLeft = -999;
-    let lastWidth = -999;
-    let lastHeight = -999;
-
-    const applyViewport = () => {
-      if (!el || !vv) return;
-      // 보이는 영역(visual viewport)에 컨테이너를 맞춰 헤더가 항상 화면 상단에 보이게. top은 0 미만이 되지 않도록 클램프.
-      const top = Math.max(0, vv.offsetTop);
-      const left = Math.max(0, vv.offsetLeft);
-      const w = vv.width;
-      const h = vv.height;
-      const changed =
-        Math.abs(top - lastTop) >= THRESHOLD ||
-        Math.abs(left - lastLeft) >= THRESHOLD ||
-        Math.abs(w - lastWidth) >= THRESHOLD ||
-        Math.abs(h - lastHeight) >= THRESHOLD;
-      if (!changed && lastTop !== -999) return;
-      lastTop = top;
-      lastLeft = left;
-      lastWidth = w;
-      lastHeight = h;
-      el.style.position = "fixed";
-      el.style.top = `${top}px`;
-      el.style.left = `${left}px`;
-      el.style.width = `${w}px`;
-      el.style.height = `${h}px`;
-    };
-    const onScrollLock = () => {
-      window.scrollTo(0, 0);
-    };
-
-    applyViewport();
-    vv.addEventListener("resize", applyViewport);
-    vv.addEventListener("scroll", applyViewport);
-    window.addEventListener("scroll", onScrollLock, { passive: true });
-
-    return () => {
-      vv.removeEventListener("resize", applyViewport);
-      vv.removeEventListener("scroll", applyViewport);
-      window.removeEventListener("scroll", onScrollLock);
-      el.style.position = "";
-      el.style.top = "";
-      el.style.left = "";
-      el.style.width = "";
-      el.style.height = "";
-    };
-  }, [view]);
-
   const loadRanking = useCallback(async () => {
     const hasInitial = ranking.length > 0;
     if (!hasInitial) setRankingLoading(true);
@@ -291,6 +234,22 @@ export function ChallengeClient({
       window.clearTimeout(t2);
     };
   }, [messages.length, showTyping]);
+
+  // 레이아웃 완료 후 스크롤: 메시지 목록에 자식이 추가되었을 때(새 메시지 반영됨) 맨 아래에 있던 경우에만 맨 아래로 스크롤
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const mo = new MutationObserver(() => {
+      if (!isAtBottomRef.current) return;
+      const scrollToEnd = () => {
+        el.scrollTop = el.scrollHeight;
+        endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+      };
+      requestAnimationFrame(() => requestAnimationFrame(scrollToEnd));
+    });
+    mo.observe(el, { childList: true, subtree: true });
+    return () => mo.disconnect();
+  }, []);
 
   // 모바일 키보드 감지 및 레이아웃 조정 (일반 채팅과 동일, contentEditable에 연결)
   useEffect(() => {
