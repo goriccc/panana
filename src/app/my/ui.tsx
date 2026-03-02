@@ -66,8 +66,8 @@ function LogoutModal({
   return (
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" />
-      <div className="absolute inset-0 grid place-items-center px-6">
-        <SurfaceCard variant="outglow" className="w-full max-w-[520px] p-6">
+      <div className="absolute inset-0 grid place-items-center px-3">
+        <SurfaceCard variant="outglow" className="w-[min(420px,calc(100vw-24px))] p-6">
           <div className="text-center text-[16px] font-semibold text-white/90">알림</div>
           <div className="mt-4 whitespace-pre-line text-center text-[14px] leading-[1.45] text-white/70">
             정말 로그아웃 하시겠습니까?
@@ -165,6 +165,10 @@ export function MyPageClient() {
     const providerImg = String((session as any)?.user?.image || "").trim();
     return custom || providerImg || "";
   }, [session]);
+  const [avatarLoadError, setAvatarLoadError] = useState(false);
+  useEffect(() => {
+    setAvatarLoadError(false);
+  }, [avatarUrl]);
 
   useEffect(() => {
     const idt = ensurePananaIdentity();
@@ -235,7 +239,7 @@ export function MyPageClient() {
     };
   }, []);
 
-  const headerAccent = safetyOn ? "text-panana-pink2" : "text-[#ffa9d6]";
+  const headerAccent = safetyOn ? "text-panana-pink2" : "text-[#f74b97]";
   return (
     <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.10),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">
       <header className="mx-auto w-full max-w-[420px] px-5 pt-3">
@@ -254,8 +258,15 @@ export function MyPageClient() {
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-4">
               <div className="h-[58px] w-[58px] overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10">
-                {avatarUrl ? (
-                  <Image src={avatarUrl} alt="프로필 이미지" width={58} height={58} className="h-full w-full object-cover" />
+                {avatarUrl && !avatarLoadError ? (
+                  <Image
+                    src={avatarUrl}
+                    alt="프로필 이미지"
+                    width={58}
+                    height={58}
+                    className="h-full w-full object-cover"
+                    onError={() => setAvatarLoadError(true)}
+                  />
                 ) : (
                   <Image
                     src="/dumyprofile.png"
@@ -428,6 +439,12 @@ export function MyPageClient() {
         onClose={() => setLogoutOpen(false)}
         onLogout={() => {
           setLogoutOpen(false);
+          // 미로그인 상태에서는 스파이시 인증도 초기화 (로그아웃 후 스파이시 콘텐츠 노출 방지)
+          try {
+            document.cookie = "panana_safety_on=0; path=/; max-age=31536000; SameSite=Lax";
+            localStorage.setItem("panana_safety_on", "0");
+            window.dispatchEvent(new Event("panana-safety-change"));
+          } catch {}
           // Auth.js 로그아웃 후 공항(온보딩)으로 이동
           signOut({ callbackUrl: "/airport" });
         }}

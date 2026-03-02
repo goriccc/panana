@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { HomeClient } from "./ui";
-import { fetchHomeCategoriesFromDb, fetchMenuVisibilityFromDb, fetchRecommendationSettingsFromDb } from "@/lib/pananaApp/contentServer";
+import { fetchHomeCategoriesFromDb, fetchMenuVisibilityFromDb, fetchRecommendationSettingsFromDb, fetchRecommendedSearchTagsFromDb } from "@/lib/pananaApp/contentServer";
 
 export const metadata: Metadata = {
   title: "홈",
@@ -20,10 +20,11 @@ export default async function HomePage({
   const safetyCookie = cookieStore.get("panana_safety_on");
   const initialSafetyOn = safetyCookie ? safetyCookie.value === "1" : undefined;
 
-  const [cats, menuVisibility, recommendationSettings] = await Promise.all([
+  const [cats, menuVisibility, recommendationSettings, recommendedSearchTags] = await Promise.all([
     fetchHomeCategoriesFromDb().catch(() => null),
     fetchMenuVisibilityFromDb().catch(() => null),
     fetchRecommendationSettingsFromDb().catch(() => null),
+    fetchRecommendedSearchTagsFromDb().catch(() => null),
   ]);
 
   const sp = await searchParams;
@@ -35,6 +36,7 @@ export default async function HomePage({
       initialSafetyOn={initialSafetyOn}
       initialMenuVisibility={menuVisibility || undefined}
       initialRecommendationSettings={recommendationSettings || undefined}
+      initialRecommendedSearchTags={recommendedSearchTags || undefined}
       initialTab={initialTab}
     />
   );

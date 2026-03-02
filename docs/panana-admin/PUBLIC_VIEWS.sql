@@ -331,7 +331,8 @@ select
   scene_image_vision_cache_minutes,
   menu_visibility,
   updated_at,
-  recommendation_settings
+  recommendation_settings,
+  recommended_search_tags
 from public.panana_site_settings
 order by updated_at desc
 limit 1;

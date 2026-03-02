@@ -15,6 +15,7 @@ const NAV_ITEMS = [
   { href: "/admin/site", label: "사이트(푸터/SEO)" },
   { href: "/admin/scene-image", label: "장면 이미지" },
   { href: "/admin/menu", label: "메뉴관리" },
+  { href: "/admin/recommended-search-tags", label: "추천 검색어" },
   { href: "/admin/recommendation", label: "추천(개인화)" },
   { href: "/studio", label: "PananaAI Studio" },
 ];

@@ -31,6 +31,7 @@ export function MyEditClient() {
   const [status, setStatus] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string>("");
+  const [avatarLoadError, setAvatarLoadError] = useState(false);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const { data: session, update } = useSession();
   const [pananaHandle, setPananaHandle] = useState<string>("");
@@ -70,6 +71,7 @@ export function MyEditClient() {
     // blob 미리보기 우선
     if (avatarUrl && avatarUrl.startsWith("blob:")) return;
     setAvatarUrl(url);
+    setAvatarLoadError(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
 
@@ -106,8 +108,17 @@ export function MyEditClient() {
                 // 선택한 로컬 이미지 미리보기(blob URL)
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={avatarUrl} alt="프로필 이미지" className="h-full w-full object-cover" />
+              ) : !avatarLoadError ? (
+                <Image
+                  src={avatarUrl}
+                  alt="프로필 이미지"
+                  width={86}
+                  height={86}
+                  className="h-full w-full object-cover"
+                  onError={() => setAvatarLoadError(true)}
+                />
               ) : (
-                <Image src={avatarUrl} alt="프로필 이미지" width={86} height={86} className="h-full w-full object-cover" />
+                <Image src="/dumyprofile.png" alt="기본 프로필 이미지" width={86} height={86} className="h-full w-full object-cover" />
               )
             ) : (
               <Image src="/dumyprofile.png" alt="기본 프로필 이미지" width={86} height={86} className="h-full w-full object-cover" />

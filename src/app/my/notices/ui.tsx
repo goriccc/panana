@@ -35,7 +35,7 @@ export function NoticesClient() {
     return () => window.removeEventListener("panana-safety-change", read as EventListener);
   }, []);
 
-  const headerAccent = safetyOn ? "text-panana-pink2" : "text-[#ffa9d6]";
+  const headerAccent = safetyOn ? "text-panana-pink2" : "text-[#f74b97]";
   return (
     <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.10),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">
       <header className="mx-auto w-full max-w-[420px] px-5 pt-3">

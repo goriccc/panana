@@ -198,7 +198,7 @@ export function CharacterClient({
   const displayFollowers = followStats?.followersTotal ?? character.followers;
   const displayFollowing = followStats?.followingTotal ?? character.following;
   const isFollowing = followStats?.isFollowing ?? false;
-  const headerAccent = safetyOn ? "text-panana-pink2" : "text-[#ffa9d6]";
+  const headerAccent = safetyOn ? "text-panana-pink2" : "text-[#f74b97]";
 
   return (
     <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.12),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">

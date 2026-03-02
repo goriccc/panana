@@ -27,7 +27,7 @@ export function LoginClient({ returnTo }: { returnTo: string }) {
     await signIn(provider, { callbackUrl: backHref });
   };
 
-  const titleClass = safetyOn ? "text-panana-pink2" : "text-[#ffa9d6]";
+  const titleClass = safetyOn ? "text-panana-pink2" : "text-[#f74b97]";
   return (
     <div className="min-h-dvh bg-[linear-gradient(#07070B,#0B0C10)] text-white">
       <header className="mx-auto w-full max-w-[420px] px-5 pt-3">
@@ -113,10 +113,6 @@ export function LoginClient({ returnTo }: { returnTo: string }) {
               <Image src="/google.png" alt="구글" width={20} height={20} className="h-5 w-5" />
             </span>
             Google로 시작하기
-          </button>
-
-          <button type="button" className="mt-2 block w-full text-center text-[12px] font-semibold text-panana-pink">
-            아이디/비밀번호 찾기
           </button>
         </div>
       </main>

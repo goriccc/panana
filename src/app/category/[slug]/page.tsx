@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
 import { getCategory } from "@/lib/content";
 import { fetchCategoryFromDb } from "@/lib/pananaApp/contentServer";
 import { CategoryClient } from "./ui";
@@ -29,6 +30,10 @@ export default async function CategoryPage({ params }: { params: { slug: string 
   const fromDb = await fetchCategoryFromDb(params.slug).catch(() => null);
   const c = fromDb || getCategory(params.slug) || getVirtualCategory(params.slug);
   if (!c) notFound();
-  return <CategoryClient category={c} />;
+  return (
+    <Suspense fallback={null}>
+      <CategoryClient category={c} />
+    </Suspense>
+  );
 }
 

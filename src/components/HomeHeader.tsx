@@ -66,14 +66,14 @@ export function HomeHeader({
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5">
               <Image
-                src="/hot.png"
+                src={safetyOn ? "/spicy_on.png" : "/spicy_off.png"}
                 alt=""
                 width={16}
                 height={16}
                 className="h-4 w-4 select-none"
                 aria-hidden
               />
-              <div className="text-[12px] font-extrabold tracking-[-0.01em] text-panana-pink2">스파이시</div>
+              <div className={`text-[12px] font-extrabold tracking-[-0.01em] ${safetyOn ? "text-panana-pink2" : "text-[#f74b97]"}`}>스파이시</div>
             </div>
             <Switch checked={safetyOn} onChange={onSafetyChange} ariaLabel="스파이시 토글" />
           </div>

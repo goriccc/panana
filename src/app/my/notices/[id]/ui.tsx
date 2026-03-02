@@ -42,7 +42,7 @@ export function NoticeDetailClient({ id }: { id: string }) {
   // 헤더 우측 날짜 포맷(스샷: 2026/01/19 형태가 필요하면 data에서 그 포맷으로 넣으면 됨)
   const date = notice.date.replaceAll(".", "/");
 
-  const headerAccent = safetyOn ? "text-panana-pink2" : "text-[#ffa9d6]";
+  const headerAccent = safetyOn ? "text-panana-pink2" : "text-[#f74b97]";
   return (
     <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.10),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">
       <header className="mx-auto w-full max-w-[420px] px-5 pt-3">

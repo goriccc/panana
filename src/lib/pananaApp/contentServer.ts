@@ -428,3 +428,40 @@ export async function fetchRecommendationSettingsFromDb(): Promise<Recommendatio
 
   return defaultRecommendationSettings;
 }
+
+const DEFAULT_RECOMMENDED_SEARCH_TAGS = ["#현실연애", "#롤플주의", "#고백도전", "#연애감정", "#환승연애"];
+
+export async function fetchRecommendedSearchTagsFromDb(): Promise<string[]> {
+  const supabase = getSupabaseAdmin() || getSupabaseServer();
+  const { data, error } = await supabase
+    .from("panana_public_site_settings_v")
+    .select("recommended_search_tags")
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    const msg = String((error as any)?.message || "");
+    if (msg.includes("recommended_search_tags") || msg.includes("permission denied")) {
+      if (process.env.NODE_ENV !== "production") {
+        console.warn(
+          "[contentServer] recommended_search_tags unavailable. Run docs/panana-admin/ADD_RECOMMENDED_SEARCH_TAGS.sql and update PUBLIC_VIEWS.sql."
+        );
+      }
+      return DEFAULT_RECOMMENDED_SEARCH_TAGS;
+    }
+    console.error("[contentServer] recommended_search_tags error:", error);
+    return DEFAULT_RECOMMENDED_SEARCH_TAGS;
+  }
+
+  const raw = data?.recommended_search_tags;
+  if (Array.isArray(raw) && raw.length) {
+    return raw.map((t: unknown) => {
+      const s = String(t ?? "").trim();
+      return s.startsWith("#") ? s : `#${s}`;
+    });
+  }
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    return DEFAULT_RECOMMENDED_SEARCH_TAGS;
+  }
+  return DEFAULT_RECOMMENDED_SEARCH_TAGS;
+}

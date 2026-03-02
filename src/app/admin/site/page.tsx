@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { AdminAuthGate } from "../_components/AdminAuthGate";
 import { AdminButton, AdminInput, AdminSectionHeader, AdminTextarea } from "../_components/AdminUI";
 
 export default function AdminSitePage() {
@@ -13,7 +14,9 @@ export default function AdminSitePage() {
   const [footerLine2, setFooterLine2] = useState("문의: support@panana.app");
   const [socialImageUrl, setSocialImageUrl] = useState("/panana.png");
   const [robotsIndex, setRobotsIndex] = useState(true);
+
   return (
+    <AdminAuthGate>
     <div>
       <AdminSectionHeader
         title="사이트(푸터/SEO)"
@@ -75,7 +78,8 @@ export default function AdminSitePage() {
           </div>
         </div>
       </div>
-    </div>
+      </div>
+    </AdminAuthGate>
   );
 }
 

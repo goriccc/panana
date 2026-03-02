@@ -8,7 +8,7 @@ import { HomeHeader } from "@/components/HomeHeader";
 import { AlertModal } from "@/components/AlertModal";
 import { ContentCard } from "@/components/ContentCard";
 import { categories as fallbackCategories, type Category, type ContentCardItem } from "@/lib/content";
-import { loadMyChats, type MyChatItem } from "@/lib/pananaApp/myChats";
+import { loadMyChats, incrementUnread, type MyChatItem } from "@/lib/pananaApp/myChats";
 import { ensurePananaIdentity } from "@/lib/pananaApp/identity";
 import { fetchAdultStatus } from "@/lib/pananaApp/adultVerification";
 import { fetchMyAccountInfo, type Gender } from "@/lib/pananaApp/accountInfo";
@@ -158,17 +158,21 @@ function categoryCacheKey(
 const VALID_TABS = ["my", "home", "challenge", "ranking", "search"] as const;
 type TabId = (typeof VALID_TABS)[number];
 
+const DEFAULT_RECOMMENDED_SEARCH_TAGS = ["#현실연애", "#롤플주의", "#고백도전", "#연애감정", "#환승연애"];
+
 export function HomeClient({
   categories,
   initialSafetyOn,
   initialMenuVisibility,
   initialRecommendationSettings,
+  initialRecommendedSearchTags,
   initialTab,
 }: {
   categories?: Category[];
   initialSafetyOn?: boolean;
   initialMenuVisibility?: MenuVisibility;
   initialRecommendationSettings?: RecommendationSettings;
+  initialRecommendedSearchTags?: string[];
   initialTab?: string | null;
 }) {
   const router = useRouter();
@@ -296,6 +300,10 @@ export function HomeClient({
   const [recommendationSettings, setRecommendationSettings] = useState<RecommendationSettings>(
     mergeRecommendationSettings(initialRecommendationSettings || defaultRecommendationSettings)
   );
+  const [recommendedSearchTags, setRecommendedSearchTags] = useState<string[]>(
+    () => initialRecommendedSearchTags?.length ? initialRecommendedSearchTags : DEFAULT_RECOMMENDED_SEARCH_TAGS
+  );
+  const [failedAvatarUrls, setFailedAvatarUrls] = useState<Set<string>>(() => new Set());
   const [abBucket, setAbBucket] = useState<"A" | "B">("A");
   const [behaviorSignals, setBehaviorSignals] = useState<Array<{ tag: string; weight: number }>>([]);
   const [cachedPersonalizedSlugs, setCachedPersonalizedSlugs] = useState<string[] | null>(null);
@@ -388,24 +396,27 @@ export function HomeClient({
     }
   }, []);
 
-  // 메뉴 설정 업데이트 (서버에서 받은 값이 있으면 사용, 없으면 클라이언트에서 다시 로드)
+  // 마운트 시 최신 설정 로드 (어드민 저장 후 찾기 탭에 바로 반영)
   useEffect(() => {
-    if (!initialMenuVisibility || !initialRecommendationSettings) {
-      fetch("/api/site-settings")
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.menuVisibility) {
-            setMenuVisibility(data.menuVisibility);
-          }
-          if (data.recommendationSettings) {
-            setRecommendationSettings(mergeRecommendationSettings(data.recommendationSettings));
-          }
-        })
-        .catch((err) => {
-          console.error("Failed to load site settings:", err);
-        });
-    }
-  }, [initialMenuVisibility, initialRecommendationSettings]);
+    fetch("/api/site-settings", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.menuVisibility) setMenuVisibility(data.menuVisibility);
+        if (data.recommendationSettings) {
+          setRecommendationSettings(mergeRecommendationSettings(data.recommendationSettings));
+        }
+      })
+      .catch((err) => console.error("Failed to load site settings:", err));
+
+    fetch("/api/recommended-search-tags", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data.recommendedSearchTags) && data.recommendedSearchTags.length) {
+          setRecommendedSearchTags(data.recommendedSearchTags);
+        }
+      })
+      .catch((err) => console.error("Failed to load recommended search tags:", err));
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -645,12 +656,53 @@ export function HomeClient({
     if (myChats.length > 0) setHasAnyMyChats(true);
   }, [myChats.length]);
 
+  // 유저가 마이 탭/채팅에 진입하지 않아도 안부 오프닝을 미리 생성하고 배지 표시 (24h 이상 미접속 캐릭터만)
+  const PRE_OPENER_THROTTLE_MS = 24 * 60 * 60 * 1000;
+  useEffect(() => {
+    if (!loggedIn || myChats.length === 0) return;
+    const idt = ensurePananaIdentity();
+    const pananaId = String(idt?.id || "").trim();
+    if (!pananaId || pananaId.length < 10) return;
+
+    let cancelled = false;
+    (async () => {
+      const now = Date.now();
+      const stale = myChats.filter((it) => (it.lastAt || 0) < now - PRE_OPENER_THROTTLE_MS);
+      for (const it of stale) {
+        if (cancelled) break;
+        try {
+          const key = `panana_pre_opener_req:${it.characterSlug}`;
+          const lastReq = parseInt(localStorage.getItem(key) || "0", 10);
+          if (lastReq > 0 && now - lastReq < PRE_OPENER_THROTTLE_MS) continue;
+          localStorage.setItem(key, String(now));
+
+          const res = await fetch("/api/me/returning-opener", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ pananaId, characterSlug: it.characterSlug }),
+          });
+          const data = await res.json().catch(() => null);
+          if (cancelled) return;
+          if (res.ok && data?.ok && data?.generated) {
+            incrementUnread(it.characterSlug);
+            setMyChats(loadMyChats());
+          }
+        } catch {
+          // ignore
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [loggedIn, myChats.length]);
+
   const searchCandidates = useMemo(() => {
     // 검색은 전체 캐릭터(allItems) 대상으로 해야 최근 캐릭터 등 이름 검색 가능 (기존: heroCandidates=상위 12개만이라 최근 캐릭터 검색 안 됨)
     return allItems;
   }, [allItems]);
 
-  const recommendedTags = useMemo(() => ["#현실연애", "#롤플주의", "#고백도전", "#연애감정", "#환승연애"], []);
+  const recommendedTags = useMemo(() => recommendedSearchTags, [recommendedSearchTags]);
 
   const answerSignals = useMemo(
     () => buildAnswerSignals(airportPref, recommendationSettings.mapping),
@@ -1350,9 +1402,15 @@ export function HomeClient({
               >
                 <div className="flex min-w-0 items-center gap-3">
                   <div className="relative h-10 w-10 flex-none overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10">
-                    {it.avatarUrl ? (
+                    {it.avatarUrl && !failedAvatarUrls.has(it.avatarUrl) ? (
                       /* eslint-disable-next-line @next/next/no-img-element */
-                      <img src={it.avatarUrl} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                      <img
+                        src={it.avatarUrl}
+                        alt=""
+                        className="h-full w-full object-cover"
+                        referrerPolicy="no-referrer"
+                        onError={() => setFailedAvatarUrls((prev) => new Set(prev).add(it.avatarUrl!))}
+                      />
                     ) : (
                       <Image src="/dumyprofile.png" alt="" fill sizes="40px" className="object-cover opacity-90" />
                     )}

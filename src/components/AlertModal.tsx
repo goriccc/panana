@@ -31,18 +31,18 @@ export function AlertModal({
 
   return (
     <div className="fixed inset-0 z-50">
-      <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" />
-      <div className="absolute inset-0 grid place-items-center px-8">
-        <SurfaceCard variant="outglow" className={`w-full ${maxWidthClassName} p-6`}>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" />
+      <div className="absolute inset-0 grid place-items-center px-3">
+        <SurfaceCard variant="outglow" className="w-[min(420px,calc(100vw-24px))] p-6">
           <div className="text-center text-[16px] font-semibold text-white/90">{title}</div>
           <div className="mt-4 whitespace-pre-line text-center text-[14px] leading-[1.45] text-white/70">
             {message}
           </div>
 
-          <div className="mt-6 grid grid-cols-2 gap-6">
+          <div className="mt-6 flex gap-4">
             <a
               href={cancelHref}
-              className="w-full rounded-xl bg-white px-4 py-3 text-center text-[15px] font-semibold text-[#0B0C10] whitespace-nowrap"
+              className="flex-1 basis-0 whitespace-nowrap rounded-xl bg-white px-4 py-3 text-center text-[15px] font-semibold text-[#0B0C10]"
             >
               {cancelText}
             </a>
@@ -51,14 +51,14 @@ export function AlertModal({
               <button
                 type="button"
                 onClick={onConfirm}
-                className="w-full rounded-xl bg-panana-pink px-4 py-3 text-center text-[15px] font-semibold text-white whitespace-nowrap"
+                className="flex-1 basis-0 whitespace-nowrap rounded-xl bg-panana-pink px-4 py-3 text-center text-[15px] font-semibold text-white"
               >
                 {confirmText}
               </button>
             ) : (
               <a
                 href={confirmHref || "#"}
-                className="w-full rounded-xl bg-panana-pink px-4 py-3 text-center text-[15px] font-semibold text-white whitespace-nowrap"
+                className="flex-1 basis-0 whitespace-nowrap rounded-xl bg-panana-pink px-4 py-3 text-center text-[15px] font-semibold text-white"
               >
                 {confirmText}
               </a>

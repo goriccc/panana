@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { Suspense } from "react";
 import "./globals.css";
 import { ConditionalFooter } from "@/app/_components/ConditionalFooter";
 import { AuthSessionProvider } from "@/app/_components/AuthSessionProvider";
@@ -78,7 +79,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <PananaIdentityInit />
           <VisitTracker />
           {children}
-          <ConditionalFooter />
+          <Suspense fallback={null}>
+            <ConditionalFooter />
+          </Suspense>
         </AuthSessionProvider>
       </body>
     </html>

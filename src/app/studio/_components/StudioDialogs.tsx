@@ -31,7 +31,7 @@ function Backdrop({
       }}
     >
       <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" />
-      <div className="absolute inset-0 grid place-items-center px-6">{children}</div>
+      <div className="absolute inset-0 grid place-items-center px-3">{children}</div>
     </div>
   );
 }
@@ -61,14 +61,14 @@ export function StudioConfirmDialog({
 
   return (
     <Backdrop open={open} onClose={onClose}>
-      <div className="relative z-10 w-full max-w-[520px] rounded-2xl border border-white/10 bg-[#0B0F18] p-6 shadow-[0_24px_70px_rgba(0,0,0,0.65)]">
+      <div className="relative z-10 w-[min(420px,calc(100vw-24px))] rounded-2xl border border-white/10 bg-[#0B0F18] p-6 shadow-[0_24px_70px_rgba(0,0,0,0.65)]">
         <div className="text-[14px] font-extrabold text-white/85">{title}</div>
         {description ? <div className="mt-3 whitespace-pre-line text-[12px] font-semibold leading-[1.55] text-white/55">{description}</div> : null}
 
-        <div className="mt-6 flex gap-2">
+        <div className="mt-6 flex gap-4">
           <button
             type="button"
-            className="flex-1 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-[12px] font-extrabold text-white/70 hover:bg-white/[0.06]"
+            className="flex-1 basis-0 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-[12px] font-extrabold text-white/70 hover:bg-white/[0.06]"
             onClick={onClose}
             disabled={busy}
           >
@@ -77,7 +77,7 @@ export function StudioConfirmDialog({
           <button
             type="button"
             className={cn(
-              "flex-1 rounded-xl px-4 py-3 text-[12px] font-extrabold text-white disabled:opacity-60",
+              "flex-1 basis-0 rounded-xl px-4 py-3 text-[12px] font-extrabold text-white disabled:opacity-60",
               destructive ? "bg-[#ff4d6d] hover:bg-[#ff2f56]" : "bg-[#4F7CFF] hover:bg-[#3E6BFF]"
             )}
             onClick={onConfirm}
@@ -136,7 +136,7 @@ export function StudioFormDialog({
 
   return (
     <Backdrop open={open} onClose={onClose}>
-      <div className="relative z-10 w-full max-w-[560px] rounded-2xl border border-white/10 bg-[#0B0F18] p-6 shadow-[0_24px_70px_rgba(0,0,0,0.65)]">
+      <div className="relative z-10 w-[min(420px,calc(100vw-24px))] rounded-2xl border border-white/10 bg-[#0B0F18] p-6 shadow-[0_24px_70px_rgba(0,0,0,0.65)]">
         <div className="text-[14px] font-extrabold text-white/85">{title}</div>
         {description ? <div className="mt-2 text-[12px] font-semibold text-white/50">{description}</div> : null}
 
@@ -156,10 +156,10 @@ export function StudioFormDialog({
           ))}
         </div>
 
-        <div className="mt-6 flex gap-2">
+        <div className="mt-6 flex gap-4">
           <button
             type="button"
-            className="flex-1 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-[12px] font-extrabold text-white/70 hover:bg-white/[0.06]"
+            className="flex-1 basis-0 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-[12px] font-extrabold text-white/70 hover:bg-white/[0.06]"
             onClick={onClose}
             disabled={busy}
           >
@@ -167,7 +167,7 @@ export function StudioFormDialog({
           </button>
           <button
             type="button"
-            className="flex-1 rounded-xl bg-[#4F7CFF] px-4 py-3 text-[12px] font-extrabold text-white hover:bg-[#3E6BFF] disabled:opacity-60"
+            className="flex-1 basis-0 rounded-xl bg-[#4F7CFF] px-4 py-3 text-[12px] font-extrabold text-white hover:bg-[#3E6BFF] disabled:opacity-60"
             onClick={onSubmit}
             disabled={busy}
           >

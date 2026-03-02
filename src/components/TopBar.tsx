@@ -29,7 +29,7 @@ export function TopBar({
     return () => window.removeEventListener("panana-safety-change", read as EventListener);
   }, []);
 
-  const headerAccent = safetyOn ? "text-panana-pink2" : "text-[#ffa9d6]";
+  const headerAccent = safetyOn ? "text-panana-pink2" : "text-[#f74b97]";
   return (
     <header className="mx-auto w-full max-w-[420px] px-5 pt-3">
       <div className="relative flex h-11 items-center">

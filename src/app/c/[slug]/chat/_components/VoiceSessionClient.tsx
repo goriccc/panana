@@ -1418,11 +1418,11 @@ export function VoiceSessionClient({
         <button
           type="button"
           onClick={handleHangupClick}
-          className="mb-[max(2rem,env(safe-area-inset-bottom))] flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-transparent"
+          className="mb-[max(2rem,env(safe-area-inset-bottom))] flex h-[84px] w-[84px] shrink-0 items-center justify-center rounded-full bg-transparent"
           aria-label="전화 끊기"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/call_end.png" alt="" width={56} height={56} className="opacity-90 hover:opacity-100" />
+          <img src="/call_end.png" alt="" width={84} height={84} className="opacity-90 hover:opacity-100" />
         </button>
         {error && (
           <span className="mt-2 truncate text-[11px] text-red-300">{error}</span>

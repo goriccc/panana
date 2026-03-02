@@ -442,7 +442,7 @@ export function CharacterChatClient({
     window.addEventListener("panana-safety-change", read as EventListener);
     return () => window.removeEventListener("panana-safety-change", read as EventListener);
   }, []);
-  const headerAccent = safetyOn ? "text-panana-pink2" : "text-[#ffa9d6]";
+  const headerAccent = safetyOn ? "text-panana-pink2" : "text-[#f74b97]";
   const composerBorderStyle = safetyOn
     ? { borderColor: "color-mix(in srgb, var(--panana-pink2, #FFA1CC) 50%, transparent)" }
     : undefined;
@@ -1043,9 +1043,12 @@ export function CharacterChatClient({
           if (rows.length) {
             savedMsgIdsRef.current = new Set(rows.map((m: any) => m.id));
             setMessages(rows);
-            const lastAt = rows[rows.length - 1]?.at;
+            const last = rows[rows.length - 1];
+            const lastAt = last?.at;
             if (typeof lastAt === "number" && lastAt > 0 && alive) {
-              tryRunReturningOpening(pid, characterSlug, rows, lastAt);
+              // 이미 최근 봇 메시지가 있으면(서버에서 미리 생성된 안부 등) 클라이언트에서 중복 생성하지 않음
+              const hasRecentBot = last?.from === "bot" && Date.now() - lastAt < RETURNING_OPENER_THROTTLE_MS;
+              if (!hasRecentBot) tryRunReturningOpening(pid, characterSlug, rows, lastAt);
             }
             if (alive) setHistoryLoading(false);
           } else {
@@ -1473,7 +1476,7 @@ export function CharacterChatClient({
           <Link 
             href={backHref} 
             aria-label="뒤로가기" 
-            className={`absolute left-0 p-2 ${headerAccent}`}
+            className={`absolute left-0 p-2 ${headerAccent} ${voicePhase === "connected" ? "invisible pointer-events-none" : ""}`}
             prefetch={true}
           >
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="stroke-current">
@@ -1507,7 +1510,7 @@ export function CharacterChatClient({
           <button
             type="button"
             onClick={() => setVoiceModalOpen(true)}
-            className="absolute right-0 p-2 text-white/70 hover:text-panana-pink2 transition"
+            className={`absolute right-0 p-2 text-white/70 hover:text-panana-pink2 transition ${voicePhase === "connected" ? "invisible pointer-events-none" : ""}`}
             aria-label="음성 대화"
           >
             <style

@@ -17,8 +17,8 @@ export function LoginModal({
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" />
 
-      <div className="absolute inset-0 px-5 pt-8">
-        <div className="mx-auto w-full max-w-[420px]">
+      <div className="absolute inset-0 grid place-items-center px-3">
+        <div className="w-[min(420px,calc(100vw-24px))]">
           <div className="relative mb-5">
             <div className="text-center text-[16px] font-semibold text-[#ffa9d6]">로그인</div>
             <button
@@ -111,10 +111,6 @@ export function LoginModal({
                 </svg>
               </span>
               Google로 시작하기
-            </button>
-
-            <button type="button" className="mt-2 block w-full text-center text-[12px] font-semibold text-panana-pink">
-              아이디/비밀번호 찾기
             </button>
           </div>
         </div>
