@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SurfaceCard } from "@/components/SurfaceCard";
 import { myPageDummy } from "@/lib/myPage";
 import { fetchMyUserProfile } from "@/lib/pananaApp/userProfiles";
@@ -108,17 +108,28 @@ function Stat({ value, label }: { value: number; label: string }) {
   );
 }
 
-export function MyPageClient() {
+export function MyPageClient({
+  initialFollowStats = null,
+}: {
+  initialFollowStats?: { followersTotal: number; followingTotal: number } | null;
+}) {
   const router = useRouter();
   const data = useMemo(() => myPageDummy, []);
   const [logoutOpen, setLogoutOpen] = useState(false);
   const localIdt = useMemo(() => ensurePananaIdentity(), []);
-  const [followStats, setFollowStats] = useState<{ followersTotal: number; followingTotal: number } | null>(null);
+  const [followStats, setFollowStats] = useState<{ followersTotal: number; followingTotal: number } | null>(initialFollowStats);
+  const [pananaBalance, setPananaBalance] = useState<number | null>(null);
   // UX: 초기 렌더에서 더미 대신 로컬/세션 값을 즉시 표시하고, 이후 DB 값으로 보정한다.
   const [nickname, setNickname] = useState<string>(() => String(localIdt.nickname || "").trim());
   const [pananaHandle, setPananaHandle] = useState<string>(() => String(localIdt.handle || "").trim().toLowerCase());
   const { data: session, status } = useSession();
-  const loggedIn = status === "authenticated";
+  const hadAuthenticatedRef = useRef(false);
+  useEffect(() => {
+    if (status === "authenticated") hadAuthenticatedRef.current = true;
+    else if (status === "unauthenticated") hadAuthenticatedRef.current = false;
+  }, [status]);
+  // loading 중에는 이전 인증 상태 유지 (리페치 시 로그인/파나나 블록 깜빡임 방지)
+  const loggedIn = status === "authenticated" || (status === "loading" && hadAuthenticatedRef.current);
   const [safetyOn, setSafetyOn] = useState(false);
   useEffect(() => {
     const read = () => {
@@ -150,16 +161,15 @@ export function MyPageClient() {
     });
   }, [router]);
   
-  // 세션 데이터를 즉시 활용하여 초기 렌더링 속도 개선
+  // 세션 데이터를 즉시 활용하여 초기 렌더링 속도 개선 (authenticated 시 1회성 보정)
   useEffect(() => {
-    if (status === "authenticated" && session) {
-      const pn = String((session as any)?.pananaNickname || "").trim();
-      const snick = String((session as any)?.nickname || "").trim();
-      const sname = String((session as any)?.user?.name || "").trim();
-      const quick = pn || snick || sname;
-      if (quick && !nickname) setNickname(quick);
-    }
-  }, [status, session, nickname]);
+    if (status !== "authenticated" || !session) return;
+    const pn = String((session as any)?.pananaNickname || "").trim();
+    const snick = String((session as any)?.nickname || "").trim();
+    const sname = String((session as any)?.user?.name || "").trim();
+    const quick = pn || snick || sname;
+    if (quick) setNickname((prev) => (prev ? prev : quick));
+  }, [status, session?.user?.name, session && (session as any).pananaNickname, session && (session as any).nickname]);
   const avatarUrl = useMemo(() => {
     const custom = String((session as any)?.profileImageUrl || "").trim();
     const providerImg = String((session as any)?.user?.image || "").trim();
@@ -199,14 +209,33 @@ export function MyPageClient() {
   }, [loggedIn, localIdt.id]);
 
   useEffect(() => {
+    if (!loggedIn) return;
+    const pid = localIdt.id;
+    if (!pid) return;
+    let alive = true;
+    fetch(`/api/me/balance?pananaId=${encodeURIComponent(pid)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!alive || !d?.ok) return;
+        const v = typeof d.pananaBalance === "number" ? d.pananaBalance : 0;
+        setPananaBalance(Math.max(0, v));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [loggedIn, localIdt.id]);
+
+  useEffect(() => {
     // 세션이 늦게 로딩될 수 있으니, 들어오는 즉시 UI를 먼저 갱신한다(네트워크 fetch 전에).
+    if (status !== "authenticated" || !session) return;
     const pn = String((session as any)?.pananaNickname || "").trim();
     const snick = String((session as any)?.nickname || "").trim();
     const sname = String((session as any)?.user?.name || "").trim();
     const semail = String((session as any)?.user?.email || "").trim();
     const quick = pn || snick || sname || semail;
     if (quick) setNickname((prev) => (prev ? prev : quick));
-  }, [session, status]);
+  }, [status, session?.user?.name, session?.user?.email, session && (session as any).pananaNickname, session && (session as any).nickname]);
 
   useEffect(() => {
     let alive = true;
@@ -316,7 +345,7 @@ export function MyPageClient() {
                 prefetch={true}
                 onMouseEnter={() => router.prefetch("/my/follows")}
               >
-                <Stat value={followStats?.followersTotal ?? data.followers} label="팔로워" />
+                <Stat value={followStats?.followersTotal ?? 0} label="팔로워" />
               </Link>
               <Link 
                 href="/my/follows?tab=following" 
@@ -324,7 +353,7 @@ export function MyPageClient() {
                 prefetch={true}
                 onMouseEnter={() => router.prefetch("/my/follows")}
               >
-                <Stat value={followStats?.followingTotal ?? data.following} label="팔로잉" />
+                <Stat value={followStats?.followingTotal ?? 0} label="팔로잉" />
               </Link>
             </div>
 
@@ -334,7 +363,7 @@ export function MyPageClient() {
                   <div className="flex min-w-0 items-center gap-3">
                     <BananaIcon />
                     <div className="min-w-0 text-[13px] font-semibold text-white/70">
-                      {data.bananas.toLocaleString("ko-KR")}
+                      {(pananaBalance !== null ? pananaBalance : 0).toLocaleString("ko-KR")}
                       <span className="text-[#f29ac3]">개의 파나나를 가지고 있어요</span>
                     </div>
                   </div>

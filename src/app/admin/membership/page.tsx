@@ -1,85 +1,210 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { AdminAuthGate } from "../_components/AdminAuthGate";
-import { AdminButton, AdminInput, AdminSectionHeader, AdminTable, AdminTextarea, useAdminCrudList } from "../_components/AdminUI";
+import { useEffect, useState } from "react";
 import Image from "next/image";
+import { AdminAuthGate } from "../_components/AdminAuthGate";
+import { AdminButton, AdminInput, AdminSectionHeader } from "../_components/AdminUI";
+import { getBrowserSupabase } from "@/lib/supabase/browser";
 import {
   createMembershipBanner,
   deleteMembershipBanner,
   listMembershipBanners,
-  reorderMembershipBanners,
-  type MembershipBannerRow,
   updateMembershipBanner,
   uploadMembershipBannerImage,
+  type MembershipBannerRow,
 } from "@/lib/pananaAdmin/membershipBanners";
 
-export default function AdminMembershipPage() {
-  const banners = useAdminCrudList<MembershipBannerRow>([]);
-  const [loadingBanners, setLoadingBanners] = useState(false);
-  const [bannerError, setBannerError] = useState<string | null>(null);
+const PANANA_PASS_PLAN_KEY = "panana_pass";
 
+type MembershipPlanRow = {
+  id: string;
+  plan_key: string;
+  title: string;
+  payment_sku: string | null;
+  price_krw: number | null;
+};
+
+export default function AdminMembershipPage() {
+  const [plan, setPlan] = useState<MembershipPlanRow | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [paymentSku, setPaymentSku] = useState("");
+  const [priceKrw, setPriceKrw] = useState("");
+
+  const [banner, setBanner] = useState<MembershipBannerRow | null>(null);
+  const [bannerLoading, setBannerLoading] = useState(true);
   const [bTitle, setBTitle] = useState("");
   const [bLinkUrl, setBLinkUrl] = useState("");
-  const [bSortOrder, setBSortOrder] = useState("0");
-  const [bActive, setBActive] = useState(true);
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [savingOrder, setSavingOrder] = useState(false);
-  const [enlargeBannerUrl, setEnlargeBannerUrl] = useState<string | null>(null);
+  const [bannerSaving, setBannerSaving] = useState(false);
 
-  const reloadBanners = async () => {
-    setLoadingBanners(true);
-    setBannerError(null);
+  const loadPlan = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const sb = getBrowserSupabase();
+      const { data, error: e } = await sb
+        .from("panana_membership_plans")
+        .select("id, plan_key, title, payment_sku, price_krw")
+        .eq("plan_key", PANANA_PASS_PLAN_KEY)
+        .maybeSingle();
+      if (e) throw e;
+      const row = data as MembershipPlanRow | null;
+      setPlan(row ?? null);
+      if (row) {
+        setPaymentSku(String(row.payment_sku ?? "").trim());
+        setPriceKrw(String(row.price_krw ?? "") === "" ? "" : String(Number(row.price_krw)));
+      } else {
+        setPaymentSku("");
+        setPriceKrw("");
+      }
+    } catch (err: any) {
+      setError(err?.message || "플랜을 불러오지 못했어요.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const createPlan = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const sb = getBrowserSupabase();
+      const { data, error: e } = await sb
+        .from("panana_membership_plans")
+        .insert({
+          plan_key: PANANA_PASS_PLAN_KEY,
+          title: "파나나 패스",
+          price_label: "14,900원/월",
+          sort_order: 0,
+          active: true,
+        })
+        .select("id, plan_key, title")
+        .single();
+      if (e) throw e;
+      const row = data as { id: string; plan_key: string; title: string };
+      setPlan({
+        id: row.id,
+        plan_key: row.plan_key,
+        title: row.title,
+        payment_sku: null,
+        price_krw: null,
+      });
+      setPaymentSku("panana_pass_monthly");
+      setPriceKrw("14900");
+    } catch (err: any) {
+      setError(err?.message || "플랜 생성에 실패했어요.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const loadBanner = async () => {
+    setBannerLoading(true);
     try {
       const rows = await listMembershipBanners();
-      banners.setItems(rows);
-      if (!banners.selectedId && rows[0]?.id) banners.setSelectedId(rows[0].id);
-    } catch (e: any) {
-      setBannerError(e?.message || "배너를 불러오지 못했어요.");
+      const first = rows[0] ?? null;
+      setBanner(first);
+      if (first) {
+        setBTitle(first.title || "");
+        setBLinkUrl(first.link_url || "");
+      } else {
+        setBTitle("");
+        setBLinkUrl("");
+      }
+    } catch {
+      setBanner(null);
     } finally {
-      setLoadingBanners(false);
+      setBannerLoading(false);
     }
   };
 
   useEffect(() => {
-    reloadBanners();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    loadPlan();
+    loadBanner();
   }, []);
 
-  useMemo(() => {
-    setBTitle(banners.selected?.title || "");
-    setBLinkUrl(banners.selected?.link_url || "");
-    setBSortOrder(String(banners.selected?.sort_order ?? 0));
-    setBActive(Boolean(banners.selected?.active));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [banners.selectedId]);
-
-  const moveBanner = (fromId: string, toId: string) => {
-    if (fromId === toId) return;
-    banners.setItems((prev) => {
-      const fromIdx = prev.findIndex((x) => x.id === fromId);
-      const toIdx = prev.findIndex((x) => x.id === toId);
-      if (fromIdx < 0 || toIdx < 0) return prev;
-      const next = [...prev];
-      const [moved] = next.splice(fromIdx, 1);
-      next.splice(toIdx, 0, moved);
-      // UI 즉시 반영: sort_order는 drop 이후에 DB 저장
-      return next.map((x, idx) => ({ ...x, sort_order: idx }));
-    });
+  const savePlan = async () => {
+    if (!plan) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const sb = getBrowserSupabase();
+      const sku = paymentSku.trim() || null;
+      const num = priceKrw.trim() === "" ? null : Number(priceKrw);
+      const price_krw = num != null && Number.isFinite(num) ? Math.max(0, num) : null;
+      const { data, error: e } = await sb
+        .from("panana_membership_plans")
+        .update({ payment_sku: sku, price_krw })
+        .eq("id", plan.id)
+        .select("id, plan_key, title, payment_sku, price_krw")
+        .single();
+      if (e) throw e;
+      setPlan(data as MembershipPlanRow);
+    } catch (err: any) {
+      setError(err?.message || "저장에 실패했어요.");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const persistBannerOrder = async () => {
-    setSavingOrder(true);
-    setBannerError(null);
+  const addBanner = async () => {
+    setBannerSaving(true);
+    setError(null);
     try {
-      const ids = banners.items.map((b) => b.id);
-      await reorderMembershipBanners(ids);
-      // 서버 기준으로 재로드(정합성)
-      await reloadBanners();
-    } catch (e: any) {
-      setBannerError(e?.message || "순서 저장에 실패했어요.");
+      const row = await createMembershipBanner();
+      setBanner(row);
+      setBTitle(row.title || "");
+      setBLinkUrl(row.link_url || "");
+    } catch (err: any) {
+      setError(err?.message || "배너 추가에 실패했어요.");
     } finally {
-      setSavingOrder(false);
+      setBannerSaving(false);
+    }
+  };
+
+  const saveBanner = async () => {
+    if (!banner) return;
+    setBannerSaving(true);
+    setError(null);
+    try {
+      const row = await updateMembershipBanner(banner.id, {
+        title: bTitle.trim(),
+        link_url: bLinkUrl.trim() || "/my/membership",
+      });
+      setBanner(row);
+    } catch (err: any) {
+      setError(err?.message || "배너 저장에 실패했어요.");
+    } finally {
+      setBannerSaving(false);
+    }
+  };
+
+  const onBannerImageUpload = async (file: File) => {
+    if (!banner) return;
+    setError(null);
+    try {
+      const { imageUrl, path } = await uploadMembershipBannerImage(banner.id, file);
+      setBanner((prev) => (prev ? { ...prev, image_url: imageUrl, image_path: path } : null));
+    } catch (err: any) {
+      setError(err?.message || "이미지 업로드에 실패했어요.");
+    }
+  };
+
+  const deleteBanner = async () => {
+    if (!banner) return;
+    if (!confirm(`"${banner.title || "배너"}"를 삭제할까요?`)) return;
+    setBannerSaving(true);
+    setError(null);
+    try {
+      await deleteMembershipBanner(banner.id);
+      setBanner(null);
+      setBTitle("");
+      setBLinkUrl("");
+    } catch (err: any) {
+      setError(err?.message || "배너 삭제에 실패했어요.");
+    } finally {
+      setBannerSaving(false);
     }
   };
 
@@ -88,311 +213,117 @@ export default function AdminMembershipPage() {
       <div>
         <AdminSectionHeader
           title="멤버십"
-          subtitle="멤버십 배너(복수)를 등록하고 프론트 &ldquo;멤버십 가입&rdquo; 화면에 노출합니다."
-          right={null}
+          subtitle="파나나 패스(panana_pass) 결제코드 SKU·결제금액과 멤버십 배너 1개를 등록·편집합니다."
+          right={
+            <AdminButton variant="ghost" onClick={() => { loadPlan(); loadBanner(); }} disabled={loading}>
+              새로고침
+            </AdminButton>
+          }
         />
 
-        <div className="grid gap-6">
-          {/* B) 신규: 멤버십 배너 */}
+        {error ? <div className="mb-3 text-[12px] font-semibold text-[#ff9aa1]">{error}</div> : null}
+        {loading ? <div className="mb-3 text-[12px] font-semibold text-white/45">불러오는 중...</div> : null}
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* 결제 설정 */}
           <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-[13px] font-extrabold text-white/80">멤버십 배너(복수)</div>
-                <div className="mt-1 text-[12px] font-semibold text-white/40">프론트 &ldquo;멤버십 가입&rdquo; 상단 배너로 노출됩니다.</div>
-              </div>
-              <div className="flex items-center gap-2">
-                <AdminButton variant="ghost" onClick={() => reloadBanners()}>
-                  새로고침
-                </AdminButton>
-                <AdminButton variant="ghost" onClick={() => persistBannerOrder()}>
-                  {savingOrder ? "저장중..." : "순서 저장"}
-                </AdminButton>
-                <AdminButton
-                  variant="ghost"
-                  onClick={async () => {
-                    try {
-                      const row = await createMembershipBanner();
-                      banners.setItems((prev) => [...prev, row]);
-                      banners.setSelectedId(row.id);
-                    } catch (e: any) {
-                      setBannerError(e?.message || "추가에 실패했어요.");
-                    }
-                  }}
-                >
-                  + 배너 추가
-                </AdminButton>
-                <AdminButton
-                  variant="danger"
-                  onClick={async () => {
-                    if (!banners.selectedId) return;
-                    if (!confirm("선택한 배너를 삭제할까요?")) return;
-                    const id = banners.selectedId;
-                    try {
-                      await deleteMembershipBanner(id);
-                      banners.setItems((prev) => prev.filter((x) => x.id !== id));
-                      banners.setSelectedId(null);
-                    } catch (e: any) {
-                      setBannerError(e?.message || "삭제에 실패했어요.");
-                    }
-                  }}
-                >
-                  삭제
-                </AdminButton>
-              </div>
-            </div>
-
-            {bannerError ? <div className="mt-3 text-[12px] font-semibold text-[#ff9aa1]">{bannerError}</div> : null}
-            {loadingBanners ? <div className="mt-3 text-[12px] font-semibold text-white/45">불러오는 중...</div> : null}
-
-            <div className="mt-4 grid gap-6 lg:grid-cols-[1fr_420px]">
-              <div className="rounded-2xl border border-white/10 bg-black/10 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-[13px] font-extrabold text-white/80">배너 목록(드래그로 순서 변경)</div>
-                  <div className="text-[11px] font-semibold text-white/35">드롭 후 &ldquo;순서 저장&rdquo;을 눌러주세요.</div>
+            <div className="text-[13px] font-extrabold text-white/80">결제 설정</div>
+            {plan ? (
+              <div className="mt-4 space-y-4">
+                <div className="text-[12px] font-semibold text-white/45">
+                  플랜: {plan.title} ({plan.plan_key})
                 </div>
-
-                <div className="mt-3 space-y-2">
-                  {banners.items.map((b) => (
-                    <div
-                      key={b.id}
-                      draggable
-                      onDragStart={(e) => {
-                        setDragId(b.id);
-                        try {
-                          e.dataTransfer.setData("text/plain", b.id);
-                        } catch {}
-                        e.dataTransfer.effectAllowed = "move";
-                      }}
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                        e.dataTransfer.dropEffect = "move";
-                      }}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        const from = (() => {
-                          try {
-                            return e.dataTransfer.getData("text/plain");
-                          } catch {
-                            return "";
-                          }
-                        })();
-                        const fromId = from || dragId;
-                        if (!fromId) return;
-                        moveBanner(fromId, b.id);
-                        setDragId(null);
-                      }}
-                      onDragEnd={() => setDragId(null)}
-                      className={`flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.02] px-3 py-3 ${
-                        b.id === banners.selectedId ? "ring-2 ring-[#ff4da7]/40" : ""
-                      }`}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => banners.setSelectedId(b.id)}
-                    >
-                      <div className="flex min-w-0 items-center gap-3">
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white/5 text-[14px] font-extrabold text-white/60">
-                          ≡
-                        </div>
-                        <div className="min-w-0">
-                          <div className="truncate text-[12px] font-extrabold text-white/80">{b.title || "(제목 없음)"}</div>
-                          <div className="mt-1 flex items-center gap-2 text-[11px] font-semibold text-white/40">
-                            <span>order: {b.sort_order}</span>
-                            {b.active ? (
-                              <span className="rounded-full bg-[#22c55e]/15 px-2 py-[2px] font-extrabold text-[#6ee7b7]">ON</span>
-                            ) : (
-                              <span className="rounded-full bg-white/10 px-2 py-[2px] font-extrabold text-white/45">OFF</span>
-                            )}
-                            {b.image_url ? (
-                              <span className="rounded-full bg-white/10 px-2 py-[2px] font-extrabold text-white/65">IMG</span>
-                            ) : (
-                              <span className="rounded-full bg-white/5 px-2 py-[2px] font-extrabold text-white/35">NO IMG</span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <AdminButton variant="ghost" onClick={() => banners.setSelectedId(b.id)}>
-                        편집
-                      </AdminButton>
-                    </div>
-                  ))}
+                <AdminInput
+                  label="결제코드 SKU"
+                  value={paymentSku}
+                  onChange={setPaymentSku}
+                  placeholder="예: panana_pass_monthly"
+                />
+                <AdminInput
+                  label="결제금액 (KRW)"
+                  value={priceKrw}
+                  onChange={setPriceKrw}
+                  placeholder="예: 14900"
+                />
+                <AdminButton onClick={savePlan} disabled={saving}>
+                  {saving ? "저장 중..." : "저장"}
+                </AdminButton>
+              </div>
+            ) : (
+              <div className="mt-4">
+                <p className="text-[12px] font-semibold text-white/45">panana_pass 플랜이 없어요.</p>
+                <div className="mt-3">
+                  <AdminButton onClick={createPlan} disabled={saving}>
+                    {saving ? "생성 중..." : "플랜 생성"}
+                  </AdminButton>
                 </div>
               </div>
+            )}
+          </div>
 
-              <div className="rounded-2xl border border-white/10 bg-black/10 p-4">
-                <div className="text-[13px] font-extrabold text-white/80">배너 편집</div>
-                {banners.selected ? (
-                  <div className="mt-4 space-y-4">
-                    <AdminInput label="제목(alt)" value={bTitle} onChange={setBTitle} />
-                    <AdminInput label="클릭 링크(URL)" value={bLinkUrl} onChange={setBLinkUrl} />
-                    <AdminInput label="정렬 순서(sort_order)" value={bSortOrder} onChange={setBSortOrder} />
+          {/* 배너 1개 */}
+          <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+            <div className="text-[13px] font-extrabold text-white/80">멤버십 배너 (1개)</div>
+            {bannerLoading ? (
+              <div className="mt-3 text-[12px] font-semibold text-white/45">불러오는 중...</div>
+            ) : banner ? (
+              <div className="mt-4 space-y-4">
+                <AdminInput label="제목(alt)" value={bTitle} onChange={setBTitle} />
+                <AdminInput label="클릭 링크(URL)" value={bLinkUrl} onChange={setBLinkUrl} placeholder="/my/membership" />
 
-                    <label className="block">
-                      <div className="text-[12px] font-bold text-white/55">노출(active)</div>
-                      <div className="mt-2 flex items-center gap-2">
-                        <button
-                          type="button"
-                          className={`rounded-xl px-4 py-2 text-[12px] font-extrabold ring-1 ring-white/10 ${
-                            bActive ? "bg-[#22c55e]/15 text-[#6ee7b7]" : "bg-white/[0.06] text-white/60"
-                          }`}
-                          onClick={() => setBActive(true)}
-                        >
-                          ON
-                        </button>
-                        <button
-                          type="button"
-                          className={`rounded-xl px-4 py-2 text-[12px] font-extrabold ring-1 ring-white/10 ${
-                            !bActive ? "bg-[#ff9aa1]/15 text-[#ff9aa1]" : "bg-white/[0.06] text-white/60"
-                          }`}
-                          onClick={() => setBActive(false)}
-                        >
-                          OFF
-                        </button>
-                      </div>
-                    </label>
-
-                    <div>
-                      <div className="text-[12px] font-bold text-white/55">배너 이미지</div>
-                      <label
-                        className="mt-2 block cursor-pointer rounded-2xl border border-dashed border-white/15 bg-black/15 p-4 hover:bg-black/20"
-                        onDragOver={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                        }}
-                        onDrop={async (e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          const file = e.dataTransfer.files?.[0];
-                          if (!file || !banners.selected) return;
-                          setBannerError(null);
-                          try {
-                            const { imageUrl, path } = await uploadMembershipBannerImage(banners.selected.id, file);
-                            banners.setItems((prev) =>
-                              prev.map((x) =>
-                                x.id === banners.selected!.id ? { ...x, image_url: imageUrl, image_path: path } : x
-                              )
-                            );
-                          } catch (err: any) {
-                            setBannerError(err?.message || "업로드에 실패했어요.");
-                          }
-                        }}
-                      >
-                        <input
-                          type="file"
-                          className="hidden"
-                          accept="image/*"
-                          onChange={async (e) => {
-                            const file = e.target.files?.[0];
-                            if (!file || !banners.selected) return;
-                            setBannerError(null);
-                            try {
-                              const { imageUrl, path } = await uploadMembershipBannerImage(banners.selected.id, file);
-                              banners.setItems((prev) =>
-                                prev.map((x) => (x.id === banners.selected!.id ? { ...x, image_url: imageUrl, image_path: path } : x))
-                              );
-                            } catch (err: any) {
-                              setBannerError(err?.message || "업로드에 실패했어요.");
-                            }
-                          }}
-                        />
-
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="text-[12px] font-extrabold text-white/70">드래그앤드롭 또는 클릭하여 이미지 업로드</div>
-                            <div className="mt-1 text-[11px] font-semibold text-white/35">bucket: panana-membership</div>
-                          </div>
-                          <div className="rounded-full bg-white/10 px-2 py-1 text-[11px] font-extrabold text-white/60">IMAGE</div>
+                <div>
+                  <div className="text-[12px] font-bold text-white/55">배너 이미지</div>
+                  <label className="mt-2 block cursor-pointer rounded-2xl border border-dashed border-white/15 bg-black/15 p-4 hover:bg-black/20">
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept="image/*"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) onBannerImageUpload(file);
+                      }}
+                    />
+                    <div className="text-[12px] font-extrabold text-white/70">클릭하여 이미지 업로드</div>
+                    {banner.image_url ? (
+                      <div className="mt-3 flex justify-center overflow-auto rounded-xl border border-white/10 bg-white/[0.02] p-2">
+                        <div className="relative h-[260px] w-[110px] shrink-0">
+                          <Image
+                            src={banner.image_url}
+                            alt={banner.title || "membership banner"}
+                            fill
+                            className="object-contain object-top"
+                            sizes="110px"
+                          />
                         </div>
+                      </div>
+                    ) : (
+                      <div className="mt-3 rounded-xl bg-white/5 p-4 text-[12px] font-semibold text-white/45">이미지 미등록</div>
+                    )}
+                  </label>
+                </div>
 
-                        {banners.selected?.image_url ? (
-                          <div className="mt-3">
-                            <div className="flex justify-center overflow-auto rounded-xl border border-white/10 bg-white/[0.02] p-2">
-                              <div className="relative h-[520px] w-[220px] shrink-0">
-                                <Image
-                                  src={banners.selected.image_url}
-                                  alt={banners.selected.title || "membership banner"}
-                                  fill
-                                  className="object-contain object-top"
-                                  sizes="220px"
-                                />
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.06] px-4 py-2.5 text-[12px] font-semibold text-white/80 hover:bg-white/[0.08]"
-                              onClick={() => setEnlargeBannerUrl(banners.selected!.image_url!)}
-                            >
-                              원본 사이즈로 크게 보기
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="mt-3 rounded-xl bg-white/5 p-4 text-[12px] font-semibold text-white/45">이미지 미등록</div>
-                        )}
-                      </label>
-                    </div>
-
-                    <div className="flex gap-2 pt-2">
-                      <AdminButton
-                        onClick={async () => {
-                          if (!banners.selected) return;
-                          setBannerError(null);
-                          try {
-                            const patch: Partial<MembershipBannerRow> = {
-                              title: String(bTitle || "").trim(),
-                              link_url: String(bLinkUrl || "").trim(),
-                              sort_order: Number.isFinite(Number(bSortOrder)) ? Number(bSortOrder) : 0,
-                              active: Boolean(bActive),
-                            };
-                            const row = await updateMembershipBanner(banners.selected.id, patch);
-                            banners.setItems((prev) => prev.map((x) => (x.id === row.id ? row : x)));
-                          } catch (e: any) {
-                            setBannerError(e?.message || "저장에 실패했어요.");
-                          }
-                        }}
-                      >
-                        저장
-                      </AdminButton>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="mt-3 text-[12px] font-semibold text-white/45">왼쪽에서 배너를 선택해 주세요.</div>
-                )}
+                <div className="flex flex-wrap gap-2">
+                  <AdminButton onClick={saveBanner} disabled={bannerSaving}>
+                    {bannerSaving ? "저장 중..." : "배너 저장"}
+                  </AdminButton>
+                  <AdminButton variant="danger" onClick={deleteBanner} disabled={bannerSaving}>
+                    삭제
+                  </AdminButton>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="mt-4">
+                <p className="text-[12px] font-semibold text-white/45">등록된 배너가 없어요.</p>
+                <div className="mt-3">
+                  <AdminButton onClick={addBanner} disabled={bannerSaving}>
+                    {bannerSaving ? "추가 중..." : "배너 추가"}
+                  </AdminButton>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
-
-      {enlargeBannerUrl ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center overflow-auto bg-black/85 p-4"
-          onClick={() => setEnlargeBannerUrl(null)}
-          role="dialog"
-          aria-modal="true"
-          aria-label="배너 원본 크게 보기"
-        >
-          <div
-            className="inline-block min-h-0 min-w-0"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={enlargeBannerUrl}
-              alt="배너 원본"
-              className="block"
-              style={{ maxWidth: "none", maxHeight: "none", width: "auto", height: "auto" }}
-              draggable={false}
-            />
-          </div>
-          <button
-            type="button"
-            className="absolute right-4 top-4 rounded-xl bg-white/10 px-4 py-2 text-[13px] font-bold text-white hover:bg-white/20"
-            onClick={() => setEnlargeBannerUrl(null)}
-          >
-            닫기
-          </button>
-        </div>
-      ) : null}
     </AdminAuthGate>
   );
 }
-

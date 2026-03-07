@@ -1,24 +1,47 @@
 import { getBrowserSupabase } from "@/lib/supabase/browser";
 import { ensurePananaIdentity } from "@/lib/pananaApp/identity";
+import { fetchIdentityThrottled } from "@/lib/pananaApp/identityApi";
 
 export type MyUserProfile = {
   userId: string;
   nickname: string;
 };
 
-export async function fetchMyUserProfile(): Promise<MyUserProfile | null> {
-  // NextAuth 기반에서도 동작하도록: 서버 identity API를 우선 사용
+const CACHE_KEY = "panana_fetchMyUserProfile";
+const CACHE_TTL_MS = 2 * 60 * 1000;
+
+function getCached(): MyUserProfile | null {
   try {
-    const idt = ensurePananaIdentity();
-    const res = await fetch("/api/me/identity", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ pananaId: idt.id }),
-    });
-    const data = await res.json().catch(() => null);
-    if (res.ok && data?.ok && data?.id) {
-      const nick = String(data?.nickname || "").trim();
-      if (nick) return { userId: String(data.id), nickname: nick };
+    const raw = typeof sessionStorage !== "undefined" ? sessionStorage.getItem(CACHE_KEY) : null;
+    if (!raw) return null;
+    const { data, exp } = JSON.parse(raw) as { data: MyUserProfile; exp: number };
+    if (Date.now() > exp) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+function setCached(p: MyUserProfile) {
+  try {
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.setItem(CACHE_KEY, JSON.stringify({ data: p, exp: Date.now() + CACHE_TTL_MS }));
+    }
+  } catch {
+    // ignore
+  }
+}
+
+export async function fetchMyUserProfile(): Promise<MyUserProfile | null> {
+  const cached = getCached();
+  if (cached) return cached;
+
+  try {
+    const data = await fetchIdentityThrottled(ensurePananaIdentity().id);
+    if (data?.nickname) {
+      const out: MyUserProfile = { userId: data.id, nickname: data.nickname };
+      setCached(out);
+      return out;
     }
   } catch {
     // ignore

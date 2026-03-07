@@ -17,6 +17,7 @@ import {
   type ChatThread,
 } from "@/lib/pananaApp/chatHistory";
 import { ensurePananaIdentity, setPananaId } from "@/lib/pananaApp/identity";
+import { fetchIdentityThrottled } from "@/lib/pananaApp/identityApi";
 import { fetchAdultStatus } from "@/lib/pananaApp/adultVerification";
 import type { ChatRuntimeEvent, ChatRuntimeState } from "@/lib/studio/chatRuntimeEngine";
 import { useSession } from "next-auth/react";
@@ -1006,22 +1007,16 @@ export function CharacterChatClient({
     }
     (async () => {
       let pid = pidCandidate;
-      try {
-        const res = await fetch("/api/me/identity", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ pananaId: pidCandidate }),
-        });
-        const data = await res.json().catch(() => null);
-        if (res.ok && data?.ok && data?.id) {
-          pid = String(data.id || "").trim();
-          if (pid) {
-            setPananaId(pid);
-            pananaIdRef.current = pid;
-          }
+      const alreadyConfirmed = pananaIdRef.current && pananaIdRef.current === pidCandidate && /^[0-9a-f-]{36}$/i.test(pidCandidate);
+      if (!alreadyConfirmed) {
+        const data = await fetchIdentityThrottled(pidCandidate);
+        if (data?.id) {
+          pid = data.id;
+          setPananaId(pid);
+          pananaIdRef.current = pid;
         }
-      } catch {
-        // ignore
+      } else {
+        pid = pananaIdRef.current || pidCandidate;
       }
 
       try {

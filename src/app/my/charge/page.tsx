@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { ChargeClient } from "./ui";
+import { getBillingProductsServer } from "@/lib/pananaApp/billingProductsServer";
 
 export const metadata: Metadata = {
   title: "마이 페이지",
@@ -7,7 +8,10 @@ export const metadata: Metadata = {
   alternates: { canonical: "/my/charge" },
 };
 
-export default function ChargePage() {
-  return <ChargeClient />;
+export const revalidate = 60;
+
+export default async function ChargePage() {
+  const initialProducts = await getBillingProductsServer();
+  return <ChargeClient initialProducts={initialProducts} />;
 }
 

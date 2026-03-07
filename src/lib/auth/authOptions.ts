@@ -1,30 +1,94 @@
 import type { NextAuthOptions } from "next-auth";
+import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
 import KakaoProvider from "next-auth/providers/kakao";
 import NaverProvider from "next-auth/providers/naver";
 
+const DEV_MOCK_PANANA_ID = process.env.DEV_MOCK_PANANA_ID || "aaaaaaaa-bbbb-4ccc-8000-000000000001";
+
+async function ensureDevUser(): Promise<{ id: string; handle: string; nickname: string }> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceKey) throw new Error("Supabase env missing");
+  const { createClient } = await import("@supabase/supabase-js");
+  const sb = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+
+  const handle = "@dev0000";
+  const nickname = "개발유저";
+
+  const { data: existing } = await sb
+    .from("panana_users")
+    .select("id, handle, nickname")
+    .eq("id", DEV_MOCK_PANANA_ID)
+    .maybeSingle();
+
+  if (existing?.id) {
+    return {
+      id: String(existing.id),
+      handle: String((existing as any).handle || handle),
+      nickname: String((existing as any).nickname || nickname),
+    };
+  }
+
+  const { data: inserted, error } = await sb
+    .from("panana_users")
+    .insert({ id: DEV_MOCK_PANANA_ID, handle, nickname })
+    .select("id, handle, nickname")
+    .single();
+
+  if (error || !inserted?.id) throw new Error("Dev user create failed");
+  const { data: _ } = await sb.from("panana_user_identities").upsert(
+    { user_id: inserted.id, provider: "credentials", provider_account_id: "dev" },
+    { onConflict: "provider,provider_account_id" }
+  );
+  return { id: String((inserted as any).id), handle: String((inserted as any).handle), nickname: String((inserted as any).nickname) };
+}
+
+const providers: NextAuthOptions["providers"] = [
+  GoogleProvider({
+    clientId: process.env.GOOGLE_CLIENT_ID || "",
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
+  }),
+  KakaoProvider({
+    clientId: process.env.KAKAO_CLIENT_ID || "",
+    clientSecret: process.env.KAKAO_CLIENT_SECRET || "",
+  }),
+  NaverProvider({
+    clientId: process.env.NAVER_CLIENT_ID || "",
+    clientSecret: process.env.NAVER_CLIENT_SECRET || "",
+  }),
+];
+
+if (process.env.NODE_ENV === "development" || process.env.DEV_MOCK_AUTH === "1") {
+  providers.push(
+    CredentialsProvider({
+      id: "credentials",
+      name: "개발 로그인",
+      credentials: {},
+      async authorize() {
+        return ensureDevUser();
+      },
+    })
+  );
+}
+
 export const authOptions: NextAuthOptions = {
-  providers: [
-    GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID || "",
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
-    }),
-    KakaoProvider({
-      clientId: process.env.KAKAO_CLIENT_ID || "",
-      clientSecret: process.env.KAKAO_CLIENT_SECRET || "",
-    }),
-    NaverProvider({
-      clientId: process.env.NAVER_CLIENT_ID || "",
-      clientSecret: process.env.NAVER_CLIENT_SECRET || "",
-    }),
-  ],
+  providers,
   // DB adapter 없이도 동작(JWT 기반 세션)
   session: { strategy: "jwt" },
   pages: {
     signIn: "/login",
   },
   callbacks: {
-    async jwt({ token, account, trigger, session }) {
+    async jwt({ token, account, trigger, session, user }) {
+      // 개발 로그인(Credentials): 최초 로그인 시 pananaId 등 저장
+      if (account?.provider === "credentials" && user) {
+        (token as any).provider = "credentials";
+        (token as any).providerAccountId = "dev";
+        (token as any).pananaId = (user as any).id;
+        (token as any).pananaHandle = (user as any).handle;
+        (token as any).pananaNickname = (user as any).nickname;
+      }
       // 최초 로그인 시 provider를 토큰에 저장(계정설정 화면에서 표시용)
       if (account?.provider) {
         (token as any).provider = String(account.provider);

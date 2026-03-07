@@ -22,10 +22,11 @@ export function LoginClient({ returnTo }: { returnTo: string }) {
     return () => window.removeEventListener("panana-safety-change", read as EventListener);
   }, []);
 
-  const login = async (provider: "kakao" | "naver" | "google") => {
-    // Auth.js(NextAuth) OAuth 로그인
+  const login = async (provider: "kakao" | "naver" | "google" | "credentials") => {
     await signIn(provider, { callbackUrl: backHref });
   };
+
+  const devMockEnabled = process.env.NEXT_PUBLIC_DEV_MOCK_AUTH === "1";
 
   const titleClass = safetyOn ? "text-panana-pink2" : "text-[#f74b97]";
   return (
@@ -114,6 +115,16 @@ export function LoginClient({ returnTo }: { returnTo: string }) {
             </span>
             Google로 시작하기
           </button>
+
+          {devMockEnabled && (
+            <button
+              type="button"
+              onClick={() => login("credentials")}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-amber-500/60 bg-amber-500/10 px-5 py-4 text-[14px] font-extrabold text-amber-400"
+            >
+              개발 로그인 (로컬 전용)
+            </button>
+          )}
         </div>
       </main>
     </div>

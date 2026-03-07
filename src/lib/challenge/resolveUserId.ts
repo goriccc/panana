@@ -13,6 +13,14 @@ export async function resolveUserId(
   if (session) {
     const provider = String((session as any)?.provider || "").toLowerCase();
     const providerAccountId = String((session as any)?.providerAccountId || "");
+
+    // 개발 로그인(credentials) 또는 세션에 이미 pananaId가 있으면 우선 사용
+    const sessionPananaId = (session as any)?.pananaId;
+    if (sessionPananaId && isUuid(String(sessionPananaId))) {
+      const { data: exists } = await sb.from("panana_users").select("id").eq("id", sessionPananaId).maybeSingle();
+      if (exists?.id) return String(exists.id);
+    }
+
     if (provider && providerAccountId) {
       const { data: mapped } = await sb
         .from("panana_user_identities")

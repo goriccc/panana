@@ -89,6 +89,12 @@ export async function POST(req: Request) {
 
     // 1) 로그인된 경우: provider identity로 기존 매핑이 있으면 그 user를 우선 사용
     if (session) {
+      const sessionPananaId = (session as any)?.pananaId;
+      if (sessionPananaId && isUuid(String(sessionPananaId))) {
+        const u = await ensureUserById(sb, sessionPananaId);
+        return NextResponse.json({ ok: true, id: u.id, handle: u.handle, nickname: (u as any).nickname || "" });
+      }
+
       const provider = String((session as any)?.provider || "").toLowerCase();
       const providerAccountId = String((session as any)?.providerAccountId || "");
 
