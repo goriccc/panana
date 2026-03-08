@@ -48,9 +48,9 @@ function defaultSelectedId(products: ChargeProduct[]): string | null {
   return (recommended ?? products[0])?.id ?? null;
 }
 
-export function ChargeClient({ initialProducts = [] }: { initialProducts?: ChargeProduct[] }) {
+export function ChargeClient({ initialProducts = [], initialBalance }: { initialProducts?: ChargeProduct[]; initialBalance?: number }) {
   const localIdt = useMemo(() => ensurePananaIdentity(), []);
-  const [pananaBalance, setPananaBalance] = useState<number | null>(null);
+  const [pananaBalance, setPananaBalance] = useState<number | null>(initialBalance ?? null);
   const [products, setProducts] = useState<ChargeProduct[]>(initialProducts);
   const [selectedId, setSelectedId] = useState<string | null>(() => defaultSelectedId(initialProducts));
 

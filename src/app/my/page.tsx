@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth/authOptions";
 import { resolveUserId } from "@/lib/challenge/resolveUserId";
 import { createClient } from "@supabase/supabase-js";
 import { getMyFollowStatsServer } from "@/lib/pananaApp/myFollowStatsServer";
+import { getBalanceForUserId } from "@/lib/pananaApp/balanceServer";
 import { MyPageClient } from "./ui";
 
 export const metadata: Metadata = {
@@ -22,15 +23,47 @@ function getSb() {
 export default async function MyPage() {
   const session = await getServerSession(authOptions);
   let initialFollowStats: { followersTotal: number; followingTotal: number } | null = null;
+  let initialBalance: number | null = null;
+  const initialNickname =
+    session &&
+    String(
+      (session as any)?.pananaNickname ||
+        (session as any)?.nickname ||
+        (session as any)?.user?.name ||
+        ""
+    ).trim();
+  const initialHandle =
+    session && /^@[a-z]{4}\d{4}$/.test(String((session as any)?.pananaHandle || "").trim())
+      ? String((session as any).pananaHandle).trim().toLowerCase()
+      : undefined;
+  const initialAvatarUrl =
+    session &&
+    (String((session as any)?.profileImageUrl || "").trim() ||
+      String((session as any)?.user?.image || "").trim()) ||
+    undefined;
+
   if (session) {
     try {
       const sb = getSb();
       const pananaId = await resolveUserId(sb, { pananaId: null, session });
-      initialFollowStats = await getMyFollowStatsServer(pananaId);
+      const [followStats, balance] = await Promise.all([
+        getMyFollowStatsServer(pananaId),
+        getBalanceForUserId(sb, pananaId),
+      ]);
+      initialFollowStats = followStats;
+      initialBalance = balance;
     } catch {
       // 비로그인 또는 resolve 실패 시 null 유지
     }
   }
-  return <MyPageClient initialFollowStats={initialFollowStats} />;
+  return (
+    <MyPageClient
+      initialFollowStats={initialFollowStats}
+      initialNickname={initialNickname || undefined}
+      initialHandle={initialHandle}
+      initialAvatarUrl={initialAvatarUrl}
+      initialBalance={initialBalance ?? undefined}
+    />
+  );
 }
 

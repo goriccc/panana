@@ -1,7 +1,7 @@
 "use client";
 
 import { AdminButton, AdminInput, AdminSectionHeader, AdminTable, useAdminCrudList } from "../_components/AdminUI";
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 type CategoryRow = {
   id: string;
@@ -29,7 +29,7 @@ export default function AdminCategoriesPage() {
     setOrder(String(crud.selected?.order ?? 1));
   };
 
-  useMemo(() => {
+  useEffect(() => {
     syncFromSelected();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [crud.selectedId]);

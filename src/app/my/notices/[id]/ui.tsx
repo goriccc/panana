@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { getNotice, getNoticeNav, notices } from "@/lib/notices";
+import { useSafetyOn } from "@/lib/pananaApp/useSafetyOn";
 
 function BackIcon() {
   return (
@@ -21,20 +22,7 @@ function BackIcon() {
 export function NoticeDetailClient({ id }: { id: string }) {
   const notice = useMemo(() => getNotice(id)!, [id]);
   const nav = useMemo(() => getNoticeNav(id), [id]);
-  const [safetyOn, setSafetyOn] = useState(false);
-  useEffect(() => {
-    const read = () => {
-      try {
-        const v = document.cookie.split("; ").find((row) => row.startsWith("panana_safety_on="));
-        setSafetyOn(v ? v.split("=")[1] === "1" : localStorage.getItem("panana_safety_on") === "1");
-      } catch {
-        setSafetyOn(false);
-      }
-    };
-    read();
-    window.addEventListener("panana-safety-change", read as EventListener);
-    return () => window.removeEventListener("panana-safety-change", read as EventListener);
-  }, []);
+  const safetyOn = useSafetyOn();
 
   const prevHref = nav.prev ? `/my/notices/${nav.prev.id}` : undefined;
   const nextHref = nav.next ? `/my/notices/${nav.next.id}` : undefined;

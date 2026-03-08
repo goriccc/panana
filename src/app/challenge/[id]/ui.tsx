@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { SurfaceCard } from "@/components/SurfaceCard";
 import { fetchAdultStatus } from "@/lib/pananaApp/adultVerification";
 import { ensurePananaIdentity } from "@/lib/pananaApp/identity";
+import { useSafetyOn } from "@/lib/pananaApp/useSafetyOn";
 
 function getPananaId(): string {
   return ensurePananaIdentity().id;
@@ -101,7 +102,7 @@ export function ChallengeClient({
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [timerMs, setTimerMs] = useState(0);
-  const [safetyOn, setSafetyOn] = useState(false);
+  const safetyOn = useSafetyOn();
   const timerRef = useRef<number | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const hasStartedSessionRef = useRef(false);
@@ -164,7 +165,7 @@ export function ChallengeClient({
     } finally {
       setRankingLoading(false);
     }
-  }, [challenge.id]);
+  }, [challenge.id, ranking.length]);
 
   useEffect(() => {
     ensurePananaIdentity();
@@ -194,20 +195,6 @@ export function ChallengeClient({
   const lastKeyboardHeightRef = useRef(0);
   const isInputFocusedRef = useRef(false);
   const isAtBottomRef = useRef(true);
-
-  useEffect(() => {
-    const read = () => {
-      try {
-        const v = document.cookie.split("; ").find((r) => r.startsWith("panana_safety_on="));
-        setSafetyOn(v ? v.split("=")[1] === "1" : localStorage.getItem("panana_safety_on") === "1");
-      } catch {
-        setSafetyOn(false);
-      }
-    };
-    read();
-    window.addEventListener("panana-safety-change", read as EventListener);
-    return () => window.removeEventListener("panana-safety-change", read as EventListener);
-  }, []);
 
   const composerBorderStyle = safetyOn
     ? { borderColor: "color-mix(in srgb, var(--panana-pink2, #FFA1CC) 50%, transparent)" }

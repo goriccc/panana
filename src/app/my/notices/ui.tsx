@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { notices } from "@/lib/notices";
+import { useSafetyOn } from "@/lib/pananaApp/useSafetyOn";
 
 function BackIcon() {
   return (
@@ -20,21 +21,7 @@ function BackIcon() {
 
 export function NoticesClient() {
   const list = useMemo(() => notices, []);
-  const [safetyOn, setSafetyOn] = useState(false);
-  useEffect(() => {
-    const read = () => {
-      try {
-        const v = document.cookie.split("; ").find((row) => row.startsWith("panana_safety_on="));
-        setSafetyOn(v ? v.split("=")[1] === "1" : localStorage.getItem("panana_safety_on") === "1");
-      } catch {
-        setSafetyOn(false);
-      }
-    };
-    read();
-    window.addEventListener("panana-safety-change", read as EventListener);
-    return () => window.removeEventListener("panana-safety-change", read as EventListener);
-  }, []);
-
+  const safetyOn = useSafetyOn();
   const headerAccent = safetyOn ? "text-panana-pink2" : "text-[#f74b97]";
   return (
     <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.10),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">

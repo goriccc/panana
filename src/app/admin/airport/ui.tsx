@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { AdminAuthGate } from "../_components/AdminAuthGate";
 import { AdminButton, AdminInput, AdminSectionHeader, AdminTable, AdminTextarea, useAdminCrudList } from "../_components/AdminUI";
 import {
@@ -142,21 +142,21 @@ export default function AdminAirportFlowClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useMemo(() => {
+  useEffect(() => {
     setImTitle(immigrationMedia.selected?.title || "");
     setImImagePath(immigrationMedia.selected?.imagePath || "");
     setImVideoPath(immigrationMedia.selected?.videoPath || "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [immigrationMedia.selectedId]);
 
-  useMemo(() => {
+  useEffect(() => {
     setIcTitle(immigrationChatMedia.selected?.title || "");
     setIcImagePath(immigrationChatMedia.selected?.imagePath || "");
     setIcVideoPath(immigrationChatMedia.selected?.videoPath || "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [immigrationChatMedia.selectedId]);
 
-  useMemo(() => {
+  useEffect(() => {
     setCmTitle(completeMedia.selected?.title || "");
     setCmImagePath(completeMedia.selected?.imagePath || "");
     setCmVideoPath(completeMedia.selected?.videoPath || "");

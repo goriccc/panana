@@ -148,8 +148,7 @@ export function AirportChatClient() {
 
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
 
-  // 로컬 파일 직접 사용: 입국심사중 (2.png, 2_2.mp4)
-  const heroImageUrl = "/airport/2.png";
+  // 동영상만 로드: 입국심사중 (2_2.mp4)
   const heroVideoUrl = "/airport/2_2.mp4";
   const introText = "입국 심사대 앞에 도착하였다. 친절한 입국 심사관을 마주하는데...";
   const [videoReady, setVideoReady] = useState(false);
@@ -242,22 +241,10 @@ export function AirportChatClient() {
 
           <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
             <div className="relative aspect-[16/10] w-full bg-black/20">
-              {heroImageUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={heroImageUrl}
-                  alt=""
-                  className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-200 ${
-                    heroVideoUrl && videoReady ? "opacity-0" : "opacity-100"
-                  }`}
-                />
-              ) : null}
-              
               {heroVideoUrl ? (
                 <video
                   ref={videoRef}
                   src={heroVideoUrl}
-                  poster={heroImageUrl || undefined}
                   className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-200 ${
                     videoReady ? "opacity-100" : "opacity-0"
                   }`}
@@ -267,11 +254,9 @@ export function AirportChatClient() {
                   loop
                   preload="auto"
                 />
-              ) : null}
-              
-              {!heroImageUrl && !heroVideoUrl ? (
+              ) : (
                 <div className="grid h-full w-full place-items-center text-[12px] font-semibold text-white/35">미디어가 아직 없어요</div>
-              ) : null}
+              )}
             </div>
           </div>
 
@@ -283,12 +268,7 @@ export function AirportChatClient() {
             <div className="flex items-start gap-3">
               {/* avatar (outside bubble) */}
               <div className="mt-[2px] h-9 w-9 overflow-hidden rounded-full ring-1 ring-white/15 bg-black/30 shrink-0">
-                {heroImageUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={heroImageUrl} alt="" className="h-full w-full object-cover" />
-                ) : (
-                  <div className="grid h-full w-full place-items-center text-[14px] font-extrabold text-white/60">P</div>
-                )}
+                <div className="grid h-full w-full place-items-center text-[14px] font-extrabold text-white/60">P</div>
               </div>
 
               {/* speech bubble with small left tail */}

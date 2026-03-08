@@ -7,7 +7,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { SurfaceCard } from "@/components/SurfaceCard";
 import { myPageDummy } from "@/lib/myPage";
 import { fetchMyUserProfile } from "@/lib/pananaApp/userProfiles";
-import { ensurePananaIdentity, isValidPananaHandle } from "@/lib/pananaApp/identity";
+import { ensurePananaIdentity, isValidPananaHandle, setPananaNickname } from "@/lib/pananaApp/identity";
+import { useSafetyOn } from "@/lib/pananaApp/useSafetyOn";
 import { prefetchMyAccountInfo } from "@/lib/pananaApp/accountInfo";
 import { signOut, useSession } from "next-auth/react";
 
@@ -110,18 +111,32 @@ function Stat({ value, label }: { value: number; label: string }) {
 
 export function MyPageClient({
   initialFollowStats = null,
+  initialNickname,
+  initialHandle,
+  initialAvatarUrl,
+  initialBalance: initialBalanceProp,
 }: {
   initialFollowStats?: { followersTotal: number; followingTotal: number } | null;
+  initialNickname?: string;
+  initialHandle?: string;
+  initialAvatarUrl?: string;
+  initialBalance?: number;
 }) {
   const router = useRouter();
   const data = useMemo(() => myPageDummy, []);
   const [logoutOpen, setLogoutOpen] = useState(false);
   const localIdt = useMemo(() => ensurePananaIdentity(), []);
   const [followStats, setFollowStats] = useState<{ followersTotal: number; followingTotal: number } | null>(initialFollowStats);
-  const [pananaBalance, setPananaBalance] = useState<number | null>(null);
-  // UX: 초기 렌더에서 더미 대신 로컬/세션 값을 즉시 표시하고, 이후 DB 값으로 보정한다.
-  const [nickname, setNickname] = useState<string>(() => String(localIdt.nickname || "").trim());
-  const [pananaHandle, setPananaHandle] = useState<string>(() => String(localIdt.handle || "").trim().toLowerCase());
+  const [pananaBalance, setPananaBalance] = useState<number | null>(
+    initialBalanceProp !== undefined ? initialBalanceProp : null
+  );
+  // 서버에서 넘긴 세션 닉네임/핸들을 우선 사용해 더미가 깜빡이지 않도록 함
+  const [nickname, setNickname] = useState<string>(() =>
+    (initialNickname && initialNickname.trim()) || String(localIdt.nickname || "").trim()
+  );
+  const [pananaHandle, setPananaHandle] = useState<string>(() =>
+    (initialHandle && initialHandle.trim().toLowerCase()) || String(localIdt.handle || "").trim().toLowerCase()
+  );
   const { data: session, status } = useSession();
   const hadAuthenticatedRef = useRef(false);
   useEffect(() => {
@@ -130,20 +145,7 @@ export function MyPageClient({
   }, [status]);
   // loading 중에는 이전 인증 상태 유지 (리페치 시 로그인/파나나 블록 깜빡임 방지)
   const loggedIn = status === "authenticated" || (status === "loading" && hadAuthenticatedRef.current);
-  const [safetyOn, setSafetyOn] = useState(false);
-  useEffect(() => {
-    const read = () => {
-      try {
-        const v = document.cookie.split("; ").find((row) => row.startsWith("panana_safety_on="));
-        setSafetyOn(v ? v.split("=")[1] === "1" : localStorage.getItem("panana_safety_on") === "1");
-      } catch {
-        setSafetyOn(false);
-      }
-    };
-    read();
-    window.addEventListener("panana-safety-change", read as EventListener);
-    return () => window.removeEventListener("panana-safety-change", read as EventListener);
-  }, []);
+  const safetyOn = useSafetyOn();
   const isMember = Boolean((session as any)?.membershipActive);
 
   // 마이페이지 진입 시 주요 링크 프리페칭
@@ -168,13 +170,18 @@ export function MyPageClient({
     const snick = String((session as any)?.nickname || "").trim();
     const sname = String((session as any)?.user?.name || "").trim();
     const quick = pn || snick || sname;
-    if (quick) setNickname((prev) => (prev ? prev : quick));
+    if (quick) {
+      setNickname((prev) => (prev ? prev : quick));
+      setPananaNickname(quick); // 다음 방문 시 로컬 초기값으로 바로 표시
+    }
   }, [status, session?.user?.name, session && (session as any).pananaNickname, session && (session as any).nickname]);
   const avatarUrl = useMemo(() => {
-    const custom = String((session as any)?.profileImageUrl || "").trim();
-    const providerImg = String((session as any)?.user?.image || "").trim();
-    return custom || providerImg || "";
-  }, [session]);
+    const fromSession =
+      String((session as any)?.profileImageUrl || "").trim() ||
+      String((session as any)?.user?.image || "").trim();
+    const fromInitial = String(initialAvatarUrl || "").trim();
+    return fromSession || fromInitial || "";
+  }, [session, initialAvatarUrl]);
   const [avatarLoadError, setAvatarLoadError] = useState(false);
   useEffect(() => {
     setAvatarLoadError(false);
@@ -193,38 +200,35 @@ export function MyPageClient({
     const pid = localIdt.id;
     if (!pid) return;
     let alive = true;
-    fetch(`/api/me/my-follow-stats?pananaId=${encodeURIComponent(pid)}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (!alive || !d?.ok) return;
+    Promise.all([
+      fetch(`/api/me/my-follow-stats?pananaId=${encodeURIComponent(pid)}`).then((r) => r.json()),
+      fetch(`/api/me/balance?pananaId=${encodeURIComponent(pid)}`).then((r) => r.json()),
+      fetchMyUserProfile().catch(() => null),
+    ]).then(([followData, balanceData, profile]) => {
+      if (!alive) return;
+      if (followData?.ok)
         setFollowStats({
-          followersTotal: typeof d.followersTotal === "number" ? d.followersTotal : 0,
-          followingTotal: typeof d.followingTotal === "number" ? d.followingTotal : 0,
+          followersTotal: typeof followData.followersTotal === "number" ? followData.followersTotal : 0,
+          followingTotal: typeof followData.followingTotal === "number" ? followData.followingTotal : 0,
         });
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [loggedIn, localIdt.id]);
-
-  useEffect(() => {
-    if (!loggedIn) return;
-    const pid = localIdt.id;
-    if (!pid) return;
-    let alive = true;
-    fetch(`/api/me/balance?pananaId=${encodeURIComponent(pid)}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (!alive || !d?.ok) return;
-        const v = typeof d.pananaBalance === "number" ? d.pananaBalance : 0;
+      if (balanceData?.ok) {
+        const v = typeof balanceData.pananaBalance === "number" ? balanceData.pananaBalance : 0;
         setPananaBalance(Math.max(0, v));
-      })
-      .catch(() => {});
+      }
+      if (profile?.nickname) setNickname(String(profile.nickname).trim());
+      else if (session) {
+        const pn = String((session as any)?.pananaNickname || "").trim();
+        const snick = String((session as any)?.nickname || "").trim();
+        const sname = String((session as any)?.user?.name || "").trim();
+        const semail = String((session as any)?.user?.email || "").trim();
+        const fallback = pn || snick || sname || semail || String(localIdt.nickname || "").trim();
+        if (fallback) setNickname(fallback);
+      }
+    });
     return () => {
       alive = false;
     };
-  }, [loggedIn, localIdt.id]);
+  }, [loggedIn, localIdt.id, localIdt.nickname, session]);
 
   useEffect(() => {
     // 세션이 늦게 로딩될 수 있으니, 들어오는 즉시 UI를 먼저 갱신한다(네트워크 fetch 전에).
@@ -234,7 +238,10 @@ export function MyPageClient({
     const sname = String((session as any)?.user?.name || "").trim();
     const semail = String((session as any)?.user?.email || "").trim();
     const quick = pn || snick || sname || semail;
-    if (quick) setNickname((prev) => (prev ? prev : quick));
+    if (quick) {
+      setNickname((prev) => (prev ? prev : quick));
+      setPananaNickname(quick);
+    }
   }, [status, session?.user?.name, session?.user?.email, session && (session as any).pananaNickname, session && (session as any).nickname]);
 
   useEffect(() => {
@@ -358,7 +365,12 @@ export function MyPageClient({
             </div>
 
             <div className="mt-6">
-              <div className="rounded-2xl bg-[#2f2f3a] px-4 py-4">
+              <Link
+                href="/my/charge"
+                className="block rounded-2xl bg-[#2f2f3a] px-4 py-4"
+                prefetch={true}
+                onMouseEnter={() => router.prefetch("/my/charge")}
+              >
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-3">
                     <BananaIcon />
@@ -367,16 +379,11 @@ export function MyPageClient({
                       <span className="text-[#f29ac3]">개의 파나나를 가지고 있어요</span>
                     </div>
                   </div>
-                  <Link
-                    href="/my/charge"
-                    className="rounded-lg bg-panana-pink px-4 py-2 text-[12px] font-bold text-white"
-                    prefetch={true}
-                    onMouseEnter={() => router.prefetch("/my/charge")}
-                  >
+                  <span className="rounded-lg bg-panana-pink px-4 py-2 text-[12px] font-bold text-white">
                     충전
-                  </Link>
+                  </span>
                 </div>
-              </div>
+              </Link>
             </div>
           </>
         ) : (

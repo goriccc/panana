@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AdminAuthGate } from "../_components/AdminAuthGate";
 import { AdminButton, AdminInput, AdminSectionHeader, useAdminCrudList } from "../_components/AdminUI";
 import { getBrowserSupabase } from "@/lib/supabase/browser";
@@ -60,7 +60,7 @@ export default function AdminBillingPage() {
     loadProducts();
   }, [loadProducts]);
 
-  useMemo(() => {
+  useEffect(() => {
     const s = crud.selected;
     setSku(s?.sku ?? "");
     setTitle(s?.title ?? "");

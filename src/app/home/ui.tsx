@@ -281,7 +281,17 @@ export function HomeClient({
     return Array.from(bySlug.values());
   }, [source]);
 
-  const heroCandidates = useMemo(() => allItems.slice(0, 12), [allItems]);
+  // 탭 메뉴 아래 큰 카드 배너: 남/여 지정 시 반대 성별만, 공개안함/둘다일 때만 섞어서 표시
+  const heroCandidates = useMemo(() => {
+    const base = allItems;
+    if (preferredGender) {
+      const filtered = base.filter((it) => getCharacterGender(it) === preferredGender);
+      return shuffleWithSeed(filtered, genderSeed + 99).slice(0, 12);
+    }
+    const withGender = hasGenderData(base) ? filterKnownGender(base) : base;
+    const mixed = withGender.length ? mixByGender(withGender, genderSeed + 99) : base;
+    return shuffleWithSeed(mixed, genderSeed + 99).slice(0, 12);
+  }, [allItems, preferredGender, genderSeed]);
 
   const [heroList, setHeroList] = useState<ContentCardItem[]>([]);
   const [heroIdx, setHeroIdx] = useState(0);
@@ -598,9 +608,9 @@ export function HomeClient({
     const next = shuffle(heroCandidates.length ? heroCandidates : [fallback]);
     setHeroList(next);
     setHeroIdx(0);
-    // 접속(마운트)마다 랜덤 순서로 시작
+    // 성별 변경 시에도 배너 목록 갱신 (preferredGender 포함)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [heroCandidates.length]);
+  }, [preferredGender, heroCandidates.length, heroCandidates]);
 
   useEffect(() => {
     if (heroPaused) return;

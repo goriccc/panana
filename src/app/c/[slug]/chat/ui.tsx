@@ -17,6 +17,7 @@ import {
   type ChatThread,
 } from "@/lib/pananaApp/chatHistory";
 import { ensurePananaIdentity, setPananaId } from "@/lib/pananaApp/identity";
+import { useSafetyOn } from "@/lib/pananaApp/useSafetyOn";
 import { fetchIdentityThrottled } from "@/lib/pananaApp/identityApi";
 import { fetchAdultStatus } from "@/lib/pananaApp/adultVerification";
 import type { ChatRuntimeEvent, ChatRuntimeState } from "@/lib/studio/chatRuntimeEngine";
@@ -429,20 +430,7 @@ export function CharacterChatClient({
     settings: Array<{ provider: string; model: string }>;
   } | null>(null);
 
-  const [safetyOn, setSafetyOn] = useState(false);
-  useEffect(() => {
-    const read = () => {
-      try {
-        const v = document.cookie.split("; ").find((r) => r.startsWith("panana_safety_on="));
-        setSafetyOn(v ? v.split("=")[1] === "1" : localStorage.getItem("panana_safety_on") === "1");
-      } catch {
-        setSafetyOn(false);
-      }
-    };
-    read();
-    window.addEventListener("panana-safety-change", read as EventListener);
-    return () => window.removeEventListener("panana-safety-change", read as EventListener);
-  }, []);
+  const safetyOn = useSafetyOn();
   const headerAccent = safetyOn ? "text-panana-pink2" : "text-[#f74b97]";
   const composerBorderStyle = safetyOn
     ? { borderColor: "color-mix(in srgb, var(--panana-pink2, #FFA1CC) 50%, transparent)" }
@@ -450,19 +438,32 @@ export function CharacterChatClient({
   const composerBorderClass = safetyOn ? "" : "border-[#ffa9d6]/50";
 
   useEffect(() => {
-    fetch("/api/llm/config")
-      .then((r) => r.json())
-      .then((d) => {
-        if (d?.ok && d?.settings) {
+    let alive = true;
+    Promise.all([
+      fetch("/api/llm/config").then((r) => r.json()),
+      fetchAdultStatus().then((s) => (alive ? s : null)),
+    ])
+      .then(([config, adultStatus]) => {
+        if (!alive) return;
+        if (config?.ok && config?.settings) {
           llmConfigRef.current = {
-            defaultProvider: d.defaultProvider || "anthropic",
-            fallbackProvider: d.fallbackProvider || "gemini",
-            fallbackModel: d.fallbackModel || "gemini-2.5-flash",
-            settings: d.settings || [],
+            defaultProvider: config.defaultProvider || "anthropic",
+            fallbackProvider: config.fallbackProvider || "gemini",
+            fallbackModel: config.fallbackModel || "gemini-2.5-flash",
+            settings: config.settings || [],
           };
         }
+        if (adultStatus) {
+          setAdultVerified(Boolean(adultStatus.adultVerified));
+        }
+        setAdultLoading(false);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (alive) setAdultLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
   }, []);
 
   const openingPrompt = useMemo(() => {
@@ -506,19 +507,6 @@ export function CharacterChatClient({
       })
       .catch(() => {});
   }, [characterAvatarUrl, characterSlug]);
-
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      const status = await fetchAdultStatus();
-      if (!alive) return;
-      setAdultVerified(Boolean(status?.adultVerified));
-      setAdultLoading(false);
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
 
   // 모바일 키보드 높이 감지 및 메시지 입력창 위치 조정
   useEffect(() => {

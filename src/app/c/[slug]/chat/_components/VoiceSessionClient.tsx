@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useSafetyOn } from "@/lib/pananaApp/useSafetyOn";
 import { AudioRecorder } from "@/lib/voice/genai-live/audio-recorder";
 import { AudioStreamer } from "@/lib/voice/genai-live/audio-streamer";
 import { audioContext, base64ToArrayBuffer } from "@/lib/voice/genai-live/utils";
@@ -121,20 +122,7 @@ export function VoiceSessionClient({
   const [ringtoneUrl, setRingtoneUrl] = useState<string | null>(null);
   const [hangupSoundUrl, setHangupSoundUrl] = useState<string | null>(null);
   const [closingWithHangupSound, setClosingWithHangupSound] = useState(false);
-  const [safetyOn, setSafetyOn] = useState(false);
-  useEffect(() => {
-    const read = () => {
-      try {
-        const v = document.cookie.split("; ").find((r) => r.startsWith("panana_safety_on="));
-        setSafetyOn(v ? v.split("=")[1] === "1" : localStorage.getItem("panana_safety_on") === "1");
-      } catch {
-        setSafetyOn(false);
-      }
-    };
-    read();
-    window.addEventListener("panana-safety-change", read as EventListener);
-    return () => window.removeEventListener("panana-safety-change", read as EventListener);
-  }, []);
+  const safetyOn = useSafetyOn();
   const cancelButtonBg = safetyOn ? "bg-panana-pink2 hover:bg-panana-pink2/90" : "bg-[#ffa9d6] hover:bg-[#ffa9d6]/90";
   const [callDurationSec, setCallDurationSec] = useState(0);
   const [started, setStarted] = useState(false);

@@ -8,46 +8,34 @@ import { ScreenShell } from "@/components/ScreenShell";
 import { SurfaceCard } from "@/components/SurfaceCard";
 
 function AirportMediaBlock({
-  imageUrl,
   videoUrl,
   showNext,
   onNext,
 }: {
-  imageUrl: string;
   videoUrl: string;
   showNext: boolean;
   onNext: () => void;
 }) {
-  if (!imageUrl && !videoUrl) {
-    return <IllustrationPlaceholder label="panana AIRPORT" className="mt-5 h-[240px] w-full" />;
-  }
-
   const [videoReady, setVideoReady] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  // 이미지 먼저 렌더 + 동영상은 병렬 로딩 후 준비되면 전환
   useEffect(() => {
     setVideoReady(false);
-  }, [imageUrl, videoUrl]);
+  }, [videoUrl]);
 
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
-    if (!videoUrl) return;
 
     const onReady = () => {
       setVideoReady(true);
-      // 동영상이 준비되면 즉시 재생
       // eslint-disable-next-line @typescript-eslint/no-floating-promises
       el.play().catch(() => {});
     };
-    
-    // 여러 이벤트로 빠른 감지
+
     el.addEventListener("loadeddata", onReady);
     el.addEventListener("canplay", onReady);
     el.addEventListener("canplaythrough", onReady);
-    
-    // 동영상 로딩 즉시 시작
     el.load();
 
     return () => {
@@ -57,39 +45,25 @@ function AirportMediaBlock({
     };
   }, [videoUrl]);
 
+  if (!videoUrl) {
+    return <IllustrationPlaceholder label="panana AIRPORT" className="mt-5 h-[240px] w-full" />;
+  }
+
   return (
     <div className="mt-5 overflow-hidden rounded-2xl border border-white/10 bg-black/30">
       <div className="relative h-[240px] w-full">
-        {imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={imageUrl}
-            alt=""
-            className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-300 ${
-              videoUrl && videoReady ? "opacity-0" : "opacity-100"
-            }`}
-          />
-        ) : (
-          <div className="absolute inset-0">
-            <IllustrationPlaceholder label="panana AIRPORT" className="h-full w-full" />
-          </div>
-        )}
-
-        {videoUrl ? (
-          <video
-            ref={videoRef}
-            src={videoUrl}
-            poster={imageUrl || undefined}
-            className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-200 ${
-              videoReady ? "opacity-100" : "opacity-0"
-            }`}
-            muted
-            playsInline
-            autoPlay
-            loop
-            preload="auto"
-          />
-        ) : null}
+        <video
+          ref={videoRef}
+          src={videoUrl}
+          className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-200 ${
+            videoReady ? "opacity-100" : "opacity-0"
+          }`}
+          muted
+          playsInline
+          autoPlay
+          loop
+          preload="auto"
+        />
 
         {showNext ? (
           <button
@@ -109,8 +83,7 @@ function AirportMediaBlock({
 }
 
 export default function AirportStartClient() {
-  // 로컬 파일 직접 사용: 입국심사 (1.png, 1_1.mp4)
-  const imageUrl = "/airport/1.png";
+  // 동영상만 로드: 입국심사 (1_1.mp4)
   const videoUrl = "/airport/1_1.mp4";
 
   const fallbackIntro = useMemo(
@@ -129,7 +102,6 @@ export default function AirportStartClient() {
           <div className="text-center text-[18px] font-semibold tracking-[-0.01em] text-white/90">파나나 공항</div>
 
           <AirportMediaBlock
-            imageUrl={imageUrl}
             videoUrl={videoUrl}
             showNext={false}
             onNext={() => {}}

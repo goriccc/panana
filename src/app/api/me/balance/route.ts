@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth/authOptions";
 import { resolveUserId } from "@/lib/challenge/resolveUserId";
+import { getBalanceForUserId } from "@/lib/pananaApp/balanceServer";
 
 export const runtime = "nodejs";
 
@@ -26,30 +27,8 @@ export async function GET(req: Request) {
     const session = await getServerSession(authOptions);
     const sb = getSb();
     const userId = await resolveUserId(sb, { pananaId, session });
-    const { data } = await sb
-      .from("panana_billing_profiles")
-      .select("panana_balance, amount_base, amount_bonus")
-      .eq("user_id", userId)
-      .maybeSingle();
-
-    if (!data) {
-      return NextResponse.json({ ok: true, pananaBalance: 0 });
-    }
-
-    const row = data as { panana_balance?: number; amount_base?: number; amount_bonus?: number };
-    const hasSplit =
-      typeof row.amount_base === "number" && typeof row.amount_bonus === "number";
-    const balance = hasSplit
-      ? Math.max(0, Number(row.amount_base) + Number(row.amount_bonus))
-      : (typeof row.panana_balance === "number" ? Number(row.panana_balance) : 0);
-    return NextResponse.json({
-      ok: true,
-      pananaBalance: Math.max(0, balance),
-      ...(hasSplit && {
-        amountBase: Math.max(0, Number(row.amount_base)),
-        amountBonus: Math.max(0, Number(row.amount_bonus)),
-      }),
-    });
+    const pananaBalance = await getBalanceForUserId(sb, userId);
+    return NextResponse.json({ ok: true, pananaBalance });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Unknown error";
     return NextResponse.json({ ok: false, error: message }, { status: 400 });

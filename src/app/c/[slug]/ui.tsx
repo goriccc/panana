@@ -10,6 +10,7 @@ import { ContentCard } from "@/components/ContentCard";
 import { defaultRecommendationSettings, trackBehaviorEvent } from "@/lib/pananaApp/recommendation";
 import { fetchMyAccountInfo, type Gender } from "@/lib/pananaApp/accountInfo";
 import { ensurePananaIdentity } from "@/lib/pananaApp/identity";
+import { useSafetyOn } from "@/lib/pananaApp/useSafetyOn";
 
 function Stat({ value, label }: { value: number; label: string }) {
   return (
@@ -109,7 +110,7 @@ export function CharacterClient({
     return recommendedTalkCards.filter((it) => getCharacterGender(it) === preferredGender);
   }, [preferredGender, recommendedTalkCards]);
 
-  const [safetyOn, setSafetyOn] = useState(false);
+  const safetyOn = useSafetyOn();
   const [followStats, setFollowStats] = useState<{
     followersTotal: number;
     followingTotal: number;
@@ -120,20 +121,6 @@ export function CharacterClient({
     isFollowing: false,
   }));
   const [followLoading, setFollowLoading] = useState(false);
-  useEffect(() => {
-    const read = () => {
-      try {
-        const v = document.cookie.split("; ").find((r) => r.startsWith("panana_safety_on="));
-        setSafetyOn(v ? v.split("=")[1] === "1" : localStorage.getItem("panana_safety_on") === "1");
-      } catch {
-        setSafetyOn(false);
-      }
-    };
-    read();
-    window.addEventListener("panana-safety-change", read as EventListener);
-    return () => window.removeEventListener("panana-safety-change", read as EventListener);
-  }, []);
-
   useEffect(() => {
     let alive = true;
     setFollowStats({

@@ -2,25 +2,13 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { signIn } from "next-auth/react";
+import { useSafetyOn } from "@/lib/pananaApp/useSafetyOn";
 
 export function LoginClient({ returnTo }: { returnTo: string }) {
   const backHref = useMemo(() => returnTo || "/my", [returnTo]);
-  const [safetyOn, setSafetyOn] = useState(false);
-  useEffect(() => {
-    const read = () => {
-      try {
-        const v = document.cookie.split("; ").find((row) => row.startsWith("panana_safety_on="));
-        setSafetyOn(v ? v.split("=")[1] === "1" : localStorage.getItem("panana_safety_on") === "1");
-      } catch {
-        setSafetyOn(false);
-      }
-    };
-    read();
-    window.addEventListener("panana-safety-change", read as EventListener);
-    return () => window.removeEventListener("panana-safety-change", read as EventListener);
-  }, []);
+  const safetyOn = useSafetyOn();
 
   const login = async (provider: "kakao" | "naver" | "google" | "credentials") => {
     await signIn(provider, { callbackUrl: backHref });

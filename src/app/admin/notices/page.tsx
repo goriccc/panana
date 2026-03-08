@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { AdminButton, AdminInput, AdminSectionHeader, AdminTable, AdminTextarea, useAdminCrudList } from "../_components/AdminUI";
 
 type NoticeRow = {
@@ -37,7 +37,7 @@ export default function AdminNoticesPage() {
   const [summary, setSummary] = useState(crud.selected?.summary || "");
   const [body, setBody] = useState(crud.selected?.body || "");
 
-  useMemo(() => {
+  useEffect(() => {
     setTitle(crud.selected?.title || "");
     setSummary(crud.selected?.summary || "");
     setBody(crud.selected?.body || "");
