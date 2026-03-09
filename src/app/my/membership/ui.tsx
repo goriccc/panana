@@ -31,9 +31,9 @@ export function MembershipClient({ banners }: { banners: PublicMembershipBanner[
           {current ? (
             <div className="overflow-hidden border border-white/10 bg-white/[0.02] shadow-[0_18px_45px_rgba(0,0,0,0.25)]">
               <Link href={current.link_url || "/my/membership"} className="block">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
+                {/* API 프록시로 동일 도메인에서 로드해 Supabase 직링크 액박 방지 */}
                 <img
-                  src={current.image_url}
+                  src={`/api/membership-banner-image?id=${encodeURIComponent(current.id)}`}
                   alt={current.title || "멤버십 배너"}
                   className="h-auto w-full"
                   sizes="(max-width: 420px) 100vw, 420px"

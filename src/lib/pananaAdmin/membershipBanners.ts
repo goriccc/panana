@@ -83,18 +83,22 @@ export async function deleteMembershipBanner(id: string) {
 
 export async function uploadMembershipBannerImage(bannerId: string, file: File) {
   const supabase = getBrowserSupabase();
-  const path = `banners/${bannerId}/image`;
-
-  const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
-    upsert: true,
-    contentType: file.type,
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error("로그인이 필요해요.");
+  const form = new FormData();
+  form.append("file", file);
+  form.append("bannerId", bannerId);
+  const base = typeof window !== "undefined" ? window.location.origin : "";
+  const res = await fetch(`${base}/api/admin/membership-banner-image`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${session.access_token}` },
+    body: form,
   });
-  if (error) throw error;
-
-  const imageUrl = supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
-  await updateMembershipBanner(bannerId, { image_path: path, image_url: imageUrl });
-
-  return { path, imageUrl };
+  const json = (await res.json()) as { ok?: boolean; path?: string; imageUrl?: string; error?: string };
+  if (!res.ok || !json.ok) throw new Error(json?.error || "업로드에 실패했어요.");
+  return { path: json.path ?? "", imageUrl: json.imageUrl ?? "" };
 }
 
 export async function reorderMembershipBanners(idsInOrder: string[]) {
