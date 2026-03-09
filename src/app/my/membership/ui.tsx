@@ -1,7 +1,6 @@
 "use client";
 
 import { TopBar } from "@/components/TopBar";
-import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { PublicMembershipBanner } from "@/lib/pananaApp/membershipPublic";
@@ -32,14 +31,13 @@ export function MembershipClient({ banners }: { banners: PublicMembershipBanner[
           {current ? (
             <div className="overflow-hidden border border-white/10 bg-white/[0.02] shadow-[0_18px_45px_rgba(0,0,0,0.25)]">
               <Link href={current.link_url || "/my/membership"} className="block">
-                <Image
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
                   src={current.image_url}
                   alt={current.title || "멤버십 배너"}
-                  width={1200}
-                  height={675}
                   className="h-auto w-full"
                   sizes="(max-width: 420px) 100vw, 420px"
-                  priority
+                  fetchPriority="high"
                 />
               </Link>
             </div>
