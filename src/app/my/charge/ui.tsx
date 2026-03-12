@@ -1,9 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { TopBar } from "@/components/TopBar";
 import { ensurePananaIdentity } from "@/lib/pananaApp/identity";
+
+const PORTONE_PENDING_KEY = "portone_charge_pending";
+
+type PendingPayload = { sku: string; panaAmount?: number; bonusAmount?: number; selectedProductId?: string | null };
 
 function fmt(n: number) {
   return n.toLocaleString("ko-KR");
@@ -48,11 +54,31 @@ function defaultSelectedId(products: ChargeProduct[]): string | null {
   return (recommended ?? products[0])?.id ?? null;
 }
 
-export function ChargeClient({ initialProducts = [], initialBalance }: { initialProducts?: ChargeProduct[]; initialBalance?: number }) {
+export function ChargeClient({
+  initialProducts = [],
+  initialBalance,
+  initialSelectedId,
+  buyerEmail = "",
+  buyerName = "",
+  buyerPhone = "",
+}: {
+  initialProducts?: ChargeProduct[];
+  initialBalance?: number;
+  initialSelectedId?: string;
+  buyerEmail?: string;
+  buyerName?: string;
+  buyerPhone?: string;
+}) {
+  const searchParams = useSearchParams();
   const localIdt = useMemo(() => ensurePananaIdentity(), []);
   const [pananaBalance, setPananaBalance] = useState<number | null>(initialBalance ?? null);
   const [products, setProducts] = useState<ChargeProduct[]>(initialProducts);
-  const [selectedId, setSelectedId] = useState<string | null>(() => defaultSelectedId(initialProducts));
+  const [selectedId, setSelectedId] = useState<string | null>(
+    () => initialSelectedId ?? defaultSelectedId(initialProducts)
+  );
+  const [paying, setPaying] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [payError, setPayError] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialProducts.length > 0) return;
@@ -71,6 +97,7 @@ export function ChargeClient({ initialProducts = [], initialBalance }: { initial
     };
   }, [initialProducts.length]);
 
+  // 충전 화면 처음 들어갈 때만 추천 상품 선택 (이미 선택된 게 있으면 유지)
   useEffect(() => {
     if (products.length > 0 && !selectedId) setSelectedId(defaultSelectedId(products));
   }, [products, selectedId]);
@@ -102,6 +129,139 @@ export function ChargeClient({ initialProducts = [], initialBalance }: { initial
       selectedButtonRef.current?.focus({ preventScroll: true });
     }
   }, [selectedId, products]);
+
+  const refreshBalance = useCallback(() => {
+    if (!localIdt.id) return;
+    fetch(`/api/me/balance?pananaId=${encodeURIComponent(localIdt.id)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.ok && typeof d.pananaBalance === "number") setPananaBalance(Math.max(0, d.pananaBalance));
+      })
+      .catch(() => {});
+  }, [localIdt.id]);
+
+  useEffect(() => {
+    const paymentId = searchParams.get("paymentId");
+    if (!paymentId || confirming) return;
+    const raw = typeof window !== "undefined" ? sessionStorage.getItem(PORTONE_PENDING_KEY) : null;
+    if (!raw) {
+      window.history.replaceState({}, "", "/my/charge");
+      return;
+    }
+    let pending: PendingPayload | null = null;
+    try {
+      pending = JSON.parse(raw) as PendingPayload;
+    } catch {
+      window.history.replaceState({}, "", "/my/charge");
+      return;
+    }
+    if (!pending?.sku) {
+      window.history.replaceState({}, "", "/my/charge");
+      return;
+    }
+    setPayError(null);
+    fetch("/api/payment/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paymentId, sku: pending.sku }),
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        sessionStorage.removeItem(PORTONE_PENDING_KEY);
+        if (d?.ok) {
+          refreshBalance();
+          window.history.replaceState({}, "", "/my/charge");
+        } else {
+          // 사용자가 결제창을 명시적으로 닫은 경우 메시지 없이 정리만
+          if ((d?.error ?? "") !== "결제가 완료된 건이 아니에요.") {
+            setPayError(d?.error ?? "결제 확인에 실패했어요.");
+          }
+          window.history.replaceState({}, "", "/my/charge");
+        }
+      })
+      .catch(() => {
+        sessionStorage.removeItem(PORTONE_PENDING_KEY);
+        setPayError("결제 확인 요청에 실패했어요.");
+        window.history.replaceState({}, "", "/my/charge");
+      })
+  }, [searchParams, confirming, refreshBalance]);
+
+  const handleChargeClick = useCallback(async () => {
+    const product = products.find((p) => p.id === selectedId) ?? products[0];
+    if (!product) return;
+    const storeId = process.env.NEXT_PUBLIC_PORTONE_STORE_ID;
+    const channelKey = process.env.NEXT_PUBLIC_PORTONE_CHANNEL_KEY;
+    if (!storeId || !channelKey) {
+      setPayError("결제 설정이 완료되지 않았어요. (Store ID / Channel Key)");
+      return;
+    }
+    const name = (buyerName || "").trim();
+    const email = (buyerEmail || "").trim();
+    const phoneNumber = (buyerPhone || "").trim().replace(/-/g, "");
+    if (!name) {
+      setPayError("이니시스 결제는 구매자 이름이 필요해요. 로그인된 계정(구글/네이버/카카오)에 표시 이름이 있는지 확인해 주세요.");
+      return;
+    }
+    if (!email) {
+      setPayError("이니시스 결제는 구매자 이메일이 필요해요. 로그인된 계정에 이메일이 있는지 확인해 주세요.");
+      return;
+    }
+    if (!phoneNumber) {
+      setPayError("PHONE_REQUIRED");
+      return;
+    }
+    const paymentId = `panana-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    sessionStorage.setItem(
+      PORTONE_PENDING_KEY,
+      JSON.stringify({
+        sku: product.sku,
+        panaAmount: product.panaAmount,
+        bonusAmount: product.bonusAmount,
+        selectedProductId: selectedId,
+      })
+    );
+    setPayError(null);
+    setPaying(true);
+    try {
+      const PortOne = await import("@portone/browser-sdk/v2").then((m) => m.default);
+      const base = typeof window !== "undefined" ? window.location.origin : "";
+      const res = await PortOne.requestPayment({
+        storeId,
+        channelKey,
+        paymentId,
+        orderName: product.title || `${product.panaAmount} 파나나 충전`,
+        totalAmount: product.priceKrw,
+        currency: "KRW",
+        payMethod: "CARD",
+        redirectUrl: `${base}/my/charge?paymentId=${encodeURIComponent(paymentId)}&selected=${encodeURIComponent(selectedId ?? "")}`,
+        forceRedirect: false,
+        customer: { fullName: name, email, phoneNumber },
+      });
+      if (res?.code) {
+        sessionStorage.removeItem(PORTONE_PENDING_KEY);
+        const msg = res.message ?? "";
+        if (msg && !msg.includes("취소")) setPayError(msg || "결제에 실패했어요.");
+      } else if (res?.paymentId) {
+        const confirmRes = await fetch("/api/payment/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paymentId: res.paymentId, sku: product.sku }),
+        }).then((r) => r.json());
+        sessionStorage.removeItem(PORTONE_PENDING_KEY);
+        if (confirmRes?.ok) {
+          refreshBalance();
+        } else {
+          setPayError(confirmRes?.error ?? "결제 확인에 실패했어요.");
+        }
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "결제 창을 열 수 없어요.";
+      setPayError(msg);
+      sessionStorage.removeItem(PORTONE_PENDING_KEY);
+    } finally {
+      setPaying(false);
+    }
+  }, [products, selectedId, buyerName, buyerEmail, buyerPhone, refreshBalance]);
 
   return (
     <div className="min-h-dvh bg-[radial-gradient(1100px_650px_at_50%_-10%,rgba(255,77,167,0.10),transparent_60%),linear-gradient(#07070B,#0B0C10)] text-white">
@@ -177,12 +337,35 @@ export function ChargeClient({ initialProducts = [], initialBalance }: { initial
           </div>
         )}
 
+        {payError ? (
+          <div className="mt-4 rounded-xl bg-red-500/15 px-4 py-3 text-[13px] font-semibold text-red-300">
+            {payError === "PHONE_REQUIRED" ? (
+              <>
+                계정설정에서 휴대폰 번호를 등록해 주세요.{" "}
+                <Link href="/my/account/edit" className="underline">
+                  계정 설정으로 이동
+                </Link>
+              </>
+            ) : (
+              payError
+            )}
+          </div>
+        ) : null}
+        {!buyerPhone && !payError ? (
+          <div className="mt-4 rounded-xl bg-amber-500/15 px-4 py-3 text-[13px] font-semibold text-amber-200">
+            결제를 위해 계정설정에서 휴대폰 번호를 등록해 주세요.{" "}
+            <Link href="/my/account/edit" className="underline">
+              계정 설정으로 이동
+            </Link>
+          </div>
+        ) : null}
         <button
           type="button"
-          className="mt-6 w-full rounded-2xl bg-panana-pink px-5 py-4 text-[15px] font-extrabold text-white"
-          disabled={!selectedProduct}
+          className="mt-6 w-full rounded-2xl bg-panana-pink px-5 py-4 text-[15px] font-extrabold text-white disabled:opacity-60"
+          disabled={!selectedProduct || paying || confirming}
+          onClick={handleChargeClick}
         >
-          충전하기
+          {confirming ? "결제 확인 중..." : paying ? "결제 창 여는 중..." : "충전하기"}
         </button>
 
         <div className="mt-8 text-[11px] leading-[1.7] text-white/35">

@@ -22,19 +22,19 @@ function isUuid(v: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(v || ""));
 }
 
-type PuRow = { birth_yyyymmdd: string | null; gender: string | null };
+type PuRow = { birth_yyyymmdd: string | null; gender: string | null; phone_number: string | null };
 
 /** 세션 있을 때 identity + panana_users 한 번에 조회 (1 round-trip) */
 async function getAccountInfoBySession(
   sb: SupabaseClient<any>,
   session: any
-): Promise<{ userId: string; birth: string | null; gender: string | null } | null> {
+): Promise<{ userId: string; birth: string | null; gender: string | null; phoneNumber: string | null } | null> {
   const provider = String((session as any)?.provider || "").toLowerCase();
   const providerAccountId = String((session as any)?.providerAccountId || "");
   if (!provider || !providerAccountId) return null;
   const { data, error } = await sb
     .from("panana_user_identities")
-    .select("user_id, panana_users(birth_yyyymmdd, gender)")
+    .select("user_id, panana_users(birth_yyyymmdd, gender, phone_number)")
     .eq("provider", provider)
     .eq("provider_account_id", providerAccountId)
     .maybeSingle();
@@ -45,7 +45,8 @@ async function getAccountInfoBySession(
   const pu = Array.isArray(raw.panana_users) ? raw.panana_users[0] : raw.panana_users;
   const birth = pu?.birth_yyyymmdd ? String(pu.birth_yyyymmdd) : null;
   const gender = pu?.gender ? String(pu.gender) : null;
-  return { userId, birth, gender };
+  const phoneNumber = pu?.phone_number ? String(pu.phone_number).trim() || null : null;
+  return { userId, birth, gender, phoneNumber };
 }
 
 async function resolveUserId(sb: SupabaseClient<any>, args: { pananaId?: string | null; session: any | null }) {
@@ -87,10 +88,16 @@ function normGender(input: string | null | undefined) {
   return null;
 }
 
+function normPhone(input: string | null | undefined) {
+  const v = String(input || "").replace(/\D/g, "").trim();
+  return v.length >= 10 ? v : null;
+}
+
 const UpdateSchema = z.object({
   pananaId: z.string().optional(),
   birth: z.string().optional(),
   gender: z.string().optional(),
+  phoneNumber: z.string().optional(),
 });
 
 const CACHE_CONTROL = "private, max-age=30";
@@ -107,7 +114,12 @@ export async function GET(req: Request) {
       const bySession = await getAccountInfoBySession(sb, session);
       if (bySession) {
         return NextResponse.json(
-          { ok: true, birth: bySession.birth, gender: bySession.gender },
+          {
+            ok: true,
+            birth: bySession.birth,
+            gender: bySession.gender,
+            phoneNumber: bySession.phoneNumber,
+          },
           { headers: { "Cache-Control": CACHE_CONTROL } }
         );
       }
@@ -116,16 +128,18 @@ export async function GET(req: Request) {
     const userId = await resolveUserId(sb, { pananaId, session });
     const { data, error } = await sb
       .from("panana_users")
-      .select("birth_yyyymmdd, gender")
+      .select("birth_yyyymmdd, gender, phone_number")
       .eq("id", userId)
       .maybeSingle();
     if (error) throw error;
 
+    const row = data as { birth_yyyymmdd?: string | null; gender?: string | null; phone_number?: string | null } | null;
     return NextResponse.json(
       {
         ok: true,
-        birth: (data as any)?.birth_yyyymmdd ? String((data as any).birth_yyyymmdd) : null,
-        gender: (data as any)?.gender ? String((data as any).gender) : null,
+        birth: row?.birth_yyyymmdd ? String(row.birth_yyyymmdd) : null,
+        gender: row?.gender ? String(row.gender) : null,
+        phoneNumber: row?.phone_number ? String(row.phone_number).trim() || null : null,
       },
       { headers: { "Cache-Control": CACHE_CONTROL } }
     );
@@ -143,16 +157,17 @@ export async function POST(req: Request) {
     const userId = await resolveUserId(sb, { pananaId: body.pananaId || null, session });
     const birth = normBirth(body.birth);
     const gender = normGender(body.gender);
+    const phoneNumber = normPhone(body.phoneNumber);
 
-    await sb
-      .from("panana_users")
-      .update({
-        birth_yyyymmdd: birth,
-        gender,
-      })
-      .eq("id", userId);
+    const patch: { birth_yyyymmdd?: string | null; gender?: string | null; phone_number?: string | null } = {
+      birth_yyyymmdd: birth,
+      gender,
+    };
+    if (body.phoneNumber !== undefined) patch.phone_number = phoneNumber;
 
-    return NextResponse.json({ ok: true, userId, birth, gender });
+    await sb.from("panana_users").update(patch).eq("id", userId);
+
+    return NextResponse.json({ ok: true, userId, birth, gender, phoneNumber: phoneNumber ?? undefined });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || "Unknown error" }, { status: 400 });
   }

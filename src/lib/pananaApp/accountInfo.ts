@@ -5,6 +5,7 @@ export type Gender = "female" | "male" | "both" | "private";
 export type AccountInfo = {
   birth: string | null; // YYYYMMDD
   gender: Gender | null;
+  phoneNumber: string | null; // 이니시스 등 결제 시 구매자 휴대폰 필수
 };
 
 const CACHE_TTL_MS = 30_000; // 30초
@@ -70,7 +71,8 @@ export async function fetchMyAccountInfo(): Promise<AccountInfo | null> {
     if (!res.ok || !data?.ok) return null;
     const birth = data.birth ? String(data.birth) : null;
     const gender = data.gender ? (String(data.gender) as Gender) : null;
-    const info: AccountInfo = { birth, gender };
+    const phoneNumber = data.phoneNumber ? String(data.phoneNumber).trim() || null : null;
+    const info: AccountInfo = { birth, gender, phoneNumber };
     setCached(key, info);
     if (shouldBypassCache && typeof window !== "undefined") {
       try {
@@ -95,6 +97,7 @@ export async function updateMyAccountInfo(patch: Partial<AccountInfo>): Promise<
         pananaId,
         birth: patch.birth ?? undefined,
         gender: patch.gender ?? undefined,
+        phoneNumber: patch.phoneNumber ?? undefined,
       }),
     });
     const data = await res.json().catch(() => null);

@@ -39,6 +39,7 @@ function RadioRow({
 export function AccountEditClient() {
   const [birth, setBirth] = useState("");
   const [gender, setGender] = useState<Gender>("private");
+  const [phoneNumber, setPhoneNumber] = useState("");
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
@@ -58,6 +59,7 @@ export function AccountEditClient() {
       if (!alive || !info) return;
       if (info.birth) setBirth(String(info.birth));
       if (info.gender) setGender(info.gender);
+      if (info.phoneNumber) setPhoneNumber(String(info.phoneNumber));
     })();
     return () => {
       alive = false;
@@ -76,7 +78,24 @@ export function AccountEditClient() {
               캐릭터 추천에 도움이 돼요! 정보는 안전하게 보관돼요!
             </div>
             {prettyBirth ? <div className="mt-2 text-[11px] font-semibold text-white/45">현재: {prettyBirth}</div> : null}
+            {phoneNumber ? (
+              <div className="mt-2 text-[11px] font-semibold text-white/45">휴대폰: {phoneNumber.replace(/(\d{3})(\d{4})(\d{4})/, "$1-$2-$3")}</div>
+            ) : null}
             {status ? <div className="mt-2 text-[12px] font-semibold text-[#ff9aa1]">{status}</div> : null}
+          </div>
+
+          <div className="border-t border-white/10" />
+
+          <div className="px-5 py-5">
+            <div className="text-[13px] font-extrabold text-white/85">휴대폰 번호</div>
+            <div className="mt-1 text-[11px] font-semibold text-white/35">결제 시 구매자 정보로 사용돼요. 숫자만 입력해 주세요.</div>
+            <input
+              value={phoneNumber}
+              onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, "").slice(0, 11))}
+              inputMode="numeric"
+              className="mt-3 w-full rounded-2xl border border-panana-pink/60 bg-white/[0.04] px-5 py-4 text-[14px] font-semibold text-white/85 outline-none placeholder:text-white/25"
+              placeholder="01012345678"
+            />
           </div>
 
           <div className="border-t border-white/10" />
@@ -115,13 +134,18 @@ export function AccountEditClient() {
         <div className="px-5">
           <button
             type="button"
-            disabled={saving || birth.length !== 8}
+            disabled={saving || birth.length !== 8 || (phoneNumber.length > 0 && phoneNumber.replace(/\D/g, "").length < 10)}
             className="mt-10 w-full rounded-2xl bg-panana-pink px-5 py-4 text-[15px] font-extrabold text-white disabled:opacity-50"
             onClick={async () => {
               setStatus(null);
               setSaving(true);
               try {
-                const res = await updateMyAccountInfo({ birth, gender });
+                const phone = phoneNumber.replace(/\D/g, "").trim();
+                const res = await updateMyAccountInfo({
+                  birth,
+                  gender,
+                  phoneNumber: phone.length >= 10 ? phone : phoneNumber.trim() === "" ? "" : undefined,
+                });
                 if (!res.ok) {
                   setStatus(res.error);
                   return;

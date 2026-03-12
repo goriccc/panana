@@ -31,6 +31,7 @@ export function AccountClient() {
   const { data: session, status } = useSession();
   const [birth, setBirth] = useState<string | null>(null);
   const [gender, setGender] = useState<Gender | null>(null);
+  const [phoneNumber, setPhoneNumber] = useState<string | null>(null);
   const [profileNote, setProfileNote] = useState("");
   const [profileNoteSaving, setProfileNoteSaving] = useState(false);
   const [profileNoteStatus, setProfileNoteStatus] = useState<string | null>(null);
@@ -42,6 +43,7 @@ export function AccountClient() {
       if (!alive || !info) return;
       setBirth(info.birth);
       setGender(info.gender);
+      setPhoneNumber(info.phoneNumber ?? null);
     })();
     return () => {
       alive = false;
@@ -85,6 +87,12 @@ export function AccountClient() {
     if (gender === "both") return "둘 다";
     return "공개 안 함";
   }, [gender]);
+
+  const phoneDisplay = useMemo(() => {
+    const v = String(phoneNumber || "").replace(/\D/g, "");
+    if (v.length < 10) return "—";
+    return v.replace(/(\d{3})(\d{4})(\d{4})/, "$1-$2-$3");
+  }, [phoneNumber]);
 
   const providerLabel = useMemo(() => {
     const p = String((session as any)?.provider || "").toLowerCase();
@@ -133,6 +141,10 @@ export function AccountClient() {
           <div className="flex items-center justify-between px-5 py-5">
             <div className="text-[13px] font-semibold text-white/70">성별</div>
             <div className="text-[13px] font-semibold text-white/60">{genderText}</div>
+          </div>
+          <div className="flex items-center justify-between px-5 py-5">
+            <div className="text-[13px] font-semibold text-white/70">휴대폰 번호</div>
+            <div className="text-[13px] font-semibold text-white/60">{phoneDisplay}</div>
           </div>
 
           <div className="border-t border-white/10" />

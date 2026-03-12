@@ -6,7 +6,23 @@ import NaverProvider from "next-auth/providers/naver";
 
 const DEV_MOCK_PANANA_ID = process.env.DEV_MOCK_PANANA_ID || "aaaaaaaa-bbbb-4ccc-8000-000000000001";
 
-async function ensureDevUser(): Promise<{ id: string; handle: string; nickname: string }> {
+const DEV_MOCK_EMAIL = "goriccc@gmail.com";
+const DEV_MOCK_PHONE = "01032067406";
+const DEV_MOCK_NAME = "송준호";
+
+/** OAuth 프로필에서 결제용 구매자 이름 추출 (필수 값 보장) */
+function resolveOAuthName(user: { name?: string | null; email?: string | null; nickname?: string } | null): string {
+  if (!user) return "회원";
+  const name = (user as any).name ? String((user as any).name).trim() : "";
+  if (name) return name;
+  const nickname = (user as any).nickname ? String((user as any).nickname).trim() : "";
+  if (nickname) return nickname;
+  const email = (user as any).email ? String((user as any).email).trim() : "";
+  if (email) return email.split("@")[0] || "회원";
+  return "회원";
+}
+
+async function ensureDevUser(): Promise<{ id: string; handle: string; nickname: string; email: string; phoneNumber: string; name: string }> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !serviceKey) throw new Error("Supabase env missing");
@@ -27,6 +43,9 @@ async function ensureDevUser(): Promise<{ id: string; handle: string; nickname: 
       id: String(existing.id),
       handle: String((existing as any).handle || handle),
       nickname: String((existing as any).nickname || nickname),
+      email: DEV_MOCK_EMAIL,
+      phoneNumber: DEV_MOCK_PHONE,
+      name: DEV_MOCK_NAME,
     };
   }
 
@@ -41,7 +60,14 @@ async function ensureDevUser(): Promise<{ id: string; handle: string; nickname: 
     { user_id: inserted.id, provider: "credentials", provider_account_id: "dev" },
     { onConflict: "provider,provider_account_id" }
   );
-  return { id: String((inserted as any).id), handle: String((inserted as any).handle), nickname: String((inserted as any).nickname) };
+  return {
+    id: String((inserted as any).id),
+    handle: String((inserted as any).handle),
+    nickname: String((inserted as any).nickname),
+    email: DEV_MOCK_EMAIL,
+    phoneNumber: DEV_MOCK_PHONE,
+    name: DEV_MOCK_NAME,
+  };
 }
 
 const providers: NextAuthOptions["providers"] = [
@@ -88,6 +114,13 @@ export const authOptions: NextAuthOptions = {
         (token as any).pananaId = (user as any).id;
         (token as any).pananaHandle = (user as any).handle;
         (token as any).pananaNickname = (user as any).nickname;
+        (token as any).email = (user as any).email ?? DEV_MOCK_EMAIL;
+        (token as any).phoneNumber = (user as any).phoneNumber ?? DEV_MOCK_PHONE;
+        (token as any).name = (user as any).name ?? DEV_MOCK_NAME;
+      }
+      // 구글/카카오/네이버 로그인 시 이름 필수 보장(결제용) — name → nickname → 이메일 앞부분 → "회원"
+      if (account?.provider && account.provider !== "credentials" && user) {
+        (token as any).name = resolveOAuthName(user as any);
       }
       // 최초 로그인 시 provider를 토큰에 저장(계정설정 화면에서 표시용)
       if (account?.provider) {
@@ -115,6 +148,13 @@ export const authOptions: NextAuthOptions = {
       (session as any).pananaHandle = (token as any)?.pananaHandle ? String((token as any).pananaHandle) : undefined;
       (session as any).pananaId = (token as any)?.pananaId ? String((token as any).pananaId) : undefined;
       (session as any).pananaNickname = (token as any)?.pananaNickname ? String((token as any).pananaNickname) : undefined;
+      if (session?.user && (token as any)?.phoneNumber) {
+        (session.user as any).phoneNumber = String((token as any).phoneNumber);
+      }
+      // 결제용 구매자 이름: OAuth/개발로그인에서 채운 token.name 세션에 반영
+      if (session?.user && (token as any)?.name) {
+        session.user.name = String((token as any).name);
+      }
       return session;
     },
     async redirect({ url, baseUrl }) {

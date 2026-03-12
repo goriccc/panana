@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
 import { getSupabaseClient } from "@/lib/supabase/client";
+import sharp from "sharp";
 
 export const runtime = "nodejs";
 
 const BUCKET = "panana-membership";
+/** 배너 표시용 최대 너비 (2x 기준 420*2≈840, 여유 있게 960) */
+const MAX_WIDTH = 960;
+const WEBP_QUALITY = 82;
 
 function isUuid(v: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -49,11 +53,16 @@ export async function GET(req: Request) {
     if (downloadError || !fileData) {
       return NextResponse.json({ error: "Image not found" }, { status: 404 });
     }
-    const buf = Buffer.from(await fileData.arrayBuffer());
-    const contentType = fileData.type || "image/png";
-    return new NextResponse(buf, {
+
+    const input = Buffer.from(await fileData.arrayBuffer());
+    const resized = await sharp(input)
+      .resize(MAX_WIDTH, null, { withoutEnlargement: true })
+      .webp({ quality: WEBP_QUALITY })
+      .toBuffer();
+
+    return new NextResponse(new Uint8Array(resized), {
       headers: {
-        "Content-Type": contentType,
+        "Content-Type": "image/webp",
         "Cache-Control": "public, max-age=86400",
       },
     });

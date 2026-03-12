@@ -37,6 +37,7 @@ export default function AdminMembershipPage() {
   const [bTitle, setBTitle] = useState("");
   const [bLinkUrl, setBLinkUrl] = useState("");
   const [bannerSaving, setBannerSaving] = useState(false);
+  const [bannerDragOver, setBannerDragOver] = useState(false);
 
   const loadPlan = async () => {
     setLoading(true);
@@ -273,7 +274,30 @@ export default function AdminMembershipPage() {
 
                 <div>
                   <div className="text-[12px] font-bold text-white/55">배너 이미지</div>
-                  <label className="mt-2 block cursor-pointer rounded-2xl border border-dashed border-white/15 bg-black/15 p-4 hover:bg-black/20">
+                  <label
+                    className={`mt-2 block cursor-pointer rounded-2xl border border-dashed p-4 transition-colors ${
+                      bannerDragOver
+                        ? "border-panana-pink bg-panana-pink/10"
+                        : "border-white/15 bg-black/15 hover:bg-black/20"
+                    }`}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setBannerDragOver(true);
+                    }}
+                    onDragLeave={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setBannerDragOver(false);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setBannerDragOver(false);
+                      const file = e.dataTransfer?.files?.[0];
+                      if (file?.type.startsWith("image/")) onBannerImageUpload(file);
+                    }}
+                  >
                     <input
                       type="file"
                       className="hidden"
@@ -283,7 +307,9 @@ export default function AdminMembershipPage() {
                         if (file) onBannerImageUpload(file);
                       }}
                     />
-                    <div className="text-[12px] font-extrabold text-white/70">클릭하여 이미지 업로드</div>
+                    <div className="text-[12px] font-extrabold text-white/70">
+                      {bannerDragOver ? "여기에 놓기" : "클릭 또는 드래그하여 이미지 업로드"}
+                    </div>
                     {banner.image_url ? (
                       <div className="mt-3 flex justify-center overflow-auto rounded-xl border border-white/10 bg-white/[0.02] p-2">
                         <div className="relative h-[260px] w-[110px] shrink-0">
