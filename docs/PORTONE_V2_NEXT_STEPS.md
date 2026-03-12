@@ -25,8 +25,9 @@
 1. **충전**으로 KG 이니시스를 쓰려면: 포트원 채널 관리에서 `panana_kg이니시스_충전형` 채널키를 복사해서 `NEXT_PUBLIC_PORTONE_CHANNEL_KEY`에 넣습니다.  
    **충전**으로 카카오페이를 쓰려면: `panana_카카오_충전형` 채널키를 복사해서 `NEXT_PUBLIC_PORTONE_CHANNEL_KEY`에 넣습니다. (둘 중 하나만 설정)
 
-2. **구독**으로 KG 이니시스를 쓰려면: `panana_kg이니시스_구독형` 채널키를 복사해서 `NEXT_PUBLIC_PORTONE_CHANNEL_KEY_SUBSCRIPTION`에 넣습니다.  
-   **구독**으로 카카오페이를 쓰려면: `panana_카카오_구독형` 채널키를 복사해서 `NEXT_PUBLIC_PORTONE_CHANNEL_KEY_SUBSCRIPTION`에 넣습니다. (둘 중 하나만 설정)
+2. **구독**으로 KG 이니시스를 쓰려면: `panana_kg이니시스_구독형` 채널키를 복사해서 `NEXT_PUBLIC_PORTONE_CHANNEL_KEY_SUBSCRIPTION`에 넣고, **카카오 구독형**을 쓰려면 `panana_카카오_구독형` 채널키를 넣습니다. (둘 중 하나만 설정)  
+   **카카오 구독형을 쓸 때는** `NEXT_PUBLIC_PORTONE_SUBSCRIPTION_BILLING_METHOD=EASY_PAY` 를 반드시 설정하세요. (KG 구독형은 기본값 CARD 사용)  
+   **모바일에서도 멤버십 가입을 받으려면 카카오 구독형을 권장합니다.** (KG 이니시스 정기결제는 PC 공인인증 필요로 모바일 제한이 있음)
 
 ```env
 # PortOne v2
@@ -35,15 +36,19 @@ NEXT_PUBLIC_PORTONE_STORE_ID=store-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 # 충전 결제 시 사용할 채널키 1개 (KG 충전형 또는 카카오 충전형 중 선택해서 채널 관리에서 복사)
 NEXT_PUBLIC_PORTONE_CHANNEL_KEY=channel-key-...
 
-# 구독 결제 시 사용할 채널키 1개 (KG 구독형 또는 카카오 구독형 중 선택해서 채널 관리에서 복사)
+# 구독 결제 시 사용할 채널키 1개 (KG 구독형 또는 카카오 구독형 중 선택)
 NEXT_PUBLIC_PORTONE_CHANNEL_KEY_SUBSCRIPTION=channel-key-...
+
+# 구독 채널이 카카오 구독형일 때만 설정 (KG 구독형이면 생략 가능)
+# NEXT_PUBLIC_PORTONE_SUBSCRIPTION_BILLING_METHOD=EASY_PAY
 
 PORTONE_API_SECRET=xxxxxxxx  # 서버 전용. 결제 검증용
 ```
 
 - `NEXT_PUBLIC_PORTONE_STORE_ID`: 연동 정보 > 식별코드 · API Keys의 **식별코드**
 - `NEXT_PUBLIC_PORTONE_CHANNEL_KEY`: **충전** 결제창에 쓸 채널키 **한 개**. KG로 충전받을 거면 KG 이니시스 충전형 채널키, 카카오로 받을 거면 카카오 충전형 채널키를 넣으면 됨.
-- `NEXT_PUBLIC_PORTONE_CHANNEL_KEY_SUBSCRIPTION`: **구독** 결제에 쓸 채널키 **한 개**. KG로 구독받을 거면 KG 구독형 채널키, 카카오로 받을 거면 카카오 구독형 채널키를 넣으면 됨.
+- `NEXT_PUBLIC_PORTONE_CHANNEL_KEY_SUBSCRIPTION`: **구독** 결제에 쓸 채널키 **한 개**. KG 구독형 또는 카카오 구독형 중 선택. (모바일 지원 필요 시 카카오 구독형 권장)
+- `NEXT_PUBLIC_PORTONE_SUBSCRIPTION_BILLING_METHOD`: **카카오 구독형** 사용 시 `EASY_PAY` 로 설정. KG 구독형이면 설정하지 않으면 됨(기본 CARD).
 - `PORTONE_API_SECRET`: 연동 정보 > API Keys에서 **API Secret** (서버에서만 사용)
 
 (4개 채널키를 각각 따로 변수로 두고 싶다면 `NEXT_PUBLIC_PORTONE_CHANNEL_KEY_KG_CHARGE`, `_KG_SUBSCRIPTION`, `_KAKAO_CHARGE`, `_KAKAO_SUBSCRIPTION` 같은 이름으로 넣어 두고, 위 두 변수에는 “지금 쓰는” 채널키 값만 복사해 넣어도 됩니다.)

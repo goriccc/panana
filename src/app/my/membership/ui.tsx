@@ -44,6 +44,9 @@ export function MembershipClient({
       setSubError("구독 결제 설정이 완료되지 않았어요. (Store ID / 구독 채널키)");
       return;
     }
+    // 카카오 구독형: EASY_PAY / KG 이니시스 구독형: CARD
+    const billingKeyMethod =
+      process.env.NEXT_PUBLIC_PORTONE_SUBSCRIPTION_BILLING_METHOD === "EASY_PAY" ? "EASY_PAY" : "CARD";
     const name = (buyerName || "").trim();
     const email = (buyerEmail || "").trim();
     const phone = (buyerPhone || "").trim().replace(/-/g, "");
@@ -70,7 +73,7 @@ export function MembershipClient({
       const issueRes = await PortOne.requestIssueBillingKey({
         storeId,
         channelKey,
-        billingKeyMethod: "CARD",
+        billingKeyMethod,
         issueId,
         displayAmount: plan.priceKrw,
         currency: "KRW",
