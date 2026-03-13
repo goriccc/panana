@@ -3,6 +3,12 @@ import { createClient } from "@supabase/supabase-js";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth/authOptions";
 import { resolveUserId } from "@/lib/challenge/resolveUserId";
+import {
+  PANANA_PASS_UPFRONT_BASE_P,
+  PANANA_PASS_UPFRONT_BONUS_P,
+  PANANA_PASS_UPFRONT_P,
+} from "@/lib/billing/constants";
+import { nowKstIso } from "@/lib/kst";
 
 export const runtime = "nodejs";
 
@@ -162,23 +168,55 @@ export async function POST(req: Request) {
 
     const { data: profile } = await sb
       .from("panana_billing_profiles")
-      .select("user_id")
+      .select("user_id, amount_base, amount_bonus, panana_balance")
       .eq("user_id", userId)
       .maybeSingle();
 
+    const addBase = PANANA_PASS_UPFRONT_BASE_P;
+    const addBonus = PANANA_PASS_UPFRONT_BONUS_P;
+    const addTotal = PANANA_PASS_UPFRONT_P;
+
     if (profile) {
+      const curBase = Number((profile as { amount_base?: number })?.amount_base ?? 0);
+      const curBonus = Number((profile as { amount_bonus?: number })?.amount_bonus ?? 0);
+      const curBalance = Number((profile as { panana_balance?: number })?.panana_balance ?? 0);
       await sb
         .from("panana_billing_profiles")
-        .update({ is_subscriber: true, subscription_type: "panana_pass" })
+        .update({
+          is_subscriber: true,
+          subscription_type: "panana_pass",
+          has_ever_paid: true,
+          amount_base: curBase + addBase,
+          amount_bonus: curBonus + addBonus,
+          panana_balance: curBalance + addTotal,
+          updated_at: nowKstIso(),
+        })
         .eq("user_id", userId);
     } else {
       await sb.from("panana_billing_profiles").insert({
         user_id: userId,
-        panana_balance: 0,
+        amount_base: addBase,
+        amount_bonus: addBonus,
+        panana_balance: addTotal,
         is_subscriber: true,
         subscription_type: "panana_pass",
+        has_ever_paid: true,
+        created_at: nowKstIso(),
+        updated_at: nowKstIso(),
       });
     }
+
+    const { error: txErr } = await sb.from("panana_billing_transactions").insert({
+      user_id: userId,
+      amount: addTotal,
+      type: "bonus",
+      amount_base: addBase,
+      amount_bonus: addBonus,
+      total_amount: addTotal,
+      description: "파나나 패스 가입 즉시 지급",
+      created_at: nowKstIso(),
+    });
+    if (txErr) throw txErr;
 
     return NextResponse.json({ ok: true });
   } catch (e: unknown) {

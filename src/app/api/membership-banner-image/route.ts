@@ -3,6 +3,7 @@ import { getSupabaseClient } from "@/lib/supabase/client";
 import sharp from "sharp";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 const BUCKET = "panana-membership";
 /** 배너 표시용 최대 너비 (2x 기준 420*2≈840, 여유 있게 960) */

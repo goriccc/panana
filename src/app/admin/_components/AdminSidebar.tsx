@@ -12,7 +12,6 @@ const NAV_ITEMS = [
   { href: "/admin/membership", label: "멤버십" },
   { href: "/admin/llm", label: "LLM 설정" },
   { href: "/admin/voice", label: "음성 설정" },
-  { href: "/admin/site", label: "사이트(푸터/SEO)" },
   { href: "/admin/scene-image", label: "장면 이미지" },
   { href: "/admin/menu", label: "메뉴관리" },
   { href: "/admin/recommended-search-tags", label: "추천 검색어" },

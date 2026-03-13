@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth/authOptions";
 import { resolveUserId } from "@/lib/challenge/resolveUserId";
+import { nowKstIso } from "@/lib/kst";
 
 export const runtime = "nodejs";
 
@@ -127,6 +128,8 @@ export async function POST(req: Request) {
           amount_base: curBase + panaAmount,
           amount_bonus: curBonus + bonusAmount,
           panana_balance: curBalance + totalP,
+          has_ever_paid: true,
+          updated_at: nowKstIso(),
         })
         .eq("user_id", userId);
       if (updateErr) throw updateErr;
@@ -136,6 +139,9 @@ export async function POST(req: Request) {
         amount_base: panaAmount,
         amount_bonus: bonusAmount,
         panana_balance: totalP,
+        has_ever_paid: true,
+        created_at: nowKstIso(),
+        updated_at: nowKstIso(),
       });
       if (insertErr) throw insertErr;
     }
@@ -148,6 +154,7 @@ export async function POST(req: Request) {
       amount_bonus: bonusAmount,
       total_amount: totalP,
       description: `충전: ${(product as { title?: string })?.title ?? sku}`,
+      created_at: nowKstIso(),
     });
     if (txErr) throw txErr;
 

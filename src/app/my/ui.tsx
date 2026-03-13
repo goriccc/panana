@@ -130,6 +130,8 @@ export function MyPageClient({
   const [pananaBalance, setPananaBalance] = useState<number | null>(
     initialBalanceProp !== undefined ? initialBalanceProp : null
   );
+  const [isTrialOnly, setIsTrialOnly] = useState<boolean>(false);
+  const [trialDailyClaimed, setTrialDailyClaimed] = useState<boolean>(false);
   // 서버에서 넘긴 세션 닉네임/핸들을 우선 사용해 더미가 깜빡이지 않도록 함
   const [nickname, setNickname] = useState<string>(() =>
     (initialNickname && initialNickname.trim()) || String(localIdt.nickname || "").trim()
@@ -214,6 +216,8 @@ export function MyPageClient({
       if (balanceData?.ok) {
         const v = typeof balanceData.pananaBalance === "number" ? balanceData.pananaBalance : 0;
         setPananaBalance(Math.max(0, v));
+        setIsTrialOnly(Boolean(balanceData.isTrialOnly));
+        setTrialDailyClaimed(Boolean(balanceData.trialDailyClaimed));
       }
       if (profile?.nickname) setNickname(String(profile.nickname).trim());
       else if (session) {
@@ -364,6 +368,18 @@ export function MyPageClient({
               </Link>
             </div>
 
+            {isTrialOnly && pananaBalance !== null && pananaBalance <= 100 ? (
+              <Link
+                href="/my/charge"
+                className="mt-3 block rounded-2xl border border-panana-pink/50 bg-panana-pink/10 px-4 py-3"
+                prefetch={true}
+                onMouseEnter={() => router.prefetch("/my/charge")}
+              >
+                <div className="text-[12px] font-semibold text-panana-pink">
+                  더 많은 대화를 위해 충전하거나 파나나 패스를 이용해 보세요.
+                </div>
+              </Link>
+            ) : null}
             <div className="mt-6">
               <Link
                 href="/my/charge"
