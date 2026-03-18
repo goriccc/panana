@@ -27,11 +27,16 @@ async function getPortOneToken(): Promise<string> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ apiSecret }),
   });
-  if (!res.ok) {
-    const t = await res.text();
-    throw new Error(`PortOne 로그인 실패: ${res.status} ${t}`);
+  const tokenText = await res.text();
+  if (!res.ok) throw new Error(`PortOne 로그인 실패: ${res.status} ${tokenText}`);
+  let data: { accessToken?: string } = {};
+  if (tokenText.trim()) {
+    try {
+      data = JSON.parse(tokenText) as { accessToken?: string };
+    } catch {
+      throw new Error("PortOne 로그인 응답 형식 오류");
+    }
   }
-  const data = (await res.json()) as { accessToken?: string };
   if (!data?.accessToken) throw new Error("PortOne accessToken 없음");
   return data.accessToken;
 }
@@ -41,16 +46,19 @@ async function getPaymentById(paymentId: string): Promise<{ status: string; tota
   const res = await fetch(`${PORTONE_API_BASE}/payments/${encodeURIComponent(paymentId)}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
+  const payText = await res.text();
   if (!res.ok) {
     if (res.status === 404) return null;
-    const t = await res.text();
-    throw new Error(`결제 조회 실패: ${res.status} ${t}`);
+    throw new Error(`결제 조회 실패: ${res.status} ${payText}`);
   }
-  const data = (await res.json()) as {
-    status?: string;
-    totalAmount?: number;
-    amount?: { total?: number };
-  };
+  let data: { status?: string; totalAmount?: number; amount?: { total?: number } } = {};
+  if (payText.trim()) {
+    try {
+      data = JSON.parse(payText) as { status?: string; totalAmount?: number; amount?: { total?: number } };
+    } catch {
+      return null;
+    }
+  }
   const total =
     typeof data?.totalAmount === "number"
       ? data.totalAmount
@@ -69,7 +77,7 @@ async function payWithBillingKey(
   params: { billingKey: string; orderName: string; totalAmount: number }
 ): Promise<{ ok: boolean; error?: string }> {
   const token = await getPortOneToken();
-  const res = await fetch(`${PORTONE_API_BASE}/payments/${encodeURIComponent(paymentId)}/billing-key/pay`, {
+  const res = await fetch(`${PORTONE_API_BASE}/payments/${encodeURIComponent(paymentId)}/billing-key`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -78,11 +86,19 @@ async function payWithBillingKey(
     body: JSON.stringify({
       billingKey: params.billingKey,
       orderName: params.orderName,
-      totalAmount: params.totalAmount,
+      amount: { total: params.totalAmount },
       currency: "KRW",
     }),
   });
-  const data = (await res.json()) as { status?: string; code?: string; message?: string };
+  const text = await res.text();
+  let data: { status?: string; code?: string; message?: string } = {};
+  if (text.trim()) {
+    try {
+      data = JSON.parse(text) as { status?: string; code?: string; message?: string };
+    } catch {
+      return { ok: false, error: "결제 서버 응답을 확인할 수 없어요." };
+    }
+  }
   if (!res.ok) {
     return { ok: false, error: (data?.message ?? data?.code) || `결제 요청 실패: ${res.status}` };
   }

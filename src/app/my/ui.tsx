@@ -137,7 +137,7 @@ export function MyPageClient({
     (initialNickname && initialNickname.trim()) || String(localIdt.nickname || "").trim()
   );
   const [pananaHandle, setPananaHandle] = useState<string>(() =>
-    (initialHandle && initialHandle.trim().toLowerCase()) || String(localIdt.handle || "").trim().toLowerCase()
+    (initialHandle && initialHandle.trim().toLowerCase()) || ""
   );
   const { data: session, status } = useSession();
   const hadAuthenticatedRef = useRef(false);
@@ -325,7 +325,7 @@ export function MyPageClient({
                     <span className="inline-block h-[14px] w-[110px] animate-pulse rounded bg-white/10 align-middle" aria-hidden="true" />
                   )}
                 </div>
-                <div className="mt-1 text-[12px] font-semibold text-white/45">
+                <div className="mt-1 text-[12px] font-semibold text-white/45" suppressHydrationWarning>
                   {pananaHandle ? (
                     pananaHandle
                   ) : (
@@ -424,6 +424,10 @@ export function MyPageClient({
           >
             멤버십 가입하고 무제한 이용하기
           </Link>
+        ) : loggedIn && isMember ? (
+          <div className="mt-4 block w-full rounded-xl border border-white/20 bg-white/10 px-4 py-3 text-center text-[13px] font-semibold text-white/80">
+            파나나 맴버십 구독중
+          </div>
         ) : null}
 
         <div className="mt-8 space-y-6 text-[14px] font-semibold text-white/60">

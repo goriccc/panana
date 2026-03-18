@@ -3,6 +3,7 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
 import KakaoProvider from "next-auth/providers/kakao";
 import NaverProvider from "next-auth/providers/naver";
+import { createClient } from "@supabase/supabase-js";
 
 const DEV_MOCK_PANANA_ID = process.env.DEV_MOCK_PANANA_ID || "aaaaaaaa-bbbb-4ccc-8000-000000000001";
 
@@ -240,6 +241,27 @@ export const authOptions: NextAuthOptions = {
       // 결제용 구매자 이름: OAuth/개발로그인에서 채운 token.name 세션에 반영
       if (session?.user && (token as any)?.name) {
         session.user.name = String((token as any).name);
+      }
+      // 구독 여부: pananaId가 있으면 DB에서 is_subscriber 조회해 마이페이지 버튼 문구에 사용
+      const pananaId = (token as any)?.pananaId ? String((token as any).pananaId) : undefined;
+      if (pananaId) {
+        try {
+          const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+          const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+          if (url && key) {
+            const sb = createClient(url, key, { auth: { persistSession: false } });
+            const { data: profile } = await sb
+              .from("panana_billing_profiles")
+              .select("is_subscriber")
+              .eq("user_id", pananaId)
+              .maybeSingle();
+            (session as any).membershipActive = Boolean((profile as { is_subscriber?: boolean })?.is_subscriber);
+          }
+        } catch {
+          (session as any).membershipActive = false;
+        }
+      } else {
+        (session as any).membershipActive = false;
       }
       return session;
     },

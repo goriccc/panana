@@ -23,6 +23,7 @@ export function MembershipClient({
   const [idx, setIdx] = useState(0);
   const [subscribing, setSubscribing] = useState(false);
   const [subError, setSubError] = useState<string | null>(null);
+  const [subSuccess, setSubSuccess] = useState(false);
 
   useEffect(() => {
     if (items.length <= 1) return;
@@ -119,13 +120,21 @@ export function MembershipClient({
       }
       if (confirmRes?.ok) {
         setSubError(null);
-        window.location.reload();
+        setSubSuccess(true);
+        setTimeout(() => {
+          window.location.href = "/my";
+        }, 1800);
       } else {
-        setSubError(confirmRes?.error ?? "멤버십 가입 확인에 실패했어요.");
+        const errMsg = confirmRes?.error ?? "멤버십 가입 확인에 실패했어요.";
+        const isJsonError = String(errMsg).includes("Unexpected end of JSON input");
+        setSubError(isJsonError ? "멤버십 가입 확인에 실패했어요." : errMsg);
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "결제 창을 열 수 없어요.";
-      const isUserAbort = String(msg).includes("취소") || String(msg).includes("중단");
+      const isUserAbort =
+        String(msg).includes("취소") ||
+        String(msg).includes("중단") ||
+        String(msg).includes("Unexpected end of JSON input");
       if (!isUserAbort) setSubError(msg);
     } finally {
       setSubscribing(false);
@@ -138,7 +147,18 @@ export function MembershipClient({
 
       <main className="mx-auto w-full max-w-[420px] px-0 pb-24 pt-2">
         {/* 배너만 깔끔하게 */}
-        <div className="px-5 pt-3">
+        <div className="px-5 pt-3 relative">
+          {subSuccess ? (
+            <div className="fixed inset-0 z-20 flex items-center justify-center px-5" aria-hidden="false">
+              <div
+                className="rounded-xl border border-emerald-500/50 bg-emerald-600/95 px-6 py-4 text-center text-[15px] font-semibold text-white shadow-lg animate-in fade-in duration-300"
+                role="alert"
+                aria-live="polite"
+              >
+                파나나 패스에 가입되었어요.
+              </div>
+            </div>
+          ) : null}
           {current ? (
             <div className="overflow-hidden border border-white/10 bg-white/[0.02] shadow-[0_18px_45px_rgba(0,0,0,0.25)]">
               <button
@@ -157,9 +177,10 @@ export function MembershipClient({
                 />
               </button>
             </div>
-          ) : (
+          ) : null}
+          {!current && !subSuccess ? (
             <div className="h-[220px] w-full border border-white/10 bg-white/[0.02]" />
-          )}
+          ) : null}
 
           {items.length > 1 ? (
             <div className="mt-3 flex items-center justify-center gap-2">
