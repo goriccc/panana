@@ -192,6 +192,7 @@ export async function POST(req: Request) {
     const addBonus = PANANA_PASS_UPFRONT_BONUS_P;
     const addTotal = PANANA_PASS_UPFRONT_P;
 
+    const nowIso = nowKstIso();
     if (profile) {
       const curBase = Number((profile as { amount_base?: number })?.amount_base ?? 0);
       const curBonus = Number((profile as { amount_bonus?: number })?.amount_bonus ?? 0);
@@ -202,10 +203,12 @@ export async function POST(req: Request) {
           is_subscriber: true,
           subscription_type: "panana_pass",
           has_ever_paid: true,
+          subscription_started_at: nowIso,
+          subscription_billing_key: billingKey || null,
           amount_base: curBase + addBase,
           amount_bonus: curBonus + addBonus,
           panana_balance: curBalance + addTotal,
-          updated_at: nowKstIso(),
+          updated_at: nowIso,
         })
         .eq("user_id", userId);
     } else {
@@ -217,8 +220,10 @@ export async function POST(req: Request) {
         is_subscriber: true,
         subscription_type: "panana_pass",
         has_ever_paid: true,
-        created_at: nowKstIso(),
-        updated_at: nowKstIso(),
+        subscription_started_at: nowIso,
+        subscription_billing_key: billingKey || null,
+        created_at: nowIso,
+        updated_at: nowIso,
       });
     }
 

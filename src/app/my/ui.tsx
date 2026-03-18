@@ -424,10 +424,6 @@ export function MyPageClient({
           >
             멤버십 가입하고 무제한 이용하기
           </Link>
-        ) : loggedIn && isMember ? (
-          <div className="mt-4 block w-full rounded-xl border border-white/20 bg-white/10 px-4 py-3 text-center text-[13px] font-semibold text-white/80">
-            파나나 맴버십 구독중
-          </div>
         ) : null}
 
         <div className="mt-8 space-y-6 text-[14px] font-semibold text-white/60">
@@ -458,6 +454,16 @@ export function MyPageClient({
               }}
             >
               계정설정
+            </Link>
+          ) : null}
+          {loggedIn && isMember ? (
+            <Link
+              href="/my/subscription"
+              className="block w-full text-left"
+              prefetch={true}
+              onMouseEnter={() => router.prefetch("/my/subscription")}
+            >
+              구독관리
             </Link>
           ) : null}
           <Link 
