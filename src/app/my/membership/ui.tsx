@@ -86,8 +86,9 @@ export function MembershipClient({
         },
       });
       if (issueRes?.code !== undefined) {
-        const msg = issueRes?.message ?? "빌링키 발급에 실패했어요.";
-        if (!String(msg).includes("취소")) setSubError(msg);
+        const msg = String(issueRes?.message ?? "빌링키 발급에 실패했어요.");
+        const isUserAbort = msg.includes("취소") || msg.includes("중단");
+        if (!isUserAbort) setSubError(msg);
         return;
       }
       const billingKey = issueRes?.billingKey;
@@ -114,7 +115,8 @@ export function MembershipClient({
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "결제 창을 열 수 없어요.";
-      setSubError(msg);
+      const isUserAbort = String(msg).includes("취소") || String(msg).includes("중단");
+      if (!isUserAbort) setSubError(msg);
     } finally {
       setSubscribing(false);
     }
