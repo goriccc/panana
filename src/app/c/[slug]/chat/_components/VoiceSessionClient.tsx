@@ -130,6 +130,10 @@ export function VoiceSessionClient({
   const hangupAudioRef = useRef<HTMLAudioElement | null>(null);
   const hangupPreloadAudioRef = useRef<HTMLAudioElement | null>(null);
   const callDurationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** 통화 종료 시 서버에 보고할 초 (타이머와 동기화, 중복 보고 방지) */
+  const callDurationSecRef = useRef(0);
+  /** 통화 중 주기 보고 시 이미 보고한 구간 (잔액 0이면 강제 끊기용) */
+  const lastReportedSecRef = useRef(0);
   const wsRef = useRef<WebSocket | null>(null);
   const recorderRef = useRef<AudioRecorder | null>(null);
   const streamerRef = useRef<AudioStreamer | null>(null);
@@ -257,7 +261,9 @@ export function VoiceSessionClient({
     };
   }, [phase, ringtoneUrl]);
 
-  // 통화 시간 타이머 (started && connected)
+  // 통화 시간 타이머 + 통화 중 5초마다 P 차감 보고 (잔액 0이면 강제 끊기)
+  const stopVoiceCoreRef = useRef<(opts?: { closeUi?: boolean; setIdle?: boolean }) => void>(() => {});
+
   useEffect(() => {
     if (!started) {
       if (callDurationTimerRef.current) {
@@ -267,15 +273,46 @@ export function VoiceSessionClient({
       setCallDurationSec(0);
       return;
     }
+    lastReportedSecRef.current = 0;
     setPhase("connected");
     callDurationTimerRef.current = setInterval(() => {
-      setCallDurationSec((s) => s + 1);
+      setCallDurationSec((s) => {
+        const next = s + 1;
+        callDurationSecRef.current = next;
+        return next;
+      });
     }, 1000);
+
+    const REPORT_INTERVAL_MS = 5000;
+    const reportIntervalId = setInterval(() => {
+      const total = callDurationSecRef.current;
+      const reported = lastReportedSecRef.current;
+      const delta = Math.max(0, total - reported);
+      if (delta <= 0) return;
+      fetch("/api/me/voice-usage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ seconds: delta }),
+      })
+        .then((res) => {
+          if (res.ok) {
+            lastReportedSecRef.current = total;
+            return;
+          }
+          if (res.status === 402) {
+            stopVoiceCoreRef.current({ closeUi: true, setIdle: true });
+            setError("파나나가 부족해 통화가 종료되었어요. 충전 후 다시 이용해 주세요.");
+          }
+        })
+        .catch(() => {});
+    }, REPORT_INTERVAL_MS);
+
     return () => {
       if (callDurationTimerRef.current) {
         clearInterval(callDurationTimerRef.current);
         callDurationTimerRef.current = null;
       }
+      clearInterval(reportIntervalId);
     };
   }, [started]);
   /** iOS 17 등: 첫 오디오 수신 시 suspend→resume 워크어라운드 1회만 수행 */
@@ -1123,6 +1160,16 @@ export function VoiceSessionClient({
   const stopVoiceCore = useCallback((opts?: { closeUi?: boolean; setIdle?: boolean }) => {
     const closeUi = opts?.closeUi !== false;
     const setIdle = opts?.setIdle !== false;
+    const secToReport = Math.max(0, callDurationSecRef.current - lastReportedSecRef.current);
+    if (secToReport > 0) {
+      lastReportedSecRef.current = callDurationSecRef.current;
+      fetch("/api/me/voice-usage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ seconds: secToReport }),
+      }).catch(() => {});
+    }
+    callDurationSecRef.current = 0;
     userStoppedRef.current = true;
     reconnectAttemptRef.current = 0;
     voiceCallTranscriptRef.current = [];
@@ -1144,6 +1191,10 @@ export function VoiceSessionClient({
     initSentRef.current = false;
     if (closeUi) onClose();
   }, [clearReconnectTimer, flushAssistant, flushUser, onClose]);
+
+  useEffect(() => {
+    stopVoiceCoreRef.current = stopVoiceCore;
+  }, [stopVoiceCore]);
 
   const stopVoice = useCallback(() => {
     stopVoiceCore();

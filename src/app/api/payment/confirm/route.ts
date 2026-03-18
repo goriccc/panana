@@ -153,9 +153,10 @@ export async function POST(req: Request) {
       amount_base: panaAmount,
       amount_bonus: bonusAmount,
       total_amount: totalP,
+      amount_krw: priceKrw,
       description: `충전: ${(product as { title?: string })?.title ?? sku}`,
       created_at: nowKstIso(),
-    });
+    } as any);
     if (txErr) throw txErr;
 
     return NextResponse.json({ ok: true });

@@ -10,6 +10,27 @@ import {
   takeLastNTurns,
   RECENT_TURNS_FOR_LLM,
 } from "@/lib/pananaApp/hybridMemory";
+import { USER_INPUT_MAX_CHARS, ARCHIVE_TURNS_ON_SUMMARY } from "@/lib/billing/constants";
+import {
+  getChatProfile,
+  reserveOrReject,
+  getRequiredPForTurn,
+  deductAfterChat,
+} from "@/lib/billing/pointService";
+import type { DeductionResult } from "@/lib/billing/types";
+import {
+  getChatModelIdFromApi,
+  getMaxTokensForModel,
+  logMarginGuard,
+} from "@/lib/billing/chatBilling";
+import {
+  shouldTriggerSummary,
+  takeOldestTurns,
+  dropOldestTurns,
+  summarizeContextWithFlash,
+  estimateTokens,
+} from "@/lib/billing/contextSummaryEngine";
+import type { MemoryMessage } from "@/lib/pananaApp/hybridMemory";
 
 export const runtime = "nodejs";
 
@@ -305,6 +326,13 @@ function isAnthropicContentPolicyError(err: unknown): boolean {
   return /content\s*filtering|output\s*blocked|content\s*policy/i.test(msg);
 }
 
+/** Anthropic 400 등으로 재시도 시 Gemini로 넘겨도 되는 에러인지 (콘텐츠 정책·메시지 누락 등) */
+function isAnthropicFallbackableError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err ?? "");
+  if (isAnthropicContentPolicyError(err)) return true;
+  return /at least one message is required|invalid_request_error|messages.*required/i.test(msg);
+}
+
 /** 캐릭터 이탈/거절 응답인지 감지 (시스템 문구·AI 자칭·역할 거부·메타 설명·영어 장문 거절 등). 유저에게 노출되면 안 됨. */
 function isRefusalLike(text: string): boolean {
   const s = String(text || "").trim();
@@ -497,9 +525,18 @@ async function callAnthropic(args: {
   if (!res.ok) {
     throw new Error(`Anthropic error: ${res.status} ${JSON.stringify(data)}`);
   }
-  // anthropic: content is array
+  // anthropic: content is array; usage has input_tokens, output_tokens
   const text = Array.isArray(data?.content) ? data.content.map((c: any) => c?.text).filter(Boolean).join("\n") : "";
-  return { text: text || "" };
+  const usage = data?.usage;
+  return {
+    text: text || "",
+    raw: {
+      usageMetadata: {
+        input_tokens: usage?.input_tokens ?? 0,
+        output_tokens: usage?.output_tokens ?? 0,
+      },
+    },
+  };
 }
 
 async function callGemini(args: {
@@ -835,6 +872,13 @@ function composeSystemPrompt(args: {
 export async function POST(req: Request) {
   try {
     const body = BodySchema.parse(await req.json());
+    const lastUserMsg = body.messages.filter((m) => m.role === "user").pop();
+    if (lastUserMsg && lastUserMsg.content.length > USER_INPUT_MAX_CHARS) {
+      return NextResponse.json(
+        { ok: false, error: `메시지는 ${USER_INPUT_MAX_CHARS}자 이내로 입력해 주세요.` },
+        { status: 400 }
+      );
+    }
     const settings = await loadSettings(body.provider).catch(() => null);
 
     const apiKey = getEnvKey(body.provider);
@@ -1033,6 +1077,77 @@ export async function POST(req: Request) {
       }));
       nonSystemInterpolated = takeLastNTurns(asMemory, RECENT_TURNS_FOR_LLM);
     }
+
+    // 모델 해석(auto → 실제) 및 토큰 예산: 요약 트리거·포인트 검사·max_tokens에 사용
+    let outModel = model;
+    if (body.provider === "gemini") {
+      model =
+        body.model && body.model !== "auto"
+          ? toGeminiApiModel(body.model)
+          : selectGeminiModel(
+              nonSystemInterpolated.map((m) => ({ role: m.role, content: m.content })),
+              system || ""
+            );
+    }
+    if (body.provider === "anthropic" && model === "auto") {
+      model = selectAnthropicModel(
+        nonSystemInterpolated.map((m) => ({ role: m.role, content: m.content })),
+        system || ""
+      );
+    }
+    outModel = model;
+    const chatModelId = getChatModelIdFromApi(body.provider, model);
+    const maxTokensCap = getMaxTokensForModel(chatModelId);
+    const maxTokensClamped = Math.min(maxTokens, maxTokensCap);
+
+    if (
+      chatModelId &&
+      pananaIdFromRuntime &&
+      body.characterSlug &&
+      isUuid(pananaIdFromRuntime)
+    ) {
+      const systemTokens = estimateTokens(system || "");
+      const messageTokens = nonSystemInterpolated.reduce((s, m) => s + estimateTokens(m.content), 0);
+      const estimatedContextTokens = systemTokens + messageTokens;
+      if (
+        shouldTriggerSummary(userTurns, chatModelId, estimatedContextTokens)
+      ) {
+        const geminiKeyForSummary = getEnvKey("gemini");
+        const sbAdminSummary = getSupabaseAdminIfPossible();
+        if (geminiKeyForSummary && sbAdminSummary) {
+          const asMem: MemoryMessage[] = nonSystemInterpolated.map((m) => ({
+            role: m.role as "user" | "assistant",
+            content: m.content,
+          }));
+          const oldTurns = takeOldestTurns(asMem, ARCHIVE_TURNS_ON_SUMMARY);
+          if (oldTurns.length >= 2) {
+            try {
+              const summaryText = await summarizeContextWithFlash(geminiKeyForSummary, oldTurns);
+              if (summaryText.trim()) {
+                const { getLastSummaryTurnCount } = await import("@/lib/pananaApp/hybridMemory");
+                const lastCount = await getLastSummaryTurnCount(sbAdminSummary, pananaIdFromRuntime, body.characterSlug);
+                const nextTurnCount = Math.max(lastCount, userTurns);
+                await sbAdminSummary.from("panana_memory_summaries").insert({
+                  user_id: pananaIdFromRuntime,
+                  character_slug: body.characterSlug.trim().toLowerCase(),
+                  summary_text: summaryText.trim(),
+                  user_turn_count: nextTurnCount,
+                } as any);
+                const dropped = dropOldestTurns(asMem, ARCHIVE_TURNS_ON_SUMMARY);
+                const hasUserMessage = dropped.some((m) => m.role === "user");
+                if (dropped.length >= 1 && hasUserMessage) {
+                  nonSystemInterpolated = dropped;
+                  system = system ? `${system}\n\n# [Current Context]\n${summaryText.trim()}` : `# [Current Context]\n${summaryText.trim()}`;
+                }
+              }
+            } catch {
+              // 요약 실패 시 무시하고 기존 컨텍스트로 진행
+            }
+          }
+        }
+      }
+    }
+
     // 유저 지문(( ) 괄호 입력): 마지막 user 메시지 앞에 주입
     const userScript = body.challengeId ? "" : String((body as any).userScript || "").trim();
     if (userScript) {
@@ -1122,29 +1237,29 @@ export async function POST(req: Request) {
 
     let out: { text: string; raw?: any; meta?: any };
     let outProvider: "anthropic" | "gemini" | "deepseek" = body.provider;
-    let outModel = model;
 
-    // Gemini: model이 "auto"이거나 없으면 대화 복잡도에 따라 Flash vs Pro 자동 선택. 그 외에는 지정 모델 사용.
-    if (body.provider === "gemini") {
-      model =
-        body.model && body.model !== "auto"
-          ? toGeminiApiModel(body.model)
-          : selectGeminiModel(
-              nonSystemInterpolated.map((m) => ({ role: m.role, content: m.content })),
-              system || ""
-            );
+    let requiredPForTurn: number | null = null;
+    if (pananaIdFromRuntime && chatModelId && isUuid(pananaIdFromRuntime)) {
+      const sbAdminBilling = getSupabaseAdminIfPossible();
+      if (sbAdminBilling) {
+        const profile = await getChatProfile(sbAdminBilling, pananaIdFromRuntime);
+        const requiredP = getRequiredPForTurn(chatModelId, profile?.is_subscriber ?? false, allowUnsafe ? "nsfw" : "normal");
+        requiredPForTurn = requiredP;
+        const reserve = reserveOrReject(profile, requiredP);
+        if (!reserve.allowed) {
+          return NextResponse.json({ ok: false, error: reserve.error }, { status: 402 });
+        }
+      }
     }
 
-    // Anthropic: model이 "auto"이면 문장·맥락에 따라 Haiku(짧/단순) vs Sonnet(그 외) 자동 선택
-    if (body.provider === "anthropic" && model === "auto") {
-      model = selectAnthropicModel(
-        nonSystemInterpolated.map((m) => ({ role: m.role, content: m.content })),
-        system || ""
+    const messagesForLlm = nonSystemInterpolated.map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+    const hasAtLeastOneUserMessage = nonSystemInterpolated.some((m) => m.role === "user");
+    if (!hasAtLeastOneUserMessage || messagesForLlm.length === 0) {
+      return NextResponse.json(
+        { ok: false, error: "대화 내용을 불러올 수 없습니다. 잠시 후 다시 시도해 주세요." },
+        { status: 400 }
       );
     }
-
-    // auto 해석 후 실제 사용 모델을 응답용 outModel에 반영 (대화창에 실제 모델명 표기)
-    outModel = model;
 
     if (body.provider === "anthropic") {
       try {
@@ -1152,7 +1267,7 @@ export async function POST(req: Request) {
           apiKey,
           model,
           temperature,
-          max_tokens: maxTokens,
+          max_tokens: maxTokensClamped,
           top_p: topP,
           system,
           ...(systemStableForCache != null &&
@@ -1160,27 +1275,24 @@ export async function POST(req: Request) {
           systemStableForCache.length > 0
             ? { systemCacheable: systemStableForCache, systemVariable: systemVariablePart }
             : {}),
-          messages: nonSystemInterpolated.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+          messages: messagesForLlm,
         });
       } catch (anthropicErr) {
-        if (allowUnsafe && isAnthropicContentPolicyError(anthropicErr)) {
+        if (allowUnsafe && isAnthropicFallbackableError(anthropicErr)) {
           const fallback = await loadFallbackProvider();
           if (fallback === "gemini") {
             const geminiKey = getEnvKey("gemini");
             const geminiSettings = await loadSettings("gemini").catch(() => null);
             if (geminiKey) {
-              const fallbackModel = selectGeminiModel(
-                nonSystemInterpolated.map((m) => ({ role: m.role, content: m.content })),
-                system || ""
-              );
+              const fallbackModel = selectGeminiModel(messagesForLlm, system || "");
               out = await callGemini({
                 apiKey: geminiKey,
                 model: fallbackModel,
                 temperature: geminiSettings?.temperature ?? 0.7,
-                max_tokens: geminiSettings?.max_tokens ?? maxTokens,
+                max_tokens: geminiSettings?.max_tokens ?? maxTokensClamped,
                 top_p: geminiSettings?.top_p ?? topP,
                 system,
-                messages: nonSystemInterpolated.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+                messages: messagesForLlm,
                 allowUnsafe: true,
               });
               outProvider = "gemini";
@@ -1227,7 +1339,7 @@ export async function POST(req: Request) {
         apiKey,
         model,
         temperature,
-        max_tokens: maxTokens,
+        max_tokens: maxTokensClamped,
         top_p: topP,
         system,
         messages: nonSystemInterpolated.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
@@ -1244,7 +1356,7 @@ export async function POST(req: Request) {
         apiKey,
         model,
         temperature,
-        max_tokens: maxTokens,
+        max_tokens: maxTokensClamped,
         top_p: topP,
         messages: [{ role: "system", content: system || "" }, ...nonSystemInterpolated],
       });
@@ -1271,7 +1383,7 @@ export async function POST(req: Request) {
             apiKey: geminiKey,
             model: fallbackModel,
             temperature: geminiSettings?.temperature ?? 0.7,
-            max_tokens: geminiSettings?.max_tokens ?? maxTokens,
+            max_tokens: geminiSettings?.max_tokens ?? maxTokensClamped,
             top_p: geminiSettings?.top_p ?? topP,
             system: system || "",
             messages: nonSystemInterpolated.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
@@ -1355,6 +1467,40 @@ export async function POST(req: Request) {
       }
     }
 
+    let truncatedContinuing = false;
+    let inputTokens = 0;
+    let outputTokens = 0;
+    const usageMeta = out?.raw?.usageMetadata || out?.meta;
+    if (usageMeta) {
+      inputTokens = Number(usageMeta.promptTokenCount ?? usageMeta.input_tokens ?? 0);
+      outputTokens = Number(usageMeta.candidatesTokenCount ?? usageMeta.output_tokens ?? usageMeta.usedMaxOutputTokens ?? 0);
+      if (outputTokens >= maxTokensClamped) truncatedContinuing = true;
+    }
+
+    if (requiredPForTurn != null && chatModelId && pananaIdFromRuntime && isUuid(pananaIdFromRuntime)) {
+      const sbAdminDeduct = getSupabaseAdminIfPossible();
+      if (sbAdminDeduct) {
+        try {
+          const deduction: DeductionResult = {
+            pDeducted: requiredPForTurn,
+            modelUsed: chatModelId,
+            inputTokens,
+            outputTokens,
+            mode: allowUnsafe ? "nsfw" : "normal",
+          };
+          await deductAfterChat(sbAdminDeduct, pananaIdFromRuntime, deduction);
+          logMarginGuard(chatModelId, requiredPForTurn, inputTokens, outputTokens, {
+            userId: pananaIdFromRuntime,
+            characterSlug: body.characterSlug ?? undefined,
+          });
+        } catch (deductErr) {
+          if (typeof process !== "undefined" && process.env?.NODE_ENV !== "test") {
+            console.error("[chat-deduct]", deductErr);
+          }
+        }
+      }
+    }
+
     if (!text) {
       if (body.provider === "gemini") {
         // 1회 자동 재시도: 시스템/대화 축약 + 텍스트 출력 강제 규칙 추가. 도전 모드는 턴 수 많을 때 빈 응답 많아서 재시도 시 더 짧게
@@ -1371,7 +1517,7 @@ export async function POST(req: Request) {
           apiKey,
           model,
           temperature,
-          max_tokens: Math.min(8192, Math.max(2048, maxTokens * 2)),
+          max_tokens: Math.min(8192, Math.max(2048, maxTokensClamped * 2)),
           top_p: topP,
           system: retrySystem,
           messages: retryMessages,
@@ -1399,6 +1545,7 @@ export async function POST(req: Request) {
       provider: outProvider,
       model: modelForResponse(outProvider, outModel),
       text,
+      ...(truncatedContinuing ? { truncatedContinuing: true } : {}),
       ...(body.challengeId ? { challengeSuccess } : {}),
       runtime: {
         ...(body.runtime || {}),

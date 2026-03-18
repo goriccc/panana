@@ -23,18 +23,19 @@ export async function tryClaimDailyBonusIfEligible(
   if (profileErr || !profile) return { claimed: false };
   if (!(profile as { is_subscriber?: boolean }).is_subscriber) return { claimed: false };
 
-  const { data: existing } = await sb
-    .from("panana_subscription_daily_grants")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("grant_date", today)
-    .maybeSingle();
+  const addP = PANANA_PASS_DAILY_BONUS_P;
 
-  if (existing) return { claimed: false };
+  // 먼저 grant 삽입 (unique(user_id, grant_date)로 동시 요청·재시도 시 중복 지급 방지)
+  const { error: grantErr } = await sb.from("panana_subscription_daily_grants").insert({
+    user_id: userId,
+    grant_date: today,
+    amount_p: addP,
+    created_at: nowKstIso(),
+  });
+  if (grantErr) return { claimed: false };
 
   const curBonus = Number((profile as { amount_bonus?: number })?.amount_bonus ?? 0);
   const curBalance = Number((profile as { panana_balance?: number })?.panana_balance ?? 0);
-  const addP = PANANA_PASS_DAILY_BONUS_P;
 
   const { error: updateErr } = await sb
     .from("panana_billing_profiles")
@@ -58,14 +59,6 @@ export async function tryClaimDailyBonusIfEligible(
     created_at: nowKstIso(),
   });
   if (txErr) return { claimed: false, error: txErr.message };
-
-  const { error: grantErr } = await sb.from("panana_subscription_daily_grants").insert({
-    user_id: userId,
-    grant_date: today,
-    amount_p: addP,
-    created_at: nowKstIso(),
-  });
-  if (grantErr) return { claimed: false, error: grantErr.message };
 
   return { claimed: true };
 }

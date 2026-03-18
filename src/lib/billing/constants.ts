@@ -40,6 +40,34 @@ export const SUBSCRIPTION_VOICE_DISCOUNT_RATIO = 0.5;
 /** Standard → Deep 전환 기준 컨텍스트 토큰 수 */
 export const DEEP_SWITCH_CONTEXT_TOKEN_THRESHOLD = 4000;
 
+/** 환율 1,450원 기준 모델별 1턴당 최대 토큰 (max_tokens 파라미터 기준) */
+export const MAX_TOKENS_PER_TURN: Record<ChatModelId, number> = {
+  claude_haiku: 2_500,   // 20P / 원가 4원
+  claude_sonnet: 800,    // 60P / 원가 12원, 실질 마진 70% 방어
+  gemini_flash: 5_000,   // 10P / 원가 2원
+  gemini_pro: 1_200,     // 40P / 원가 8원
+};
+
+/** 모델별 1턴 예산 토큰 (요약 트리거 시 80% 초과 감지용) */
+export const TOKEN_BUDGET_PER_TURN: Record<ChatModelId, number> = {
+  claude_haiku: 2_500,
+  claude_sonnet: 800,
+  gemini_flash: 5_000,
+  gemini_pro: 1_200,
+};
+
+/** 자동 요약: 이 턴 수 초과 시 트리거 */
+export const SUMMARY_TRIGGER_TURNS = 15;
+/** 자동 요약: 컨텍스트가 예산의 이 비율 초과 시 트리거 */
+export const SUMMARY_TRIGGER_TOKEN_RATIO = 0.8;
+/** 요약본 최대 토큰 */
+export const SUMMARY_MAX_TOKENS = 300;
+/** 요약 시 아카이브(제거)할 오래된 턴 수 */
+export const ARCHIVE_TURNS_ON_SUMMARY = 10;
+
+/** 유저 입력 최대 길이 (한글 기준, 토큰 비용 통제) */
+export const USER_INPUT_MAX_CHARS = 400;
+
 /** Financial Products: Recharge (1:1). DB panana_billing_products takes precedence. */
 export interface RechargeProductSpec {
   sku: string;

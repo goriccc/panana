@@ -369,21 +369,31 @@ export function ChargeClient({
         </button>
 
         <div className="mt-8 text-[11px] leading-[1.7] text-white/35">
-          <div className="font-bold text-white/45">할부정책 및 파나나 포인트 이용 안내</div>
+          <div className="font-bold text-white/45">파나나 포인트 이용 안내</div>
           <div className="mt-2">
             파나나는 결제 방법(전자상거래법 등)을 준수하며, 투명한 결제 절차를 보장합니다.
           </div>
           <div className="mt-3 space-y-2">
             <div>
-              1. 결제 후 포인트는 즉시 지급되며, 사용하지 않은 경우에 한해 결제 취소가 가능합니다.
+              1. 결제 후 파나나(포인트)는 즉시 지급되며, 사용하지 않은 경우에 한해 결제 취소가 가능합니다.
             </div>
             <div>
-              2. 이벤트/출석/보상 등으로 지급된 보너스 포인트는 일부 제한이 있을 수 있습니다.
+              2. 단, 구매 후 7일 이내에 청약철회를 할 수 있습니다. 단, 이미 사용한 재화나 디지털 콘텐츠의 제공이 개시된 경우 철회가 제한될 수 있습니다.
             </div>
-            <div>3. 운영정책 위반으로 계정이 정지된 경우 환불이 제한될 수 있습니다.</div>
+            <div>3. 환불 시 결제 수단과 동일한 방법으로 환불됩니다.</div>
+            <div>4. 파나나(포인트)의 소멸시효는 발행일로부터 1년입니다.</div>
+            <div>
+              5. 이벤트/출석/보상 등으로 지급된 보너스 포인트는 일부 제한이 있을 수 있습니다.
+            </div>
+            <div>6. 운영정책 위반으로 계정이 정지된 경우 환불이 제한될 수 있습니다.</div>
           </div>
-          <div className="mt-4 font-semibold text-white/50">
-            충전내역 확인하기 / 할부정책 전체보기
+          <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1 font-semibold text-white/50">
+            <Link href="/my/charge/history" className="underline hover:text-white/70">
+              충전내역 확인하기
+            </Link>
+            <Link href="/my/usage" className="underline hover:text-white/70">
+              차감내역 확인하기
+            </Link>
           </div>
         </div>
       </main>

@@ -4,6 +4,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth/authOptions";
 import { resolveUserId } from "@/lib/challenge/resolveUserId";
 import { TRIAL_VOICE_MAX_SECONDS_PER_DAY } from "@/lib/billing/constants";
+import { deductVoice } from "@/lib/billing/pointService";
 import { isTrialOnlyUser } from "@/lib/pananaApp/isTrialOnlyUser";
 import { todayKst, nowKstIso } from "@/lib/kst";
 
@@ -38,8 +39,16 @@ export async function POST(req: Request) {
       .select("is_subscriber, has_ever_paid")
       .eq("user_id", userId)
       .maybeSingle();
-    if (!isTrialOnlyUser(profile ?? null)) {
-      return NextResponse.json({ ok: true, recorded: 0, remaining: -1 });
+    const trialOnly = isTrialOnlyUser(profile ?? null);
+    if (!trialOnly) {
+      // 유료 유저: P 차감 (10 P/초, 구독/비구독 동일)
+      try {
+        await deductVoice(sb, userId, seconds);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "파나나 차감에 실패했어요.";
+        return NextResponse.json({ ok: false, error: msg }, { status: 402 });
+      }
+      return NextResponse.json({ ok: true, recorded: seconds, remaining: -1 });
     }
     const today = todayKst();
     const { data: row } = await sb
