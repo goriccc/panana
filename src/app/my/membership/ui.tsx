@@ -96,7 +96,7 @@ export function MembershipClient({
         setSubError("빌링키를 받지 못했어요.");
         return;
       }
-      const confirmRes = await fetch("/api/membership/subscribe", {
+      const confirmResRaw = await fetch("/api/membership/subscribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -106,7 +106,17 @@ export function MembershipClient({
           orderName: plan.title || "파나나 패스",
           totalAmount: plan.priceKrw,
         }),
-      }).then((r) => r.json());
+      });
+      const text = await confirmResRaw.text();
+      let confirmRes: { ok?: boolean; error?: string } = {};
+      if (text.trim()) {
+        try {
+          confirmRes = JSON.parse(text);
+        } catch {
+          setSubError(confirmResRaw.ok ? "멤버십 가입 확인에 실패했어요." : `서버 오류 (${confirmResRaw.status})`);
+          return;
+        }
+      }
       if (confirmRes?.ok) {
         setSubError(null);
         window.location.reload();
