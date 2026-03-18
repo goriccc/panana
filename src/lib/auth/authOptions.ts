@@ -10,6 +10,10 @@ const DEV_MOCK_EMAIL = "goriccc@gmail.com";
 const DEV_MOCK_PHONE = "01032067406";
 const DEV_MOCK_NAME = "송준호";
 
+/** PG 검수 로그인 시 결제용 표시 정보 */
+const PG_INSPECTION_PHONE = "010-3206-7406";
+const PG_INSPECTION_NAME = "송준호";
+
 /** OAuth 프로필에서 결제용 구매자 이름 추출 (필수 값 보장) */
 function resolveOAuthName(user: { name?: string | null; email?: string | null; nickname?: string } | null): string {
   if (!user) return "회원";
@@ -98,6 +102,77 @@ if (process.env.NODE_ENV === "development" || process.env.DEV_MOCK_AUTH === "1")
   );
 }
 
+/** PG 검수용 임시 로그인 (라이브에서 goriccc@gmail.com 계정으로 로그인) */
+async function ensurePgInspectionUser(): Promise<{
+  id: string;
+  handle: string;
+  nickname: string;
+  email: string;
+  phoneNumber: string;
+  name: string;
+}> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceKey) throw new Error("Supabase env missing");
+  const { createClient } = await import("@supabase/supabase-js");
+  const sb = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+
+  const pgUserId = process.env.PG_INSPECTION_PANANA_ID || DEV_MOCK_PANANA_ID;
+  const handle = "@pg0000";
+  const nickname = "PG검수";
+
+  const pgPhoneDigits = "01032067406";
+
+  const { data: existing } = await sb
+    .from("panana_users")
+    .select("id, handle, nickname")
+    .eq("id", pgUserId)
+    .maybeSingle();
+
+  if (existing?.id) {
+    await sb.from("panana_users").update({ phone_number: pgPhoneDigits }).eq("id", pgUserId);
+    return {
+      id: String(existing.id),
+      handle: String((existing as any).handle || handle),
+      nickname: String((existing as any).nickname || nickname),
+      email: DEV_MOCK_EMAIL,
+      phoneNumber: PG_INSPECTION_PHONE,
+      name: PG_INSPECTION_NAME,
+    };
+  }
+
+  const { data: inserted, error } = await sb
+    .from("panana_users")
+    .insert({ id: pgUserId, handle, nickname, phone_number: pgPhoneDigits })
+    .select("id, handle, nickname")
+    .single();
+
+  if (error || !inserted?.id) throw new Error("PG inspection user create failed");
+  await sb.from("panana_user_identities").upsert(
+    { user_id: inserted.id, provider: "pg-inspection", provider_account_id: "pg-inspection" },
+    { onConflict: "provider,provider_account_id" }
+  );
+  return {
+    id: String((inserted as any).id),
+    handle: String((inserted as any).handle),
+    nickname: String((inserted as any).nickname),
+    email: DEV_MOCK_EMAIL,
+    phoneNumber: PG_INSPECTION_PHONE,
+    name: PG_INSPECTION_NAME,
+  };
+}
+
+providers.push(
+  CredentialsProvider({
+    id: "pg-inspection",
+    name: "PG검수 로그인",
+    credentials: {},
+    async authorize() {
+      return ensurePgInspectionUser();
+    },
+  })
+);
+
 export const authOptions: NextAuthOptions = {
   providers,
   // DB adapter 없이도 동작(JWT 기반 세션)
@@ -111,6 +186,17 @@ export const authOptions: NextAuthOptions = {
       if (account?.provider === "credentials" && user) {
         (token as any).provider = "credentials";
         (token as any).providerAccountId = "dev";
+        (token as any).pananaId = (user as any).id;
+        (token as any).pananaHandle = (user as any).handle;
+        (token as any).pananaNickname = (user as any).nickname;
+        (token as any).email = (user as any).email ?? DEV_MOCK_EMAIL;
+        (token as any).phoneNumber = (user as any).phoneNumber ?? DEV_MOCK_PHONE;
+        (token as any).name = (user as any).name ?? DEV_MOCK_NAME;
+      }
+      // PG검수 로그인: 동일하게 pananaId 등 저장
+      if (account?.provider === "pg-inspection" && user) {
+        (token as any).provider = "pg-inspection";
+        (token as any).providerAccountId = "pg-inspection";
         (token as any).pananaId = (user as any).id;
         (token as any).pananaHandle = (user as any).handle;
         (token as any).pananaNickname = (user as any).nickname;

@@ -113,12 +113,16 @@ export async function GET(req: Request) {
     if (session) {
       const bySession = await getAccountInfoBySession(sb, session);
       if (bySession) {
+        const sessionPhone = (session as any)?.user?.phoneNumber
+          ? String((session as any).user.phoneNumber).trim()
+          : null;
+        const phoneNumber = bySession.phoneNumber || sessionPhone || null;
         return NextResponse.json(
           {
             ok: true,
             birth: bySession.birth,
             gender: bySession.gender,
-            phoneNumber: bySession.phoneNumber,
+            phoneNumber,
           },
           { headers: { "Cache-Control": CACHE_CONTROL } }
         );

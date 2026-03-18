@@ -20,6 +20,7 @@ export function Footer() {
             <div>사업자등록번호: 304-24-18806</div>
             <div>주소: 경기도 김포시 태장로 765, 6층 607호(장기동, 금광테크노벨리)</div>
             <div>이메일: info@panana.kr</div>
+            <div>대표전화: 010-3284-7406</div>
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
             <button

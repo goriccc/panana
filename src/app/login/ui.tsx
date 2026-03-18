@@ -10,7 +10,7 @@ export function LoginClient({ returnTo }: { returnTo: string }) {
   const backHref = useMemo(() => returnTo || "/my", [returnTo]);
   const safetyOn = useSafetyOn();
 
-  const login = async (provider: "kakao" | "naver" | "google" | "credentials") => {
+  const login = async (provider: "kakao" | "naver" | "google" | "credentials" | "pg-inspection") => {
     await signIn(provider, { callbackUrl: backHref });
   };
 
@@ -102,6 +102,14 @@ export function LoginClient({ returnTo }: { returnTo: string }) {
               <Image src="/google.png" alt="구글" width={20} height={20} className="h-5 w-5" />
             </span>
             Google로 시작하기
+          </button>
+
+          <button
+            type="button"
+            onClick={() => login("pg-inspection")}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/5 px-5 py-4 text-[14px] font-extrabold text-white/80"
+          >
+            PG검수 로그인
           </button>
 
           {devMockEnabled && (
