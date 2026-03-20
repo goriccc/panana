@@ -62,21 +62,23 @@ export function HomeHeader({
           />
         </button>
         <div className="flex items-center gap-3">
-          {/* Safety toggle (red box area) */}
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5">
-              <Image
-                src={safetyOn ? "/spicy_on.png" : "/spicy_off.png"}
-                alt=""
-                width={16}
-                height={16}
-                className="h-4 w-4 select-none"
-                aria-hidden
-              />
-              <div className={`text-[12px] font-extrabold tracking-[-0.01em] ${safetyOn ? "text-panana-pink2" : "text-[#f74b97]"}`}>스파이시</div>
+          {/* 임시 비노출: 스파이시 토글 메뉴 */}
+          {false && (
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
+                <Image
+                  src={safetyOn ? "/spicy_on.png" : "/spicy_off.png"}
+                  alt=""
+                  width={16}
+                  height={16}
+                  className="h-4 w-4 select-none"
+                  aria-hidden
+                />
+                <div className={`text-[12px] font-extrabold tracking-[-0.01em] ${safetyOn ? "text-panana-pink2" : "text-[#f74b97]"}`}>스파이시</div>
+              </div>
+              <Switch checked={safetyOn} onChange={onSafetyChange} ariaLabel="스파이시 토글" />
             </div>
-            <Switch checked={safetyOn} onChange={onSafetyChange} ariaLabel="스파이시 토글" />
-          </div>
+          )}
 
           <Link 
             href="/my" 
