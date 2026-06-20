@@ -9,6 +9,7 @@
 - **ANTHROPIC_API_KEY**: Claude(Anthropic)
 - **GEMINI_API_KEY** 또는 **GOOGLE_GEMINI_API_KEY**: Gemini
 - **DEEPSEEK_API_KEY**: DeepSeek
+- **PANANA_HUMA_API_KEY** (선택): HUMA 영상 파이프라인이 `GET /api/huma/characters` 로 캐릭터 목록을 가져올 때 사용. HUMA `PANANA_CHARACTER_API_KEY` 와 동일 값. production 에서 미설정 시 401.
 
 Supabase(앱 읽기용)
 - **NEXT_PUBLIC_SUPABASE_URL**
